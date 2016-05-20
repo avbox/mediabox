@@ -27,6 +27,7 @@ LDFLAGS=-ldirectfb -pthread
 
 
 SOURCES=main.o \
+	video.o \
 	video-directfb.o \
 	input.o \
 	input-directfb.o \

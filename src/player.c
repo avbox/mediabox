@@ -10,7 +10,7 @@
 #include "input.h"
 
 #define MPLAYER_BIN "/usr/bin/mplayer"
-#define VIDEO_OUTPUT "fbdev2"
+#define VIDEO_OUTPUT "directfb"
 
 struct mbp
 {
