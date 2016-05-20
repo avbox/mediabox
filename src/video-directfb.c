@@ -137,7 +137,7 @@ mbv_dfb_window_destroy(struct mbv_window *win)
 {
 	if (win != NULL) {
 		mbv_dfb_window_hide(win);
-		//DFBCHECK(win->dfb_window->Release(win->dfb_window));
+		DFBCHECK(win->dfb_window->Release(win->dfb_window));
 		free(win);
 	}
 }

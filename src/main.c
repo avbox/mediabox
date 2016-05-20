@@ -48,7 +48,7 @@ main (int argc, char **argv)
 	sleep(3);
 	mbv_window_show(win);
 	sleep(3);
-	mbv_destroy(win);
+	mbv_window_destroy(win);
 
 	/* run the input loop */
 	ret = mbi_loop(input);
