@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sys/signal.h>
 
 #include "input.h"
 #include "input-directfb.h"
@@ -43,16 +44,22 @@ mbi_loop(void *arg)
 		}
 
 		do {
+			int ret;
 			sink = LIST_TAIL(mbi_sink*, &sinks);
 			if (sink == NULL) {
+				fprintf(stderr, "mbi: input event dropped\n");
 				dispatched = 1;
 
-			} else if (write_or_epipe(sink->writefd, &e, sizeof(mbi_event)) == 0) {
+			} else if ((ret = write_or_epipe(sink->writefd, &e, sizeof(mbi_event))) == 0) {
 				pthread_mutex_lock(&sinks_lock);
 				LIST_REMOVE(sink);
 				pthread_mutex_unlock(&sinks_lock);
 
+				close(sink->writefd);
+				free(sink);
+
 			} else {
+				//fprintf(stderr, "write_or_epipe() returned %i\n", ret);
 				dispatched = 1;
 			}
 		}
@@ -114,6 +121,9 @@ int
 mbi_init(void)
 {
 	int event_pipe[2];
+
+	/* ignore SIGPIPE */
+	signal(SIGPIPE, SIG_IGN);
 
 	/* create event pipes */
 	if (pipe(event_pipe) == -1) {

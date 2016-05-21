@@ -64,7 +64,7 @@ type;
 	LIST_INSERT(item, list, (list)->next)
 
 #define LIST_APPEND(list, item) \
-	LIST_INSERT(item, (list)->prev, list)
+	LIST_INSERT(item, (list)->next, list)
 
 #define LIST_REMOVE(item) \
 { \

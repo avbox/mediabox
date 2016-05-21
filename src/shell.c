@@ -7,6 +7,7 @@
 
 #include "video.h"
 #include "input.h"
+#include "mainmenu.h"
 #include "player.h"
 
 static struct mbv_window *root_window = NULL;
@@ -37,6 +38,9 @@ mbs_show_dialog(void)
 
 	/* show the root window */
 	mbv_window_clear(root_window, 0x00, 0x00, 0x00, 0x00);
+	mbv_window_setcolor(root_window, 0x8080ffff);
+	mbv_window_drawline(root_window, 0, mbv_screen_height_get() / 2,
+		mbv_screen_width_get() - 1, mbv_screen_height_get() / 2);
         mbv_window_show(root_window);
 
 	/* grab the input device */
@@ -53,11 +57,17 @@ mbs_show_dialog(void)
 			close(fd);
 			quit = 1;
 			break;
+		case MBI_EVENT_MENU:
+			fprintf(stderr, "mbs: Play button pressed\n");
+			if (mb_mainmenu_init() == -1) {
+				fprintf(stderr, "Could not initialize main menu\n");
+				break;
+			}
+			mb_mainmenu_showdialog();
+			fprintf(stderr, "mbs: Dialog dismissed\n");
+			break;
 		case MBI_EVENT_PLAY:
 			fprintf(stderr, "mbs: Play button pressed\n");
-			break;
-		case MBI_EVENT_MENU:
-			fprintf(stderr, "mbs: Menu button pressed\n");
 			if (!menu_visible) {
 				menu_win = mbv_window_new("Hello World",
 					(mbv_screen_width_get() / 2) - 150,
@@ -75,6 +85,7 @@ mbs_show_dialog(void)
 		}
 	}
 
+	fprintf(stderr, "mbs: Exiting\n");
 	return 0;
 }
 

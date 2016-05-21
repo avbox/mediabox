@@ -34,7 +34,8 @@ SOURCES=main.o \
 	input-tcp.o \
 	pipe_util.o \
 	player.o \
-	shell.o
+	shell.o \
+	mainmenu.o
 
 all: kernel
 
