@@ -2,6 +2,8 @@
 
 #include "video-directfb.h"
 
+struct mbv_window;
+
 struct mbv_window*
 mbv_window_new(
 	char *title,
@@ -14,10 +16,22 @@ mbv_window_new(
 }
 
 void
+mbv_window_clear(struct mbv_window *win,
+	unsigned char r,
+	unsigned char g,
+	unsigned char b,
+	unsigned char a)
+{
+	mbv_dfb_window_clear(win, r, g, b, a);
+}
+
+
+void
 mbv_window_show(struct mbv_window *win)
 {
 	mbv_dfb_window_show(win);
 }
+
 
 void
 mbv_window_hide(struct mbv_window *win)

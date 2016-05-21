@@ -128,12 +128,9 @@ mbp_stop(struct mbp* inst)
 }
 
 struct mbp*
-mbp_init(struct mbi *input)
+mbp_init(void)
 {
 	struct mbp* inst;
-
-	(void) input;
-
 	inst = malloc(sizeof(struct mbp));
 	if (inst == NULL) {
 		fprintf(stderr, "mbp_init() failed -- out of memory\n");

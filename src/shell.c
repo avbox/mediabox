@@ -5,58 +5,82 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#include "video.h"
 #include "input.h"
 #include "player.h"
 
-struct mbs
-{
-	struct mbi *input;
-	struct mbp *player;
-};
+static struct mbv_window *root_window = NULL;
+static struct mbp *player = NULL;
 
 /**
  * mbs_init() -- Initialize the MediaBox shell
  */
-struct mbs*
-mbs_init(struct mbi *input)
+int
+mbs_init(void)
 {
-	struct mbs* inst;
-
-	inst = malloc(sizeof(struct mbs));
-	if (inst == NULL) {
-		fprintf(stderr, "mbp_init() failed -- out of memory\n");
-		return NULL;
-	}
-
-	inst->input = input;
-	inst->player = NULL;
-	return inst;
+        root_window = mbv_window_new(
+		NULL,
+                0,
+                0,
+                mbv_screen_width_get(),
+                mbv_screen_height_get());
+	player = NULL;
+	return 0;
 }
 
 int
-mbs_show(struct mbs* inst)
+mbs_show_dialog(void)
 {
-	int fd;
+	struct mbv_window *menu_win;
+	int fd, quit = 0, menu_visible = 0;
 	mbi_event e;
 
-	if ((fd = mbi_grab_input(inst->input)) == -1) {
+	/* show the root window */
+	mbv_window_clear(root_window, 0x00, 0x00, 0x00, 0x00);
+        mbv_window_show(root_window);
+
+	/* grab the input device */
+	if ((fd = mbi_grab_input()) == -1) {
 		fprintf(stderr, "mbs_show() -- mbi_grab_input failed\n");
 		return -1;
 	}
 
-	while (read_or_eof(fd, &e, sizeof(mbi_event)) != 0) {
-		fprintf(stderr, "mbs: Received event %i\n", (int) e);
+	/* run the message loop */
+	while (!quit && read_or_eof(fd, &e, sizeof(mbi_event)) != 0) {
+		switch (e) {
+		case MBI_EVENT_BACK: 
+			fprintf(stderr, "mbs: Back button pressed\n");
+			close(fd);
+			quit = 1;
+			break;
+		case MBI_EVENT_PLAY:
+			fprintf(stderr, "mbs: Play button pressed\n");
+			break;
+		case MBI_EVENT_MENU:
+			fprintf(stderr, "mbs: Menu button pressed\n");
+			if (!menu_visible) {
+				menu_win = mbv_window_new("Hello World",
+					(mbv_screen_width_get() / 2) - 150,
+					(mbv_screen_height_get() / 2) - 150,
+					300,
+					300);
+				mbv_window_show(menu_win);
+			} else {
+				mbv_window_destroy(menu_win);
+			}
+			menu_visible ^= 1;
+			break;
+		default:
+			fprintf(stderr, "mbs: Received event %i\n", (int) e);
+		}
 	}
 
 	return 0;
 }
 
 void
-mbs_destroy(struct mbs *inst)
+mbs_destroy(void)
 {
-	if (inst == NULL) {
-		return;
-	}
-	free(inst);
+	mbv_window_destroy(root_window);
 }
 

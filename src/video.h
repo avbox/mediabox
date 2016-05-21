@@ -11,6 +11,14 @@ mbv_window_new(
 	int width,
 	int height);
 
+/**
+ * mbv_window_clear() -- Clear the window surface
+ */
+void
+mbv_window_clear(struct mbv_window *win,
+	unsigned char r, unsigned char g, unsigned char b, unsigned char a);
+
+
 void
 mbv_window_show(struct mbv_window *win);
 

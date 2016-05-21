@@ -11,43 +11,50 @@ static IDirectFBEventBuffer *events = NULL;
 static pthread_t event_loop_thread;
 static int quit = 0;
 
-static struct mbi *instance;
-
+/**
+ * mbi_directfb_event_loop() -- Runs the directfb input driver event loop
+ */
 static void*
 mbi_directfb_event_loop(void *arg)
 {
-	DFBWindowEvent e;
+	DFBInputEvent e;
 	DFBResult ret;
+
+	(void) arg;
 
 	fprintf(stderr, "Running directfb event loop\n");
 
 	while (!quit) {
-		if ((ret = events->GetEvent(events, DFB_EVENT(&e))) == DFB_OK) {
+		if (events->WaitForEvent(events) == DFB_OK) {
+			if ((ret = events->GetEvent(events, DFB_EVENT(&e))) != DFB_OK) {
+				fprintf(stderr, "GetEvents() returned %i\n", ret);
+				abort();
+			}
 			switch (e.type) {
-			case DWET_KEYDOWN:
+			case DIET_KEYPRESS:
 				switch (e.key_symbol) {
-				case DIKS_ESCAPE:
-					fprintf(stderr, "ESC Pressed\n");
-					break;
-				case DIKS_RETURN:
-					fprintf(stderr, "RETURN Pressed\n");
-					break;
-				//default:
-				//	break;
+				case DIKS_ESCAPE: mbi_event_send(MBI_EVENT_BACK); break;
+				case DIKS_RETURN: mbi_event_send(MBI_EVENT_PLAY); break;
+				case DIKS_SPACE:  mbi_event_send(MBI_EVENT_MENU); break;
+				default: break;
 				}
 				break;
 			default:
+				/* fprintf(stderr, "Event type %i\n", e.type); */
 				break;
 			}
-		} else {
-			sleep(1);
 		}
 	}
 	fprintf(stderr, "Exiting directfb event loop\n");
 	return NULL;
 }
 
-DFBEnumerationResult enum_devices_callback(
+/**
+ * enum_devices_callback() -- Callback function used by directfb
+ * to return enumerated devices
+ */
+DFBEnumerationResult
+enum_devices_callback(
   	DFBInputDeviceID device_id,
   	DFBInputDeviceDescription desc,
   	void *callbackdata)
@@ -60,12 +67,12 @@ DFBEnumerationResult enum_devices_callback(
 	return 0;
 }
 
+/**
+ * mbi_directfb_init() -- Initialize the directfb input driver
+ */
 int
-mbi_directfb_init(struct mbi *inst)
+mbi_directfb_init(void)
 {
-
-	instance = inst;
-
 	/* make sure directfb has been initialized */
 	if (dfb == NULL) {
 		fprintf(stderr, "mbi_directfb_init() failed!\n");
@@ -97,19 +104,22 @@ mbi_directfb_init(struct mbi *inst)
 		fprintf(stderr, "pthread_create() failed\n");
 		return -1;
 	}
-
-
-	/* send test event */
-	mbi_event_send(inst, MBI_EVENT_PLAY);
-
 	return 0;
 }
 
+/**
+ * mbi_directfb_destroy() -- Destroy the directfb input driver
+ */
 void
-mbi_directfb_destroy()
+mbi_directfb_destroy(void)
 {
+	fprintf(stderr, "mbi_directfb_destroy()\n");
 	quit = 1;
+	events->WakeUp(events);
 	pthread_join(event_loop_thread, NULL);
 	events->Release(events);
+	if (keyboard_device != NULL) {
+		keyboard_device->Release(keyboard_device);
+	}
 }
 

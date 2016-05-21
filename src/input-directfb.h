@@ -6,6 +6,9 @@
 #include "input.h"
 
 int
-mbi_directfb_init(struct mbi *inst);
+mbi_directfb_init(void);
+
+void
+mbi_directfb_destroy(void);
 
 #endif

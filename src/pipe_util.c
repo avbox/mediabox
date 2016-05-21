@@ -96,3 +96,25 @@ read_or_eof(int fd, void *buf, size_t length)
 	return (bytes_read + length);
 }
 
+int
+write_or_epipe(int fd, void *buf, size_t size)
+{
+	ssize_t ret;
+	size_t bytes_written = 0;
+	while ((ret = write(fd, buf + bytes_written, size)) != size) {
+		if (ret == -1) {
+			if (errno == EINTR) {
+				continue;
+			} else if (errno == EPIPE) {
+				return 0;
+			}
+		} else if (ret == 0) {
+			fprintf(stderr, "write_or_epipe() aborted!\n");
+			abort();
+		}
+		bytes_written += ret;
+		size -= ret;
+	}
+	return (bytes_written + size);
+}
+

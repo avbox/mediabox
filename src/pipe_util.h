@@ -9,6 +9,9 @@
 void
 write_or_die(int fd, const void *buf, size_t len);
 
+int
+write_or_epipe(int fd, void *buf, size_t size);
+
 /**
  * read_or_die() -- Like read() but it guarantees that it will
  * return the requested amount of data and will crash the program

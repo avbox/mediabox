@@ -9,37 +9,56 @@
 #include "input-tcp.h"
 #include "linkedlist.h"
 
-LISTABLE_TYPE(mpi_sink,
+LISTABLE_TYPE(mbi_sink,
 	int readfd;
 	int writefd;
 );
 
-int
-mbi_loop(struct mbi *inst)
+static int readfd;
+static int writefd;
+static pthread_t input_loop_thread;
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t sinks_lock = PTHREAD_MUTEX_INITIALIZER;
+
+LIST_DECLARE_STATIC(sinks);
+
+static void*
+mbi_loop(void *arg)
 {
-	int runloop = 1;
 	mbi_event e;
+	mbi_sink *sink;
+	int runloop = 1, dispatched;
+
+	(void) arg;
 
 	while (runloop) {
-		/* read the next event */
-		read_or_die(inst->readfd, &e, sizeof(mbi_event));
+		dispatched = 0;
 
-		/* process event */
-		switch (e) {
-		case MBI_EVENT_PLAY:
-			fprintf(stderr, "play event received\n");
-			break;
-		case MBI_EVENT_STOP:
-		case MBI_EVENT_ENTER:
-			break;
-		case MBI_EVENT_EXIT:
-			runloop = 0;
-			break;
-		default:
-			abort();
+		/* read the next event */
+		read_or_die(readfd, &e, sizeof(mbi_event));
+
+		if (e == MBI_EVENT_EXIT) {
+			fprintf(stderr, "mbi: EXIT command received\n");
 			break;
 		}
+
+		do {
+			sink = LIST_TAIL(mbi_sink*, &sinks);
+			if (sink == NULL) {
+				dispatched = 1;
+
+			} else if (write_or_epipe(sink->writefd, &e, sizeof(mbi_event)) == 0) {
+				pthread_mutex_lock(&sinks_lock);
+				LIST_REMOVE(sink);
+				pthread_mutex_unlock(&sinks_lock);
+
+			} else {
+				dispatched = 1;
+			}
+		}
+		while (!dispatched);
 	}
+	fprintf(stderr, "mbi_loop() exiting\n");
 	return 0;
 }
 
@@ -50,12 +69,12 @@ mbi_loop(struct mbi *inst)
  * is called again
  */
 int
-mbi_grab_input(struct mbi *inst)
+mbi_grab_input(void)
 {
 	int inputfd[2];
-	mpi_sink *input_sink;
+	mbi_sink *input_sink;
 
-	input_sink = malloc(sizeof(mpi_sink));
+	input_sink = malloc(sizeof(mbi_sink));
 	if (input_sink == NULL) {
 		fprintf(stderr, "mbi_grab_input() -- out of memory\n");
 		return -1;
@@ -72,71 +91,69 @@ mbi_grab_input(struct mbi *inst)
 	input_sink->writefd = inputfd[1];
 
 	/* add sink to stack */
-	pthread_mutex_lock(&inst->sinks_lock);
-	LIST_APPEND(&inst->sinks, input_sink);
-	pthread_mutex_unlock(&inst->sinks_lock);
+	pthread_mutex_lock(&sinks_lock);
+	LIST_APPEND(&sinks, input_sink);
+	pthread_mutex_unlock(&sinks_lock);
 
 	return input_sink->readfd;
+}
+
+void
+mbi_event_send(mbi_event e)
+{
+        pthread_mutex_lock(&lock);
+        write_or_die(writefd, &e, sizeof(mbi_event));
+        pthread_mutex_unlock(&lock);
+
 }
 
 /**
  * mbi_init() -- Initialize input subsystem
  */
-struct mbi*
-mbi_init()
+int
+mbi_init(void)
 {
-	struct mbi *inst;
 	int event_pipe[2];
-
-	inst = malloc(sizeof(struct mbi));
-	if (inst == NULL) {
-		fprintf(stderr, "mbi_init() -- out of memory\n");
-		return NULL;
-	}
-
-	/* initialize mutex */
-	if (pthread_mutex_init(&inst->lock, NULL) != 0) {
-		fprintf(stderr, "mbi_init() -- pthread_mutex_init() failed.\n");
-		goto err;
-	}
 
 	/* create event pipes */
 	if (pipe(event_pipe) == -1) {
 		fprintf(stderr, "mbi_init() -- pipe() failed\n");
-		goto err;
+		return -1;
 	}
 
 	/* save pipe endpoints */
-	inst->readfd = event_pipe[0];
-	inst->writefd = event_pipe[1];
+	readfd = event_pipe[0];
+	writefd = event_pipe[1];
 
 	/* initialize sinks stack */
-	LIST_INIT(&inst->sinks);
+	LIST_INIT(&sinks);
 
-	/* initialize directfb input driver */
-	if (mbi_directfb_init(inst) == -1) {
-		fprintf(stderr, "mbi_directfb_init() failed\n");
-		goto err;
+	/* initialize directfb input provider */
+	if (mbi_directfb_init() == -1) {
+		fprintf(stderr, "!!! mbi_directfb_init() failed\n");
 	}
 
-	/* initialize the tcp remote input driver */
-	if (mbi_tcp_init(inst) == -1) {
-		fprintf(stderr, "mbi_tcp_init() failed\n");
-		goto err;
+	/* initialize the tcp remote input provider */
+	if (mbi_tcp_init() == -1) {
+		fprintf(stderr, "!!! mbi_tcp_init() failed\n");
 	}
 
-	return inst;
-err:
-	free(inst);
-	return NULL;
+	if (pthread_create(&input_loop_thread, NULL, mbi_loop, NULL) != 0) {
+		fprintf(stderr, "pthread_create() failed\n");
+		return -1;
+	}	
+
+	return 0;
 }
 
 void
-mbi_destroy(struct mbi *inst)
+mbi_destroy(void)
 {
-	assert(inst != NULL);
-	close(inst->writefd);
-	close(inst->readfd);
-	free(inst);
+	mbi_directfb_destroy();
+	/* mbi_tcp_destroy(); */
+	mbi_event_send(MBI_EVENT_EXIT);
+	pthread_join(input_loop_thread, NULL);
+	close(writefd);
+	close(readfd);
 }
 

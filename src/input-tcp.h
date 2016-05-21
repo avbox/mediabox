@@ -4,6 +4,6 @@
 #include "input.h"
 
 int
-mbi_tcp_init(struct mbi *inst);
+mbi_tcp_init(void);
 
 #endif

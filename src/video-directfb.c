@@ -8,6 +8,7 @@
 struct mbv_window
 {
 	IDirectFBWindow *dfb_window;
+	IDirectFBSurface *surface;
 	char *title;
 	int x;
 	int y;
@@ -66,12 +67,11 @@ mbv_dfb_window_new(
 	int height)
 {
 	struct mbv_window *win;
-	IDirectFBSurface *surface;
 	DFBWindowDescription window_desc = {
 		.flags = DWDESC_POSX | DWDESC_POSY | DWDESC_WIDTH | DWDESC_HEIGHT |
 			 DWDESC_CAPS | DWDESC_SURFACE_CAPS,
-		.caps = /*DWCAPS_ALPHACHANNEL |*/ DWCAPS_DOUBLEBUFFER | DWCAPS_NODECORATION,
-		.surface_caps = DSCAPS_PRIMARY | DSCAPS_PREMULTIPLIED | DSCAPS_VIDEOONLY,
+		.caps = DWCAPS_ALPHACHANNEL | DWCAPS_DOUBLEBUFFER | DWCAPS_NODECORATION,
+		.surface_caps = /*DSCAPS_PRIMARY |*/ DSCAPS_PREMULTIPLIED | DSCAPS_VIDEOONLY,
 		.posx = posx,
 		.posy = posy,
 		.width = width,
@@ -91,28 +91,36 @@ mbv_dfb_window_new(
 	DFBCHECK(win->dfb_window->SetOpacity(win->dfb_window, 0xff));
 
 	/* get the window surface */
-	DFBCHECK(win->dfb_window->GetSurface(win->dfb_window, &surface));
+	DFBCHECK(win->dfb_window->GetSurface(win->dfb_window, &win->surface));
 
 	/* set basic drawing flags */
-	DFBCHECK(surface->SetPorterDuff(surface, DSPD_SRC_OVER));
-	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_BLEND_ALPHACHANNEL));
-	DFBCHECK(surface->SetDrawingFlags(surface, DSDRAW_BLEND));
+	DFBCHECK(win->surface->SetPorterDuff(win->surface, DSPD_SRC_OVER));
+	DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_BLEND_ALPHACHANNEL));
+	DFBCHECK(win->surface->SetDrawingFlags(win->surface, DSDRAW_BLEND));
 
 	/* clear window */
-	//DFBCHECK(surface->Clear(surface, 0xff, 0xff, 0xff, 0xff));
-	//DFBCHECK(surface->Flip(surface, NULL, DSFLIP_WAITFORSYNC));
-	DFBCHECK(surface->Clear(surface, 0xff, 0xff, 0xff, 0xFF));
+	DFBCHECK(win->surface->Clear(win->surface, 0x33, 0x49, 0xff, 0xFF));
 
 	/* set default font as window font */
-	DFBCHECK(surface->SetFont(surface, font));
+	DFBCHECK(win->surface->SetFont(win->surface, font));
 
 	/* draw the window title */
 	if (title != NULL) {
-		DFBCHECK(surface->SetColor(surface, 0x00, 0x00, 0x00, 0xFF));
-		DFBCHECK(surface->DrawString(surface, title, -1, 15, 15, DSTF_LEFT));
+		DFBCHECK(win->surface->SetColor(win->surface, 0xff, 0xff, 0xff, 0xff));
+		DFBCHECK(win->surface->DrawString(win->surface, title, -1, 15, 15, DSTF_LEFT));
 	}
 
 	return win;
+}
+
+void
+mbv_dfb_window_clear(struct mbv_window *win,
+	unsigned char r,
+	unsigned char g,
+	unsigned char b,
+	unsigned char a)
+{
+	DFBCHECK(win->surface->Clear(win->surface, r, g, b, a));
 }
 
 void
@@ -136,7 +144,9 @@ void
 mbv_dfb_window_destroy(struct mbv_window *win)
 {
 	if (win != NULL) {
+		fprintf(stderr, "Destroying window\n");
 		mbv_dfb_window_hide(win);
+		/* DFBCHECK(win->surface->Release(win->surface)); */
 		DFBCHECK(win->dfb_window->Release(win->dfb_window));
 		free(win);
 	}
@@ -159,11 +169,12 @@ mbv_dfb_init(int argc, char **argv)
 	dsc.flags = DSDESC_CAPS;
 	dsc.caps  = DSCAPS_PRIMARY | DSCAPS_FLIPPING;
 
-	DFBCHECK(dfb->CreateSurface( dfb, &dsc, &primary ));
+	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &primary));
 
 	/* get primary layer */
 	DFBCHECK(dfb->GetDisplayLayer(dfb, DLID_PRIMARY, &layer));
 	DFBCHECK(layer->SetCooperativeLevel(layer, DLSCL_ADMINISTRATIVE));
+	
 
 	/* load default font */
 	DFBFontDescription font_dsc = {
@@ -175,17 +186,17 @@ mbv_dfb_init(int argc, char **argv)
 
 
 	mbv_dfb_clear();
-	DFBCHECK(primary->SetColor(primary, 0x80, 0x80, 0xff, 0xff));
-	DFBCHECK(primary->DrawLine(primary, 0, 
-		screen_height / 2, screen_width - 1, screen_height / 2));
-	DFBCHECK(primary->Flip (primary, NULL, 0));
+	//DFBCHECK(layer->SetColor(layer, 0x80, 0x80, 0xff, 0xff));
+	//DFBCHECK(layer->DrawLine(layer, 0, 
+	//	screen_height / 2, screen_width - 1, screen_height / 2));
+	//DFBCHECK(layer->Flip (layer, NULL, 0));
 }
 
 void
 mbv_dfb_destroy()
 {
-	font->Release(font);
 	layer->Release(layer);
+	font->Release(font);
 	primary->Release(primary);
 	dfb->Release(dfb);
 }

@@ -6,34 +6,20 @@
 #include "pipe_util.h"
 #include "linkedlist.h"
 
-#define mbi_event_send(handle, e) \
-{ \
-	const mbi_event __e = e; \
-	pthread_mutex_lock(&handle->lock); \
-	write_or_die(handle->writefd, &__e, sizeof(mbi_event)); \
-	pthread_mutex_unlock(&handle->lock); \
-}
-
 typedef enum
 {
 	MBI_EVENT_PLAY,
+	MBI_EVENT_PAUSE,
 	MBI_EVENT_STOP,
+	MBI_EVENT_MENU,
+	MBI_EVENT_BACK,
 	MBI_EVENT_ENTER,
 	MBI_EVENT_EXIT
 }
 mbi_event;
 
-struct mbi
-{
-	int readfd;
-	int writefd;
-	pthread_mutex_t lock;
-	pthread_mutex_t sinks_lock;
-	LIST_DECLARE(sinks);
-};
-
-int
-mbi_loop(struct mbi *inst);
+void
+mbi_event_send(mbi_event e);
 
 /**
  * mbi_grab_input() -- Returns a file descriptor to a pipe where
@@ -42,13 +28,13 @@ mbi_loop(struct mbi *inst);
  * is called again
  */
 int
-mbi_grab_input(struct mbi *inst);
+mbi_grab_input(void);
 
-struct mbi*
-mbi_init();
+int
+mbi_init(void);
 
 void
-mbi_destroy();
+mbi_destroy(void);
 
 #endif
 

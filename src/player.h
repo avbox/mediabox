@@ -13,7 +13,7 @@ int
 mbp_stop(struct mbp* inst);
 
 struct mbp*
-mbp_init(struct mbi* input);
+mbp_init(void);
 
 void
 mbp_destroy(struct mbp *inst);

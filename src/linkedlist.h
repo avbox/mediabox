@@ -74,8 +74,8 @@ type;
         prev->next = next; \
 }
 
-#define LIST_TAIL(type, list) ((type) ((struct __listhead*)(list))->prev)
-#define LIST_NEXT(type, item) ((type) ((struct __listhead*)(item))->next)
+#define LIST_TAIL(type, list) ((type) (LIST_EMPTY((list)) ? NULL : ((struct __listhead*)(list))->prev))
+#define LIST_NEXT(type, item) ((type) (LIST_EMPTY((list)) ? NULL : ((struct __listhead*)(item))->next))
 
 #define LIST_FOREACH(type, ivar, list) \
 	for (ivar = LIST_NEXT(type, list); ((struct __listhead*) ivar) != list; ivar = LIST_NEXT(type, ivar))
