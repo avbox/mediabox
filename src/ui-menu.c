@@ -9,6 +9,7 @@
 #include "linkedlist.h"
 
 
+/* Listable type for storing menuitem objects */
 LISTABLE_TYPE(mb_ui_menuitem,
 	struct mbv_window *window;
 	char *name;
@@ -22,6 +23,7 @@ LISTABLE_TYPE(mb_ui_menuitem,
 struct mb_ui_menu
 {
 	struct mbv_window *window;
+	struct mbv_window **item_windows;
 	mb_ui_menuitem *selected;
 	int visible_items;
 	int count;
@@ -107,10 +109,6 @@ mb_ui_menu_additem(struct mb_ui_menu *inst, char *name, void *data)
 		inst->selected = item;
 		mbv_window_clear(item->window, 0xFF, 0xFF, 0xFF, 0xFF);
 		mbv_window_setcolor(item->window, 0x000000FF);
-	} else {
-		/* TODO: We shouldn't have to do this since this is
-		 * the default color */
-		mbv_window_setcolor(item->window, 0xffffffff);
 	}
 
 	/* draw the menu item */

@@ -3,12 +3,15 @@
 #include <stdint.h>
 #include <assert.h>
 #include <unistd.h>
+#include <string.h>
 #include <directfb.h>
 
 #define DEFAULT_FONT "/usr/share/fonts/liberation-fonts/LiberationSerif-Regular.ttf"
 #define DEFAULT_FONT_HEIGHT (16)
 #define DEFAULT_FOREGROUND  (0xFFFFFFFF)
 
+
+/* window object structure */
 struct mbv_window
 {
 	struct mbv_window *parent;
@@ -23,6 +26,7 @@ struct mbv_window
 	int visible;
 	int font_height;
 };
+
 
 IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
 static IDirectFBDisplayLayer *layer = NULL;
@@ -47,6 +51,8 @@ static int screen_height = 0;
 	(color >> 16) & 0xFF, \
 	(color >>  8) & 0xFF, \
 	(color      ) & 0xFF
+
+
 /**
  * mb_video_clear()
  */
@@ -105,9 +111,20 @@ mbv_dfb_window_new(
 		return NULL;
 	}
 
+	/* if a window title was specified save a copy */
+	if (title != NULL) {
+		win->title = strdup(title);
+		if (win->title == NULL) {
+			fprintf(stderr, "mbv: Out of memory\n");
+			free(win);
+			return NULL;
+		}
+	} else {
+		win->title = NULL;
+	}
+
 	/* initialize window structure */
 	win->parent = NULL;
-	win->title = NULL;
 	win->visible = 0;
 	win->font_height = DEFAULT_FONT_HEIGHT;
 
@@ -131,11 +148,12 @@ mbv_dfb_window_new(
 	DFBCHECK(win->surface->SetFont(win->surface, font));
 
 	/* draw the window title */
-	if (title != NULL) {
+	if (win->title != NULL) {
 		int offset = win->font_height + 10;
 		DFBRectangle rect = { 0, offset + 5, width, (height - (offset + 5)) };
 		DFBCHECK(win->surface->SetColor(win->surface, DFBCOLOR(DEFAULT_FOREGROUND)));
-		DFBCHECK(win->surface->DrawString(win->surface, title, -1, width / 2, 5, DSTF_TOPCENTER));
+		DFBCHECK(win->surface->DrawString(win->surface, win->title, -1,
+			width / 2, 5, DSTF_TOPCENTER));
 		DFBCHECK(win->surface->DrawLine(win->surface, 5, offset,
 			width - 10, offset));
 		DFBCHECK(win->surface->GetSubSurface(win->surface, &rect, &win->content));
@@ -163,11 +181,16 @@ mbv_dfb_window_getcanvassize(struct mbv_window *window,
 }
 
 
+/**
+ * mbv_dfb_window_getchildwindow() -- Creates a new child window
+ */
 struct mbv_window*
 mbv_dfb_window_getchildwindow(struct mbv_window *window,
 	int x, int y, int width, int height)
 {
 	struct mbv_window *inst;
+
+	/* allocate memory for window object */
 	inst = malloc(sizeof(struct mbv_window));
 	if (inst == NULL) {
 		fprintf(stderr, "mbv: Out of memory\n");
@@ -194,11 +217,15 @@ mbv_dfb_window_getchildwindow(struct mbv_window *window,
 	inst->visible = 0;
 	inst->font_height = window->font_height;
 
+	/* create the sub-window surface */
 	DFBRectangle rect = { x, y, width, height };
 	DFBCHECK(window->content->GetSubSurface(window->content, &rect, &inst->surface));
 	DFBCHECK(inst->surface->GetSubSurface(inst->surface, NULL, &inst->content));
-	DFBCHECK(inst->content->SetFont(inst->content, font));
 
+	/* set the default surface properties */
+	/* TODO: This shoulld be inherited from the parent window */
+	DFBCHECK(inst->content->SetFont(inst->content, font));
+	DFBCHECK(inst->content->SetColor(inst->content, DFBCOLOR(DEFAULT_FOREGROUND)));
 
 	return inst;
 }
@@ -245,7 +272,9 @@ void
 mbv_dfb_window_drawstring(struct mbv_window *window,
 	char *str, int x, int y)
 {
+	assert(window != NULL);
 	assert(str != NULL);
+
 	DFBCHECK(window->content->DrawString(window->content,
 		str, -1, x, y, DSTF_TOP | DSTF_CENTER));
 	DFBCHECK(window->content->Flip(window->content, NULL, 0));
@@ -255,6 +284,8 @@ mbv_dfb_window_drawstring(struct mbv_window *window,
 void
 mbv_dfb_window_show(struct mbv_window *window)
 {
+	assert(window != NULL);
+
 	if (window->parent != NULL) {
 		mbv_dfb_window_show(window->parent);
 	} else if (!window->visible) {
@@ -278,6 +309,9 @@ mbv_dfb_window_hide(struct mbv_window *window)
 }
 
 
+/**
+ * mbv_dfb_window_destroy() -- Destroy a window
+ */
 void
 mbv_dfb_window_destroy(struct mbv_window *window)
 {
@@ -342,14 +376,6 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(layer->GetScreen(layer, &screen));
 	DFBCHECK(screen->GetSize(screen, &screen_width, &screen_height));
 	DFBCHECK(screen->Release(screen));
-	#endif
-
-	#if 0
-	mbv_dfb_clear();
-	DFBCHECK(primary->SetColor(primary, 0x80, 0x80, 0xff, 0xff));
-	DFBCHECK(primary->DrawLine(primary, 0, 
-		screen_height / 2, screen_width - 1, screen_height / 2));
-	DFBCHECK(primary->Flip(primary, NULL, 0));
 	#endif
 }
 
