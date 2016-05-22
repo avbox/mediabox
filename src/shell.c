@@ -64,6 +64,7 @@ mbs_show_dialog(void)
 				break;
 			}
 			mb_mainmenu_showdialog();
+			mb_mainmenu_destroy();
 			fprintf(stderr, "mbs: Dialog dismissed\n");
 			break;
 		case MBI_EVENT_PLAY:

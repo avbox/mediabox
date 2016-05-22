@@ -35,6 +35,7 @@ SOURCES=main.o \
 	pipe_util.o \
 	player.o \
 	shell.o \
+	ui-menu.o \
 	mainmenu.o
 
 all: kernel

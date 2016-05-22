@@ -31,6 +31,11 @@ mbv_dfb_window_new(
         int height);
 
 
+struct mbv_window*
+mbv_dfb_window_getchildwindow(struct mbv_window *window,
+	int x, int y, int width, int height);
+
+
 void
 mbv_dfb_window_show(struct mbv_window *win);
 
@@ -47,12 +52,22 @@ void
 mbv_dfb_window_setcolor(struct mbv_window *window, uint32_t color);
 
 
+void
+mbv_dfb_window_getcanvassize(struct mbv_window *window,
+	int *width, int *height);
+
+
 /**
  * mbv_dfb_window_drawline() -- Draw a line on a window
  */
 void
 mbv_dfb_window_drawline(struct mbv_window *window,
         int x1, int y1, int x2, int y2);
+
+
+void
+mbv_dfb_window_drawstring(struct mbv_window *window,
+	char *str, int x, int y);
 
 
 /**

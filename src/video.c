@@ -15,6 +15,15 @@ mbv_window_new(
 	return mbv_dfb_window_new(title, x, y, width, height);
 }
 
+
+struct mbv_window*
+mbv_window_getchildwindow(struct mbv_window *window,
+	int x, int y, int width, int height)
+{
+	return mbv_dfb_window_getchildwindow(window, x, y, width, height);
+}
+
+
 void
 mbv_window_clear(struct mbv_window *win,
 	unsigned char r,
@@ -23,6 +32,14 @@ mbv_window_clear(struct mbv_window *win,
 	unsigned char a)
 {
 	mbv_dfb_window_clear(win, r, g, b, a);
+}
+
+
+void
+mbv_window_getcanvassize(struct mbv_window *window,
+	int *width, int *height)
+{
+	mbv_dfb_window_getcanvassize(window, width, height);
 }
 
 
@@ -38,6 +55,14 @@ mbv_window_drawline(struct mbv_window *window,
 	int x1, int y1, int x2, int y2)
 {
 	mbv_dfb_window_drawline(window, x1, y1, x2, y2);
+}
+
+
+void
+mbv_window_drawstring(struct mbv_window *window,
+	char *str, int x, int y)
+{
+	mbv_dfb_window_drawstring(window, str, x, y);
 }
 
 

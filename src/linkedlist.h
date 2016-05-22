@@ -55,8 +55,8 @@ type;
 	struct __listhead* __prev = (struct __listhead*) iprev; \
 	struct __listhead* __next = (struct __listhead*) inext; \
 	__next->prev = (struct __listhead*)(iitem); \
-	((struct __listhead*)(iitem))->next = (struct __listhead*)(inext); \
-	((struct __listhead*)(iitem))->prev = (struct __listhead*)(iprev); \
+	((struct __listhead*)(iitem))->next = (struct __listhead*)(__next); \
+	((struct __listhead*)(iitem))->prev = (struct __listhead*)(__prev); \
 	__prev->next = (struct __listhead*)(iitem); \
 }
 
@@ -64,7 +64,7 @@ type;
 	LIST_INSERT(item, list, (list)->next)
 
 #define LIST_APPEND(list, item) \
-	LIST_INSERT(item, (list)->next, list)
+	LIST_INSERT(item, (list)->prev, list)
 
 #define LIST_REMOVE(item) \
 { \
@@ -75,7 +75,7 @@ type;
 }
 
 #define LIST_TAIL(type, list) ((type) (LIST_EMPTY((list)) ? NULL : ((struct __listhead*)(list))->prev))
-#define LIST_NEXT(type, item) ((type) (LIST_EMPTY((list)) ? NULL : ((struct __listhead*)(item))->next))
+#define LIST_NEXT(type, item) ((type) ((struct __listhead*)(item))->next)
 
 #define LIST_FOREACH(type, ivar, list) \
 	for (ivar = LIST_NEXT(type, list); ((struct __listhead*) ivar) != list; ivar = LIST_NEXT(type, ivar))

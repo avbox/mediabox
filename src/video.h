@@ -13,6 +13,12 @@ mbv_window_new(
 	int width,
 	int height);
 
+
+struct mbv_window*
+mbv_window_getchildwindow(struct mbv_window *window,
+	int x, int y, int width, int height);
+
+
 /**
  * mbv_window_clear() -- Clear the window surface
  */
@@ -27,12 +33,24 @@ mbv_window_show(struct mbv_window *win);
 void
 mbv_window_hide(struct mbv_window *win);
 
+
+void
+mbv_window_getcanvassize(struct mbv_window *window,
+	int *width, int *height);
+
+
 void
 mbv_window_setcolor(struct mbv_window *window, uint32_t color);
 
 void
 mbv_window_drawline(struct mbv_window *window,
 	int x1, int y1, int x2, int y2);
+
+
+void
+mbv_window_drawstring(struct mbv_window *window,
+	char *str, int x, int y);
+
 
 void
 mbv_window_destroy(struct mbv_window *win);

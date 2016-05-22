@@ -22,20 +22,24 @@ mbi_directfb_event_loop(void *arg)
 
 	(void) arg;
 
-	fprintf(stderr, "Running directfb event loop\n");
+	fprintf(stderr, "mbi: Running directfb input event loop\n");
 
 	while (!quit) {
 		if (events->WaitForEvent(events) == DFB_OK) {
 			if ((ret = events->GetEvent(events, DFB_EVENT(&e))) != DFB_OK) {
-				fprintf(stderr, "GetEvents() returned %i\n", ret);
+				fprintf(stderr, "mbi: GetEvents() returned %i\n", ret);
 				abort();
 			}
 			switch (e.type) {
 			case DIET_KEYPRESS:
 				switch (e.key_symbol) {
-				case DIKS_ESCAPE: mbi_event_send(MBI_EVENT_BACK); break;
-				case DIKS_RETURN: mbi_event_send(MBI_EVENT_PLAY); break;
-				case DIKS_SPACE:  mbi_event_send(MBI_EVENT_MENU); break;
+				case DIKS_ESCAPE:       mbi_event_send(MBI_EVENT_BACK); break;
+				case DIKS_RETURN:       mbi_event_send(MBI_EVENT_ENTER); break;
+				case DIKS_SPACE:        mbi_event_send(MBI_EVENT_MENU); break;
+				case DIKS_CURSOR_UP:    mbi_event_send(MBI_EVENT_ARROW_UP); break;
+				case DIKS_CURSOR_DOWN:  mbi_event_send(MBI_EVENT_ARROW_DOWN); break;
+				case DIKS_CURSOR_LEFT:  mbi_event_send(MBI_EVENT_ARROW_LEFT); break;
+				case DIKS_CURSOR_RIGHT: mbi_event_send(MBI_EVENT_ARROW_RIGHT); break;
 				default: break;
 				}
 				break;
@@ -45,7 +49,8 @@ mbi_directfb_event_loop(void *arg)
 			}
 		}
 	}
-	fprintf(stderr, "Exiting directfb event loop\n");
+
+	fprintf(stderr, "mbi: Exiting directfb input event loop\n");
 	return NULL;
 }
 
@@ -113,7 +118,7 @@ mbi_directfb_init(void)
 void
 mbi_directfb_destroy(void)
 {
-	fprintf(stderr, "mbi_directfb_destroy()\n");
+	fprintf(stderr, "mbi: Destroying DirectFB input system\n");
 	quit = 1;
 	events->WakeUp(events);
 	pthread_join(event_loop_thread, NULL);
