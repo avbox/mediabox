@@ -338,6 +338,17 @@ mbv_dfb_window_destroy(struct mbv_window *window)
 
 
 /**
+ * enum_display_layers() -- Calledback by dfb to enumerate layers.
+ */
+static DFBEnumerationResult
+enum_display_layers(DFBDisplayLayerID id, DFBDisplayLayerDescription desc, void *data)
+{
+	fprintf(stderr, "mbv: Found display layer %i\n", id);
+	return DFENUM_OK;
+}
+
+
+/**
  * mbv_init() -- Initialize video device
  */
 void
@@ -345,9 +356,7 @@ mbv_dfb_init(int argc, char **argv)
 {
 	DFBCHECK(DirectFBInit(&argc, &argv));
 	DFBCHECK(DirectFBCreate(&dfb));
-	//DFBCHECK (
-	//dfb->SetCooperativeLevel (dfb, DFSCL_FULLSCREEN);
-	//);
+	DFBCHECK(dfb->SetCooperativeLevel(dfb, DFSCL_NORMAL));
 
 	/* IDirectFBScreen does not return the correct size on SDL */
 	#if 1
@@ -359,6 +368,9 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(primary->GetSize(primary, &screen_width, &screen_height));
 	DFBCHECK(primary->Release(primary));
 	#endif
+
+	/* enumerate display layers */
+	DFBCHECK(dfb->EnumDisplayLayers(dfb, enum_display_layers, NULL));
 
 	/* get primary layer */
 	DFBCHECK(dfb->GetDisplayLayer(dfb, DLID_PRIMARY, &layer));

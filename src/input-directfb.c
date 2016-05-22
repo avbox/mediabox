@@ -40,6 +40,10 @@ mbi_directfb_event_loop(void *arg)
 				case DIKS_CURSOR_DOWN:  mbi_event_send(MBI_EVENT_ARROW_DOWN); break;
 				case DIKS_CURSOR_LEFT:  mbi_event_send(MBI_EVENT_ARROW_LEFT); break;
 				case DIKS_CURSOR_RIGHT: mbi_event_send(MBI_EVENT_ARROW_RIGHT); break;
+				case DIKS_CAPITAL_Q:    mbi_event_send(MBI_EVENT_QUIT); break;
+				case DIKS_SMALL_Q:      mbi_event_send(MBI_EVENT_QUIT); break;
+				case DIKS_CAPITAL_P:    mbi_event_send(MBI_EVENT_PLAY); break;
+				case DIKS_SMALL_P:      mbi_event_send(MBI_EVENT_PLAY); break;
 				default: break;
 				}
 				break;

@@ -10,8 +10,13 @@
 #include "mainmenu.h"
 #include "player.h"
 
+
+#define MEDIA_FILE "/media/InternalStorage/Movies/Avatar ECE (2009)/Avatar.ECE.2009.720p.BrRip.x264.bitloks.YIFY.mp4"
+
+
 static struct mbv_window *root_window = NULL;
 static struct mbp *player = NULL;
+
 
 /**
  * mbs_init() -- Initialize the MediaBox shell
@@ -19,21 +24,35 @@ static struct mbp *player = NULL;
 int
 mbs_init(void)
 {
+	/* create the root window */
+	/* TODO: Do this on the video driver and get a ref to it */
         root_window = mbv_window_new(
 		NULL,
                 0,
                 0,
                 mbv_screen_width_get(),
                 mbv_screen_height_get());
-	player = NULL;
+	if (root_window == NULL) {
+		fprintf(stderr, "Could not create root window\n");
+		return -1;
+	}
+
+	/* initialize main media player */
+	player = mbp_init();
+	if (player == NULL) {
+		fprintf(stderr, "Could not initialize main media player\n");
+		mbv_window_destroy(root_window);
+		return -1;
+	}
+
 	return 0;
 }
+
 
 int
 mbs_show_dialog(void)
 {
-	struct mbv_window *menu_win;
-	int fd, quit = 0, menu_visible = 0;
+	int fd, quit = 0;
 	mbi_event e;
 
 	/* show the root window */
@@ -52,22 +71,58 @@ mbs_show_dialog(void)
 	/* run the message loop */
 	while (!quit && read_or_eof(fd, &e, sizeof(mbi_event)) != 0) {
 		switch (e) {
-		case MBI_EVENT_BACK: 
-			fprintf(stderr, "mbs: Back button pressed\n");
+		case MBI_EVENT_QUIT:
+		{
 			close(fd);
 			quit = 1;
 			break;
+		}
 		case MBI_EVENT_MENU:
-			fprintf(stderr, "mbs: Play button pressed\n");
+		{
+			enum mb_player_status status;
+			status = mb_player_getstatus(player);
+
+			/* pause the media player first */
+			if (status == MB_PLAYER_STATUS_PLAYING) {
+				(void) mbp_pause(player);
+			}
+
 			if (mb_mainmenu_init() == -1) {
 				fprintf(stderr, "Could not initialize main menu\n");
 				break;
 			}
-			mb_mainmenu_showdialog();
+			if (mb_mainmenu_showdialog() == -1) {
+				fprintf(stderr, "mbs: Main Menu dismissed\n");
+			}
 			mb_mainmenu_destroy();
-			fprintf(stderr, "mbs: Dialog dismissed\n");
+
+			/* if we were playing resume it */
+			if (status == MB_PLAYER_STATUS_PLAYING) {
+				mbp_play(player, NULL);
+			}
+
+			
+			mb_player_update(player); /* force player to redraw */
+
 			break;
+		}
 		case MBI_EVENT_PLAY:
+		{
+			enum mb_player_status status;
+			status = mb_player_getstatus(player);
+			if (status == MB_PLAYER_STATUS_PAUSED) {
+				mbp_play(player, NULL);
+			} else if (status == MB_PLAYER_STATUS_PLAYING) {
+				mbp_pause(player);
+			} else if (status == MB_PLAYER_STATUS_READY) {
+				mbp_play(player, MEDIA_FILE);
+			} else {
+				fprintf(stderr, "Status %i\n", status);
+			}
+
+			#if 0
+			struct mbv_window *menu_win;
+			static int menu_visible = 0;
 			fprintf(stderr, "mbs: Play button pressed\n");
 			if (!menu_visible) {
 				menu_win = mbv_window_new("Hello World",
@@ -81,8 +136,11 @@ mbs_show_dialog(void)
 			}
 			menu_visible ^= 1;
 			break;
+			#endif
+		}
 		default:
 			fprintf(stderr, "mbs: Received event %i\n", (int) e);
+			break;
 		}
 	}
 
@@ -90,9 +148,11 @@ mbs_show_dialog(void)
 	return 0;
 }
 
+
 void
 mbs_destroy(void)
 {
+	mbp_destroy(player);
 	mbv_window_destroy(root_window);
 }
 
