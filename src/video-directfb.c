@@ -309,7 +309,6 @@ mbv_dfb_window_destroy(struct mbv_window *window)
 void
 mbv_dfb_init(int argc, char **argv)
 {
-
 	DFBCHECK(DirectFBInit(&argc, &argv));
 	DFBCHECK(DirectFBCreate(&dfb));
 	//DFBCHECK (
@@ -331,6 +330,7 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(dfb->GetDisplayLayer(dfb, DLID_PRIMARY, &layer));
 	DFBCHECK(layer->SetCooperativeLevel(layer, DLSCL_ADMINISTRATIVE));
 	DFBCHECK(layer->SetBackgroundColor(layer, 0x00, 0x00, 0x00, 0xff));
+	DFBCHECK(layer->EnableCursor(layer, 0));
 	
 
 	/* load default font */
