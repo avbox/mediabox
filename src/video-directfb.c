@@ -28,9 +28,13 @@ struct mbv_window
 };
 
 
+
+
+
 IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
 static IDirectFBDisplayLayer *layer = NULL;
 static IDirectFBFont *font = NULL;
+struct mbv_window *root_window = NULL;
 static int screen_width = 0;
 static int screen_height = 0;
 
@@ -103,6 +107,11 @@ mbv_dfb_window_new(
 		.width = width,
 		.height = height
 	};
+
+	/* if this is the root window set as primary */
+	if (root_window == NULL) {
+		window_desc.caps |= DSCAPS_PRIMARY;
+	}
 
 	/* first allocate the window structure */
 	win = malloc(sizeof(struct mbv_window));
@@ -348,6 +357,13 @@ enum_display_layers(DFBDisplayLayerID id, DFBDisplayLayerDescription desc, void 
 }
 
 
+struct mbv_window*
+mbv_dfb_getrootwindow(void)
+{
+	return root_window;
+}
+
+
 /**
  * mbv_init() -- Initialize video device
  */
@@ -389,6 +405,20 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(screen->GetSize(screen, &screen_width, &screen_height));
 	DFBCHECK(screen->Release(screen));
 	#endif
+
+	/* create root window */
+	root_window = mbv_dfb_window_new(
+		NULL,
+		0,
+		0,
+		screen_width,
+		screen_height);
+	if (root_window == NULL) {
+		fprintf(stderr, "Could not create root window\n");
+		//return -1;
+	}
+
+
 }
 
 /**

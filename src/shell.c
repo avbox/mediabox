@@ -25,13 +25,7 @@ int
 mbs_init(void)
 {
 	/* create the root window */
-	/* TODO: Do this on the video driver and get a ref to it */
-        root_window = mbv_window_new(
-		NULL,
-                0,
-                0,
-                mbv_screen_width_get(),
-                mbv_screen_height_get());
+        root_window = mbv_getrootwindow();
 	if (root_window == NULL) {
 		fprintf(stderr, "Could not create root window\n");
 		return -1;

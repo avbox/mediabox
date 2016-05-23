@@ -57,6 +57,10 @@ mbv_dfb_window_getcanvassize(struct mbv_window *window,
 	int *width, int *height);
 
 
+struct mbv_window*
+mbv_dfb_getrootwindow(void);
+
+
 /**
  * mbv_dfb_window_drawline() -- Draw a line on a window
  */

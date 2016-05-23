@@ -24,6 +24,12 @@ mbv_window_getchildwindow(struct mbv_window *window,
 }
 
 
+struct mbv_window*
+mbv_getrootwindow(void)
+{
+	return mbv_dfb_getrootwindow();
+}
+
 void
 mbv_window_clear(struct mbv_window *win,
 	unsigned char r,
