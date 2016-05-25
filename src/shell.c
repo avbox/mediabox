@@ -12,8 +12,7 @@
 
 
 
-#define MEDIA_FILE2 "/media/InternalStorage/Movies/Avatar ECE (2009)/Avatar.ECE.2009.720p.BrRip.x264.bitloks.YIFY.mp4"
-#define MEDIA_FILE "/mnt/shared/movies/Cop Car (2015)/Cop.Car.2015.720p.BluRay.x264.YIFY.mp4"
+#define MEDIA_FILE "/mov.mp4"
 
 static struct mbv_window *root_window = NULL;
 static struct mbp *player = NULL;
@@ -90,15 +89,18 @@ mbs_show_dialog(void)
 			enum mb_player_status status;
 			status = mb_player_getstatus(player);
 			if (status == MB_PLAYER_STATUS_PAUSED) {
+				fprintf(stderr, "mbs: Resuming\n");
 				mbp_play(player, NULL);
 			} else if (status == MB_PLAYER_STATUS_PLAYING) {
+				fprintf(stderr, "mbs: Pausing\n");
 				mbp_pause(player);
 			} else if (status == MB_PLAYER_STATUS_READY) {
+				fprintf(stderr, "mbs: Playing\n");
 				mbp_play(player, MEDIA_FILE);
-				fprintf(stderr, "mbp_play() returned\n");
 			} else {
 				fprintf(stderr, "Status %i\n", status);
 			}
+			break;
 		}
 		case MBI_EVENT_STOP:
 		{
