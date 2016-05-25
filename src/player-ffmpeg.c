@@ -254,8 +254,6 @@ mb_player_playback_thread(void *arg)
 	assert(inst->window != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_PLAYING);
 
-	fprintf(stderr, "Action: %i\n", inst->action);
-
 	inst->last_pts = AV_NOPTS_VALUE;
 
 	/* get the size of the window */
@@ -372,19 +370,22 @@ mb_player_playback_thread(void *arg)
 		/* free packet */
 		av_free_packet(&packet);
 
-		if (inst->action & MB_PLAYER_ACTION_STOP) {
-			goto decoder_exit;
-		}
+		if (inst->action != MB_PLAYER_ACTION_NONE) {
 
-		/* this is where we pause -- not done yet */
-		if (inst->action & MB_PLAYER_ACTION_PAUSE) {
-			fprintf(stderr, "decoder: pausing\n");
-			pthread_mutex_lock(&inst->resume_lock);
-			inst->action &= ~MB_PLAYER_ACTION_PAUSE;
-			inst->status = MB_PLAYER_STATUS_PAUSED;
-			pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
-			inst->status = MB_PLAYER_STATUS_PLAYING;
-			pthread_mutex_unlock(&inst->resume_lock);
+			if (inst->action & MB_PLAYER_ACTION_STOP) {
+				goto decoder_exit;
+			}
+
+			/* this is where we pause -- not done yet */
+			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
+				fprintf(stderr, "decoder: pausing\n");
+				pthread_mutex_lock(&inst->resume_lock);
+				inst->action &= ~MB_PLAYER_ACTION_PAUSE;
+				inst->status = MB_PLAYER_STATUS_PAUSED;
+				pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
+				inst->status = MB_PLAYER_STATUS_PLAYING;
+				pthread_mutex_unlock(&inst->resume_lock);
+			}
 		}
 	}
 
@@ -578,9 +579,6 @@ mbp_destroy(struct mbp *inst)
 	assert(inst != NULL);
 
 	fprintf(stderr, "mb_player[ffmpeg]: Destroying\n");
-	if (inst == NULL) {
-		return;
-	}
 
 	/* this just fails if we're not playing */
 	(void) mbp_stop(inst);
