@@ -310,7 +310,7 @@ mb_player_playback_thread(void *arg)
 	}
 
 	/* calculate the size of each frame and allocate buffer for it */
-	inst->bufsz = avpicture_get_size(PIX_FMT_RGB24, codec_ctx->width, codec_ctx->height);
+	inst->bufsz = avpicture_get_size(PIX_FMT_RGB24, inst->width, inst->height);
 	inst->buf = buf = av_malloc(inst->bufsz * sizeof(uint8_t));
 	if (buf == NULL) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate buffer\n");
