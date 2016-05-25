@@ -23,6 +23,14 @@
 #include "video.h"
 #include "player.h"
 
+/*
+ * For now to change the pix format it needs to be
+ * done here and on video-directfb.c mbv_window_blit_buffer()
+ * function. We need to implement our own enum with supported
+ * formats (on video.h) and add it as an argument to that
+ * function. Then use a LUT to map between those and ffmpeg's.
+ */
+#define MB_DECODER_PIX_FMT AV_PIX_FMT_RGB32
 
 enum mb_player_action
 {
@@ -98,7 +106,7 @@ mb_player_initfilters(
 	AVFilterInOut *outputs = avfilter_inout_alloc();
 	AVFilterInOut *inputs  = avfilter_inout_alloc();
 	AVRational time_base = fmt_ctx->streams[stream_index]->time_base;
-	enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_RGB24, AV_PIX_FMT_NONE };
+	enum AVPixelFormat pix_fmts[] = { MB_DECODER_PIX_FMT, AV_PIX_FMT_NONE };
 
 	snprintf(args, sizeof(args),
 		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
@@ -310,7 +318,7 @@ mb_player_playback_thread(void *arg)
 	}
 
 	/* calculate the size of each frame and allocate buffer for it */
-	inst->bufsz = avpicture_get_size(PIX_FMT_RGB24, inst->width, inst->height);
+	inst->bufsz = avpicture_get_size(MB_DECODER_PIX_FMT, inst->width, inst->height);
 	inst->buf = buf = av_malloc(inst->bufsz * sizeof(uint8_t));
 	if (buf == NULL) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate buffer\n");
@@ -349,7 +357,7 @@ mb_player_playback_thread(void *arg)
 
 					/* copy picture to buffer */
 					avpicture_layout((const AVPicture*) frame_flt,
-						AV_PIX_FMT_RGB24, inst->width, inst->height,
+						MB_DECODER_PIX_FMT, inst->width, inst->height,
 						inst->buf, inst->bufsz);
 
 					/* render frame */
@@ -428,33 +436,47 @@ mb_player_update(struct mbp *inst)
 }
 
 
+/**
+ * mb_player_play() -- If path is not NULL it opens the file
+ * specified by path and starts playing it. If path is NULL
+ * it resumes playback if we're on the PAUSED state and return
+ * failure code (-1) if we're on any other state.
+ */
 int 
 mbp_play(struct mbp *inst, const char * const path)
 {
-	if (inst == NULL) {
-		return -1;
-	}
+	assert(inst != NULL);
+	assert(inst->status == MB_PLAYER_STATUS_READY ||
+		inst->status == MB_PLAYER_STATUS_PLAYING ||
+		inst->status == MB_PLAYER_STATUS_PAUSED);
 
+	/* if no path argument was provided but we're already
+	 * playing a file and we're paused then just resume
+	 * playback */
 	if (path == NULL) {
 		if (inst->status == MB_PLAYER_STATUS_PAUSED) {
 			pthread_mutex_lock(&inst->resume_lock);
 			pthread_cond_signal(&inst->resume_signal);
 			pthread_mutex_unlock(&inst->resume_lock);
-			/* just signal decoder and exit */
 			return 0;
 		}
 		fprintf(stderr, "mbp_play() failed -- NULL path\n");
 		return -1;
 	}
 
+	/* initialize player object */
 	inst->media_file = path;
 	inst->status = MB_PLAYER_STATUS_PLAYING;
 
+	/* start the main decoder thread */
 	if (pthread_create(&inst->thread, NULL, mb_player_playback_thread, inst) != 0) {
 		fprintf(stderr, "pthread_create() failed!\n");
 		inst->status = MB_PLAYER_STATUS_READY;
 		return -1;
 	}
+
+	/* detach the decoder thread */
+	pthread_detach(inst->thread);
 
 	return 0;
 }
@@ -472,7 +494,9 @@ mbp_pause(struct mbp* inst)
 
 	/* request pause and wait for player thread to pause */
 	inst->action |= MB_PLAYER_ACTION_PAUSE;
-	//while (inst->status != MB_PLAYER_STATUS_PAUSED);
+
+	/* TODO: Don't spin */
+	while (inst->status != MB_PLAYER_STATUS_PAUSED);
 	return 0;
 }
 
@@ -482,12 +506,17 @@ mbp_stop(struct mbp* inst)
 {
 	if (inst->status != MB_PLAYER_STATUS_READY) {
 		inst->action |= MB_PLAYER_ACTION_STOP;
-		//while (inst->status != MB_PLAYER_STATUS_READY);
+		/* TODO: Don't spin */
+		while (inst->status != MB_PLAYER_STATUS_READY);
 		return 0;
 	}
 	return -1;
 }
 
+
+/**
+ * mb_player_init() -- Create a new player object.
+ */
 struct mbp*
 mbp_init(void)
 {
@@ -495,30 +524,31 @@ mbp_init(void)
 	struct mbv_window *window = NULL; /* TODO: This should be an argument */
 	static int initialized = 0;
 
+	/* initialize libav */
 	if (!initialized) {
 		av_register_all();
 		avfilter_register_all();
 		initialized = 1;
 	}
 
+	/* allocate memory for the player object */
 	inst = malloc(sizeof(struct mbp));
 	if (inst == NULL) {
 		fprintf(stderr, "mbp_init() failed -- out of memory\n");
 		return NULL;
 	}
 
-	if (window != NULL) {
-		inst->window = window;
-	} else {
-		/* if no window was suplied we'll render to the root window */
-		inst->window = mbv_getrootwindow();
-		if (inst->window == NULL) {
+	/* if no window argument was provided then use the root window */
+	if (window == NULL) {
+		window = mbv_getrootwindow();
+		if (window == NULL) {
 			fprintf(stderr, "mb_player[ffmpeg]: Could not get root window\n");
 			free(inst);
 			return NULL;
 		}
 	}
 
+	inst->window = window;
 	inst->media_file = NULL;
 	inst->buf = NULL;
 	inst->bufsz = 0;
@@ -544,12 +574,16 @@ mbp_init(void)
 void
 mbp_destroy(struct mbp *inst)
 {
+	assert(inst != NULL);
+
 	fprintf(stderr, "mb_player[ffmpeg]: Destroying\n");
 	if (inst == NULL) {
 		return;
 	}
-	inst->action |= MB_PLAYER_ACTION_STOP;
-	pthread_join(inst->thread, NULL);
+
+	/* this just fails if we're not playing */
+	(void) mbp_stop(inst);
+
 	if (inst->media_file != NULL) {
 		free(inst);
 	}

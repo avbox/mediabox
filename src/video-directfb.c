@@ -33,7 +33,9 @@ struct mbv_window
 IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
 static IDirectFBDisplayLayer *layer = NULL;
 static IDirectFBFont *font = NULL;
+#ifdef MULTIAPP
 static IDirectFBWindows *windows;
+#endif
 struct mbv_window *root_window = NULL;
 static int screen_width = 0;
 static int screen_height = 0;
@@ -111,9 +113,9 @@ mbv_dfb_window_blit_buffer(
 	dsc.height = height;
 	dsc.flags = DSDESC_HEIGHT | DSDESC_WIDTH | DSDESC_PREALLOCATED | DSDESC_PIXELFORMAT;
 	dsc.caps = DSCAPS_NONE;
-	dsc.pixelformat = DSPF_RGB24;
+	dsc.pixelformat = DSPF_RGB32;
 	dsc.preallocated[0].data = buf;
-	dsc.preallocated[0].pitch = width * 3;
+	dsc.preallocated[0].pitch = width * 4;
 	dsc.preallocated[1].data = NULL;
 	dsc.preallocated[1].pitch = 0;
 
@@ -412,12 +414,14 @@ mbv_dfb_getrootwindow(void)
 }
 
 
+#ifdef MULTIAPP
 static void
 mbv_dfb_window_added(void *context, const DFBWindowInfo info)
 {
 	fprintf(stderr, "Window added: winid=%i resid=%lu procid=%i inst=%i\n",
 		info.window_id, info.resource_id, info.process_id, info.instance_id);
 }
+#endif
 
 
 /**
@@ -465,14 +469,14 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(screen->Release(screen));
 	#endif
 
-
+#ifdef MULTIAPP
 	/* register a window watcher */
 	DFBWindowsWatcher watcher;
 	memset(&watcher, 0, sizeof(DFBWindowsWatcher));
 	watcher.WindowAdd = (void*) mbv_dfb_window_added;
 	DFBCHECK(dfb->GetInterface(dfb, "IDirectFBWindows", NULL, NULL, (void**) &windows));
 	DFBCHECK(windows->RegisterWatcher(windows, &watcher, NULL));
-
+#endif
 
 	/* create root window */
 	root_window = mbv_dfb_window_new(
@@ -495,7 +499,9 @@ mbv_dfb_init(int argc, char **argv)
 void
 mbv_dfb_destroy()
 {
+#ifdef MULTIAPP
 	DFBCHECK(windows->Release(windows));
+#endif
 	layer->Release(layer);
 	font->Release(font);
 	dfb->Release(dfb);
