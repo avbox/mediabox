@@ -12,7 +12,7 @@
 #include "player.h"
 
 #define MPLAYER_BIN "/usr/bin/mplayer"
-#define VIDEO_OUTPUT "directfb:noinput:dfbopts=force-windowed"
+#define VIDEO_OUTPUT "directfb:noinput:dfbopts=force-windowed:dfbopts='wm=sawman'"
 
 
 struct mbp

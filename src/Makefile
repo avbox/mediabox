@@ -23,7 +23,7 @@ endif
 
 CFLAGS=-ggdb -fno-stack-protector -I/usr/include/directfb -Wunused-variable -Wall
 ASFLAGS=-ggdb
-LDFLAGS=-ldirectfb -pthread
+LDFLAGS=-ldirectfb -pthread -lavutil -lavformat -lavcodec -lswscale -lavfilter -lz -lm
 
 
 SOURCES=main.o \
@@ -33,7 +33,7 @@ SOURCES=main.o \
 	input-directfb.o \
 	input-tcp.o \
 	pipe_util.o \
-	player.o \
+	player-ffmpeg.o \
 	shell.o \
 	ui-menu.o \
 	mainmenu.o

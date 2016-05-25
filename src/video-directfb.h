@@ -22,6 +22,14 @@ mbv_dfb_window_clear(struct mbv_window *win,
 	unsigned char r, unsigned char g, unsigned char b, unsigned char a);
 
 
+int
+mbv_dfb_window_getsize(struct mbv_window *window, int *width, int *height);
+
+int
+mbv_dfb_window_blit_buffer(
+	struct mbv_window *window, void *buf, int width, int height);
+
+
 struct mbv_window*
 mbv_dfb_window_new(
         char *title,

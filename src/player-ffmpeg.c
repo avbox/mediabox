@@ -13,31 +13,158 @@
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
+#include <libavfilter/avfiltergraph.h>
+#include <libavfilter/avcodec.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
+#include <libavutil/opt.h>
 
 
-#include "input.h"
+#include "video.h"
 #include "player.h"
+
+enum mb_player_action
+{
+	MB_PLAYER_ACTION_NONE = 0,
+	MB_PLAYER_ACTION_PAUSE = 2,
+	MB_PLAYER_ACTION_STOP = 4
+};
+
 
 struct mbp
 {
+	struct mbv_window *window;
 	const char *media_file;
 	enum mb_player_status status;
-	int pause_requested;
+	enum mb_player_action action;
 	int frames_rendered;
+	int width;
+	int height;
+	int last_err;
 	uint8_t *buf;
+	int bufsz;
+	pthread_cond_t resume_signal;
+	pthread_mutex_t resume_lock;
 	pthread_t thread;
 };
 
 
+const char *filter_descr = "interlace"; //"scale=78:24,transpose=cclock";
+
 static void
-mb_player_render_frame(struct mbp *inst)
+mb_player_renderframe(struct mbp *inst)
 {
+	assert(inst != NULL);
+	assert(inst->window != NULL);
+	mbv_dfb_window_blit_buffer2(inst->window, inst->buf,
+		inst->width, inst->height);
+	mbv_window_show(inst->window);
 	inst->frames_rendered++;
 	return;
 }
 
 
-static int open_codec_context(int *stream_idx,
+static int
+mb_player_initfilters(
+	AVFormatContext *fmt_ctx,
+	AVCodecContext *dec_ctx,
+	AVFilterContext **buffersink_ctx,
+	AVFilterContext **buffersrc_ctx,
+	AVFilterGraph **filter_graph,
+	const char *filters_descr,
+	int stream_index)
+{
+	char args[512];
+	int ret = 0;
+	AVFilter *buffersrc  = avfilter_get_by_name("buffer");
+	AVFilter *buffersink = avfilter_get_by_name("buffersink");
+	AVFilterInOut *outputs = avfilter_inout_alloc();
+	AVFilterInOut *inputs  = avfilter_inout_alloc();
+	AVRational time_base = fmt_ctx->streams[stream_index]->time_base;
+	enum AVPixelFormat pix_fmts[] = { PIX_FMT_RGB24, AV_PIX_FMT_NONE };
+
+	snprintf(args, sizeof(args),
+		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+		dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
+		time_base.num, time_base.den,
+		dec_ctx->sample_aspect_ratio.num, dec_ctx->sample_aspect_ratio.den);
+	fprintf(stderr, "args: %s\n", args);
+
+
+	*filter_graph = avfilter_graph_alloc();
+	if (!outputs || !inputs || !*filter_graph) {
+		ret = AVERROR(ENOMEM);
+		goto end;
+	}
+
+	ret = avfilter_graph_create_filter(buffersrc_ctx, buffersrc, "in",
+                                       args, NULL, *filter_graph);
+	if (ret < 0) {
+		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
+		goto end;
+	}
+
+	/* buffer video sink: to terminate the filter chain. */
+	ret = avfilter_graph_create_filter(buffersink_ctx, buffersink, "out",
+                                       NULL, NULL, *filter_graph);
+	if (ret < 0) {
+		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
+		goto end;
+	}
+
+	ret = av_opt_set_int_list(*buffersink_ctx, "pix_fmts", pix_fmts,
+                              AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
+	if (ret < 0) {
+		av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
+		goto end;
+	}
+
+	/*
+	* Set the endpoints for the filter graph. The filter_graph will
+	* be linked to the graph described by filters_descr.
+	*/
+
+	/*
+	* The buffer source output must be connected to the input pad of
+	* the first filter described by filters_descr; since the first
+	* filter input label is not specified, it is set to "in" by
+	* default.
+	*/
+	outputs->name       = av_strdup("in");
+	outputs->filter_ctx = *buffersrc_ctx;
+	outputs->pad_idx    = 0;
+	outputs->next       = NULL;
+
+	/*
+	* The buffer sink input must be connected to the output pad of
+	* the last filter described by filters_descr; since the last
+	* filter output label is not specified, it is set to "out" by
+	* default.
+	*/
+	inputs->name       = av_strdup("out");
+	inputs->filter_ctx = *buffersink_ctx;
+	inputs->pad_idx    = 0;
+	inputs->next       = NULL;
+
+	if ((ret = avfilter_graph_parse_ptr(*filter_graph, filters_descr,
+                                    &inputs, &outputs, NULL)) < 0) {
+		goto end;
+	}
+
+	if ((ret = avfilter_graph_config(*filter_graph, NULL)) < 0) {
+	        goto end;
+	}
+
+
+end:
+	avfilter_inout_free(&inputs);
+	avfilter_inout_free(&outputs);
+
+	return ret;
+}
+
+static int
+open_codec_context(int *stream_idx,
                               AVFormatContext *fmt_ctx, enum AVMediaType type)
 {
     int ret;
@@ -75,6 +202,7 @@ static int open_codec_context(int *stream_idx,
    return 0;
 }
 
+
 /**
  * mb_player_playback_thread() -- This is the main decoding loop
  * TODO: Split into decoding and rendering threads
@@ -90,14 +218,26 @@ mb_player_playback_thread(void *arg)
 	AVCodecContext *codec_ctx_orig = NULL;
 	AVCodecContext *codec_ctx = NULL;
 	AVCodec *codec = NULL;
-	AVFrame *frame_nat = NULL, *frame_rgb = NULL;
+	AVFilterGraph *filter_graph = NULL;
+	AVFrame *frame_nat = NULL, *frame_rgb = NULL, *frame_flt = NULL;
+	AVFilterContext *buffersink_ctx = NULL;
+	AVFilterContext *buffersrc_ctx = NULL;
 	AVPacket packet;
 
 	assert(inst != NULL);
 	assert(inst->media_file != NULL);
+	assert(inst->window != NULL);
 
-	fprintf(stderr, "mb_player[ffmpeg]: Attempting to play '%s'\n",
-		inst->media_file);
+	inst->status = MB_PLAYER_STATUS_PLAYING;
+
+	if (mbv_window_getsize(inst->window, &inst->width, &inst->height) == -1) {
+		fprintf(stderr, "mb_player[ffmpeg]: Could not get window size\n");
+		goto decoder_exit;
+	}
+
+
+	fprintf(stderr, "mb_player[ffmpeg]: Attempting to play (%ix%i) '%s'\n",
+		inst->width, inst->height, inst->media_file);
 
 	/* open file */
 	if (avformat_open_input(&fmt_ctx, inst->media_file, NULL, NULL) != 0) {
@@ -106,7 +246,6 @@ mb_player_playback_thread(void *arg)
 		goto decoder_exit;
 	}
 
-	#if 1
 	if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not find stream info\n");
 		goto decoder_exit;
@@ -129,51 +268,26 @@ mb_player_playback_thread(void *arg)
 		goto decoder_exit;
 	}
 
-
-	#else
-	/* dump file info */
-	av_dump_format(fmt_ctx, 0, inst->media_file, 0);
-
-	/* find the first video stream */
-	for (i = 0; i < fmt_ctx->nb_streams; i++) {
-		if (fmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
-			fprintf(stderr, "mb_player[ffmpeg]: Found stream #%i\n", i);
-			codec_ctx_orig = fmt_ctx->streams[i]->codec;
-			stream_index = i;
-			break;
-		}
-	}
-	if (codec_ctx_orig == NULL) {
+	/* initialize filter graph */
+	if (mb_player_initfilters(fmt_ctx, codec_ctx,
+		&buffersink_ctx, &buffersrc_ctx, &filter_graph,
+		filter_descr, stream_index) < 0) {
+		fprintf(stderr, "mb_player[ffmpeg]: Could not init filter graph!\n");
 		goto decoder_exit;
 	}
-
-	/* find decoder */
-	codec = avcodec_find_decoder(codec_ctx_orig->codec_id);
-	if (codec == NULL) {
-		fprintf(stderr, "mb_player[ffmpeg]: Unsupported codec!\n");
-		goto decoder_exit;
-	}
-
-	/* copy context to our codec */
-	codec_ctx = avcodec_alloc_context3(codec);
-	if (avcodec_copy_context(codec_ctx, codec_ctx_orig) != 0) {
-		fprintf(stderr, "mb_player[ffmpeg]: Could not copy codec context\n");
-		goto decoder_exit;
-	}
-	#endif
-
 
 	/* allocate frames */
 	frame_nat = av_frame_alloc();
+	frame_flt = av_frame_alloc();
 	frame_rgb = av_frame_alloc();
-	if (frame_nat == NULL || frame_rgb == NULL) {
+	if (frame_nat == NULL || frame_flt == NULL || frame_rgb == NULL) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate frames\n");
 		goto decoder_exit;
 	}
 
 	/* calculate the size of each frame and allocate buffer for it */
-	i = avpicture_get_size(PIX_FMT_RGB24, codec_ctx->width, codec_ctx->height);
-	inst->buf = buf = av_malloc(i * sizeof(uint8_t));
+	inst->bufsz = avpicture_get_size(PIX_FMT_RGB24, codec_ctx->width, codec_ctx->height);
+	inst->buf = buf = av_malloc(inst->bufsz * sizeof(uint8_t));
 	if (buf == NULL) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate buffer\n");
 		goto decoder_exit;
@@ -184,49 +298,79 @@ mb_player_playback_thread(void *arg)
 		codec_ctx->width, codec_ctx->height);
 
 	fprintf(stderr, "mb_player[ffmpeg]: codec_ctx: width=%i height=%i pix_fmt=%i\n",
-		codec_ctx->width, codec_ctx->height, codec_ctx->pix_fmt);
+		inst->width, inst->height, codec_ctx->pix_fmt);
 
 	/* init the software scaler */
 	sws_ctx = sws_getContext(
 		codec_ctx->width,
 		codec_ctx->height,
-		codec_ctx->pix_fmt,
-		codec_ctx->width,
-		codec_ctx->height,
+		/*codec_ctx->pix_fmt*/ PIX_FMT_RGB24,
+		inst->width,
+		inst->height,
 		PIX_FMT_RGB24,
 		SWS_PRINT_INFO,
 		NULL,
 		NULL,
-		NULL); 
+		NULL);
 
+	/* start decoding */
 	while (av_read_frame(fmt_ctx, &packet) >= 0) {
 		if (packet.stream_index == stream_index) {
 			/* decode frame */
 			avcodec_decode_video2(codec_ctx, frame_nat, &finished, &packet);
 			if (finished) {
-				/* convert to rgb */
-				sws_scale(sws_ctx, (uint8_t const * const *) frame_nat->data,
-					frame_nat->linesize, 0, codec_ctx->height,
-					frame_rgb->data, frame_rgb->linesize);
 
-				/* render frame */
-				mb_player_render_frame(inst);
-				fprintf(stderr, "Rendered\n");
+				frame_nat->pts = av_frame_get_best_effort_timestamp(frame_nat);
 
+				/* push the decoded frame into the filtergraph */
+				if (av_buffersrc_add_frame_flags(buffersrc_ctx,
+					frame_nat, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+					fprintf(stderr, "mb_player[ffmpeg]: Error feeding filterchain\n");
+					goto decoder_exit;
+				}
+
+				/* pull filtered frames from the filtergraph */
+				while (1) {
+					i = av_buffersink_get_frame(buffersink_ctx, frame_flt);
+					if (i == AVERROR(EAGAIN) || i == AVERROR_EOF) {
+						break;
+					}
+					if (i < 0) {
+						goto decoder_exit;
+					}
+					/* convert to rgb */
+					sws_scale(sws_ctx, (uint8_t const * const *) frame_flt->data,
+						frame_flt->linesize, 0, codec_ctx->height,
+						frame_rgb->data, frame_rgb->linesize);
+
+					/* render frame */
+					mb_player_renderframe(inst);
+					//av_frame_unref(frame_flt);
+				}
+				//av_frame_unref(frame_nat);
 			}
 		}
 		/* free packet */
 		av_free_packet(&packet);
 
+		if (inst->action & MB_PLAYER_ACTION_STOP) {
+			goto decoder_exit;
+		}
+
 		/* this is where we pause -- not done yet */
-		if (inst->pause_requested) {
+		if (inst->action & MB_PLAYER_ACTION_PAUSE) {
 			inst->status = MB_PLAYER_STATUS_PAUSED;
 			sleep(10);
 			inst->status = MB_PLAYER_STATUS_PLAYING;
+			inst->action &= ~MB_PLAYER_ACTION_PAUSE;
 		}
 	}
 
 decoder_exit:
+	fprintf(stderr, "mb_player[ffmpeg]: Decoder exiting\n");
+	//memset(inst->buf, 0, inst->bufsz);
+	//mb_player_renderframe(inst);
+
 	/* cleanup */
 	if (buf != NULL) {
 		av_free(buf);
@@ -268,13 +412,6 @@ void
 mb_player_update(struct mbp *inst)
 {
 	assert(inst != NULL);
-
-	/* this is a hack for now to get the media player window to update */
-	if (inst->status == MB_PLAYER_STATUS_PAUSED) {
-		mbp_play(inst, NULL);
-		while (inst->status == MB_PLAYER_STATUS_PAUSED);
-		mbp_pause(inst);
-	}
 }
 
 
@@ -295,11 +432,14 @@ mbp_play(struct mbp *inst, const char * const path)
 	}
 
 	inst->media_file = path;
+	inst->status = MB_PLAYER_STATUS_PLAYING;
 
 	if (pthread_create(&inst->thread, NULL, mb_player_playback_thread, inst) != 0) {
 		fprintf(stderr, "pthread_create() failed!\n");
+		inst->status = MB_PLAYER_STATUS_READY;
 		return -1;
 	}
+
 	return 0;
 }
 
@@ -315,8 +455,8 @@ mbp_pause(struct mbp* inst)
 	}
 
 	/* request pause and wait for player thread to pause */
-	inst->pause_requested = 1;
-	while (inst->status != MB_PLAYER_STATUS_PAUSED);
+	inst->action &= MB_PLAYER_ACTION_PAUSE;
+	//while (inst->status != MB_PLAYER_STATUS_PAUSED);
 	return 0;
 }
 
@@ -324,18 +464,24 @@ mbp_pause(struct mbp* inst)
 int
 mbp_stop(struct mbp* inst)
 {
-	return 0;
+	if (inst->status != MB_PLAYER_STATUS_READY) {
+		inst->action &= MB_PLAYER_ACTION_STOP;
+		//while (inst->status != MB_PLAYER_STATUS_READY);
+		return 0;
+	}
+	return -1;
 }
-
 
 struct mbp*
 mbp_init(void)
 {
 	struct mbp* inst;
+	struct mbv_window *window = NULL; /* TODO: This should be an argument */
 	static int initialized = 0;
 
 	if (!initialized) {
 		av_register_all();
+		avfilter_register_all();
 		initialized = 1;
 	}
 
@@ -345,10 +491,36 @@ mbp_init(void)
 		return NULL;
 	}
 
+	if (window != NULL) {
+		inst->window = window;
+	} else {
+		/* if no window was suplied we'll render to the root window */
+		inst->window = mbv_getrootwindow();
+		if (inst->window == NULL) {
+			fprintf(stderr, "mb_player[ffmpeg]: Could not get root window\n");
+			free(inst);
+			return NULL;
+		}
+	}
+
 	inst->media_file = NULL;
-	inst->pause_requested = 0;
 	inst->buf = NULL;
+	inst->bufsz = 0;
+	inst->action = MB_PLAYER_ACTION_NONE;
 	inst->status = MB_PLAYER_STATUS_READY;
+
+	if (pthread_mutex_init(&inst->resume_lock, NULL) != 0 ) {
+		fprintf(stderr, "mb_player[ffmpeg]: pthread_mutex_init() failed\n");
+		free(inst);
+		return NULL;
+	}
+
+	if (pthread_cond_init(&inst->resume_signal, NULL) != 0) {
+		fprintf(stderr, "mb_player[ffmpeg]: pthread_cond_init() failed\n");
+		free(inst);
+		return NULL;
+	}
+
 	return inst;
 }
 
@@ -356,9 +528,12 @@ mbp_init(void)
 void
 mbp_destroy(struct mbp *inst)
 {
+	fprintf(stderr, "mb_player[ffmpeg]: Destroying\n");
 	if (inst == NULL) {
 		return;
 	}
+	inst->action |= MB_PLAYER_ACTION_STOP;
+	pthread_join(inst->thread, NULL);
 	if (inst->media_file != NULL) {
 		free(inst);
 	}

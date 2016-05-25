@@ -5,6 +5,15 @@
 
 struct mbv_window;
 
+
+int
+mbv_window_getsize(struct mbv_window *window, int *width, int *height);
+
+
+int
+mbv_window_blit_buffer(
+	struct mbv_window *window, void *buf, int width, int height);
+
 struct mbv_window*
 mbv_window_new(
 	char *title,
