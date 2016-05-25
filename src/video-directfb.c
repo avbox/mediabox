@@ -8,6 +8,7 @@
 
 #include <directfb_windows.h>
 
+//#define DEBUG_MEMORY
 #define DEFAULT_FONT "/usr/share/fonts/liberation-fonts/LiberationSerif-Regular.ttf"
 #define DEFAULT_FONT_HEIGHT (16)
 #define DEFAULT_FOREGROUND  (0xFFFFFFFF)
@@ -98,6 +99,7 @@ mbv_dfb_window_getsize(struct mbv_window *window, int *width, int *height)
 	return 0;
 }
 
+
 int
 mbv_dfb_window_blit_buffer(
 	struct mbv_window *window,
@@ -123,6 +125,7 @@ mbv_dfb_window_blit_buffer(
 	DFBCHECK(window->content->Blit(window->content, surface, NULL, 0, 0));
 	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
 	DFBCHECK(surface->Release(surface));
+
 	return 0;
 }
 
@@ -138,8 +141,6 @@ mbv_dfb_window_new(
 	int width,
 	int height)
 {
-
-	fprintf(stderr, "VIDEO ******** %ix%i\n", width, height);
 	struct mbv_window *win;
 	DFBWindowDescription window_desc = {
 		.flags = DWDESC_POSX | DWDESC_POSY | DWDESC_WIDTH | DWDESC_HEIGHT |
@@ -376,8 +377,10 @@ mbv_dfb_window_destroy(struct mbv_window *window)
 {
 	assert(window != NULL);
 
+#ifdef DEBUG_MEMORY
 	fprintf(stderr, "mbv: Destroying window (0x%lx)\n",
 		(unsigned long) window);
+#endif
 
 	mbv_dfb_window_hide(window);
 

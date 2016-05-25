@@ -21,7 +21,7 @@ ifneq ($(shell echo -e "Hello"),Hello)
 	ECHOFLAGS=
 endif
 
-CFLAGS=-ggdb -fno-stack-protector -I/usr/include/directfb -Wunused-variable -Wall
+CFLAGS=-ggdb -std=gnu99 -fno-stack-protector -I/usr/include/directfb -Wunused-variable -Wall
 ASFLAGS=-ggdb
 LDFLAGS=-ldirectfb -pthread -lavutil -lavformat -lavcodec -lswscale -lavfilter -lz -lm
 

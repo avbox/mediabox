@@ -65,7 +65,7 @@ mbi_loop(void *arg)
 		}
 		while (!dispatched);
 	}
-	fprintf(stderr, "mbi_loop() exiting\n");
+	fprintf(stderr, "mbi: Input loop exiting\n");
 	return 0;
 }
 

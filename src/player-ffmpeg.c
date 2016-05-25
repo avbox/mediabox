@@ -145,27 +145,27 @@ mb_player_initfilters(
 	}
 
 	/*
-	* Set the endpoints for the filter graph. The filter_graph will
-	* be linked to the graph described by filters_descr.
-	*/
+	 * Set the endpoints for the filter graph. The filter_graph will
+	 * be linked to the graph described by filters_descr.
+	 */
 
 	/*
-	* The buffer source output must be connected to the input pad of
-	* the first filter described by filters_descr; since the first
-	* filter input label is not specified, it is set to "in" by
-	* default.
-	*/
+	 * The buffer source output must be connected to the input pad of
+	 * the first filter described by filters_descr; since the first
+	 * filter input label is not specified, it is set to "in" by
+	 * default.
+	 */
 	outputs->name       = av_strdup("in");
 	outputs->filter_ctx = *buffersrc_ctx;
 	outputs->pad_idx    = 0;
 	outputs->next       = NULL;
 
 	/*
-	* The buffer sink input must be connected to the output pad of
-	* the last filter described by filters_descr; since the last
-	* filter output label is not specified, it is set to "out" by
-	* default.
-	*/
+	 * The buffer sink input must be connected to the output pad of
+	 * the last filter described by filters_descr; since the last
+	 * filter output label is not specified, it is set to "out" by
+	 * default.
+	 */
 	inputs->name       = av_strdup("out");
 	inputs->filter_ctx = *buffersink_ctx;
 	inputs->pad_idx    = 0;
@@ -298,8 +298,9 @@ mb_player_playback_thread(void *arg)
 	}
 
 	/* initialize filter graph */
-	snprintf(filters, sizeof(filters), "scale=%i:%i",
-		inst->width, inst->height);
+	snprintf(filters, sizeof(filters), "scale='if(gt(a,4/3),%i,-1)':'if(gt(a,4/3),-1,%i)',"
+		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
+		inst->width, inst->height, inst->width, inst->height);
 	fprintf(stderr, "mb_player[ffmpeg]: filters: %s\n",
 		filters);
 	if (mb_player_initfilters(fmt_ctx, codec_ctx,
