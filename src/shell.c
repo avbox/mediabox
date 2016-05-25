@@ -12,8 +12,8 @@
 
 
 
-#define MEDIA_FILE "/media/InternalStorage/Movies/Avatar ECE (2009)/Avatar.ECE.2009.720p.BrRip.x264.bitloks.YIFY.mp4"
-#define MEDIA_FILE2 "/mnt/shared/movies/Cop Car (2015)/Cop.Car.2015.720p.BluRay.x264.YIFY.mp4"
+#define MEDIA_FILE2 "/media/InternalStorage/Movies/Avatar ECE (2009)/Avatar.ECE.2009.720p.BrRip.x264.bitloks.YIFY.mp4"
+#define MEDIA_FILE "/mnt/shared/movies/Cop Car (2015)/Cop.Car.2015.720p.BluRay.x264.YIFY.mp4"
 
 static struct mbv_window *root_window = NULL;
 static struct mbp *player = NULL;

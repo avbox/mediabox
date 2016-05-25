@@ -125,39 +125,6 @@ mbv_dfb_window_blit_buffer(
 }
 
 
-int
-mbv_dfb_window_blit_buffer2(
-	struct mbv_window *window,
-	void *buf, int width, int height)
-{
-	DFBSurfaceDescription dsc;
-	static IDirectFBSurface *surface = NULL;
-
-	if (surface == NULL) {
-	assert(window != NULL);
-	assert(window->content != NULL);
-
-	dsc.width = width;
-	dsc.height = height;
-	dsc.flags = DSDESC_HEIGHT | DSDESC_WIDTH | DSDESC_PREALLOCATED | DSDESC_PIXELFORMAT;
-	dsc.caps = DSCAPS_NONE;
-	dsc.pixelformat = DSPF_RGB24;
-	dsc.preallocated[0].data = buf;
-	dsc.preallocated[0].pitch = width * 3;
-	dsc.preallocated[1].data = NULL;
-	dsc.preallocated[1].pitch = NULL;
-
-	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
-	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
-	}
-	DFBCHECK(window->content->Blit(window->content, surface, NULL, 0, 0));
-	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
-	//DFBCHECK(surface->Release(surface));
-	return 0;
-}
-
-
-
 /**
  * mbv_dfb_window_new() -- Creates a new window
  */

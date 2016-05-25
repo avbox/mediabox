@@ -49,14 +49,14 @@ struct mbp
 };
 
 
-const char *filter_descr = "interlace"; //"scale=78:24,transpose=cclock";
+const char *filter_descr = "yadif"; //"scale=78:24,transpose=cclock";
 
 static void
 mb_player_renderframe(struct mbp *inst)
 {
 	assert(inst != NULL);
 	assert(inst->window != NULL);
-	mbv_dfb_window_blit_buffer2(inst->window, inst->buf,
+	mbv_window_blit_buffer(inst->window, inst->buf,
 		inst->width, inst->height);
 	mbv_window_show(inst->window);
 	inst->frames_rendered++;
