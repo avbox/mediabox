@@ -159,8 +159,7 @@ mb_ui_menu_additem(struct mb_ui_menu *inst, char *name, void *data)
 	}
 
 	if (inst->count < inst->visible_items) {
-		fprintf(stderr, "mb_ui_menu: Adding widget for '%s'\n", name);
-		/* create a subwindow for the item */
+		/* grab a preallocated subwindow */
 		item->window = inst->item_windows[inst->count];
 		assert(item->window != NULL);
 
@@ -238,7 +237,6 @@ mb_ui_menu_showdialog(struct mb_ui_menu *inst)
 		switch (e) {
 		case MBI_EVENT_BACK:
 		{
-			fprintf(stderr, "mb_ui_menu: BACK button pressed\n");
 			close(fd);	/* relinquish input */
 			quit = 1;	/* break out of loop */
 			ret = 1; 	/* return failure since user backed out */
@@ -248,7 +246,6 @@ mb_ui_menu_showdialog(struct mb_ui_menu *inst)
 		{
 			/* same as above but return success since the user
 			 * selected an item */
-			fprintf(stderr, "mb_ui_menu: ENTER button pressed\n");
 			close(fd);
 			quit = 1;
 			ret = 0;
@@ -332,9 +329,6 @@ mb_ui_menu_new(struct mbv_window *window)
 	 * number of visible items */
 	mbv_window_getcanvassize(window, &width, &height);
 	inst->visible_items = height / MB_ITEM_HEIGHT;
-
-	fprintf(stderr, "mb_ui_menu: visible items: %i\n",
-		inst->visible_items);
 
 	/* allocate memory for an array of pointers to
 	 * window objects for each visible item */

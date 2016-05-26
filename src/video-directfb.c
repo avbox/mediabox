@@ -9,7 +9,7 @@
 #include <directfb_windows.h>
 
 //#define DEBUG_MEMORY
-#define DEFAULT_FONT "/usr/share/fonts/liberation-fonts/LiberationSerif-Regular.ttf"
+#define DEFAULT_FONT "/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf"
 #define DEFAULT_FONT_HEIGHT (16)
 #define DEFAULT_FOREGROUND  (0xFFFFFFFF)
 
@@ -28,6 +28,7 @@ struct mbv_window
 	int height;
 	int visible;
 	int font_height;
+	uint8_t opacity;
 };
 
 
@@ -146,7 +147,7 @@ mbv_dfb_window_new(
 		.flags = DWDESC_POSX | DWDESC_POSY | DWDESC_WIDTH | DWDESC_HEIGHT |
 			 DWDESC_CAPS | DWDESC_SURFACE_CAPS,
 		.caps = DWCAPS_ALPHACHANNEL | DWCAPS_DOUBLEBUFFER | DWCAPS_NODECORATION,
-		.surface_caps = /*DSCAPS_PRIMARY |*/ DSCAPS_PREMULTIPLIED | DSCAPS_VIDEOONLY,
+		.surface_caps = DSCAPS_PREMULTIPLIED,
 		.posx = posx,
 		.posy = posy,
 		.width = width,
@@ -183,6 +184,7 @@ mbv_dfb_window_new(
 	win->width = width;
 	win->height = height;
 	win->font_height = DEFAULT_FONT_HEIGHT;
+	win->opacity = (uint8_t) ((0xFF * 80) / 100);
 
 	if (0 && root_window == NULL) {
 		DFBCHECK(layer->GetWindow(layer, 1, &win->dfb_window));
@@ -191,7 +193,7 @@ mbv_dfb_window_new(
 	}
 
 	/* set opacity to 100% */
-	DFBCHECK(win->dfb_window->SetOpacity(win->dfb_window, 0xff));
+	DFBCHECK(win->dfb_window->SetOpacity(win->dfb_window, win->opacity));
 
 	/* get the window surface */
 	DFBCHECK(win->dfb_window->GetSurface(win->dfb_window, &win->surface));
@@ -315,6 +317,8 @@ void
 mbv_dfb_window_drawline(struct mbv_window *window,
 	int x1, int y1, int x2, int y2)
 {
+	assert(window != NULL);
+
 	DFBCHECK(window->content->DrawLine(window->content,
 		x1, y1, x2, y2));
 }
@@ -336,7 +340,8 @@ void
 mbv_dfb_window_update(struct mbv_window *window)
 {
 	/* fprintf(stderr, "mbv: Updating window\n"); */
-	DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_WAITFORSYNC |  DSFLIP_BLIT));
+	DFBCHECK(window->surface->Flip(window->surface, NULL,
+		DSFLIP_WAITFORSYNC |  DSFLIP_BLIT));
 }
 
 
@@ -347,7 +352,7 @@ mbv_dfb_window_show(struct mbv_window *window)
 
 	if (!window->visible) {
 		window->visible = 1;
-		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, 0xff));
+		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, window->opacity));
 	}
 
 	DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_WAITFORSYNC |  DSFLIP_BLIT));

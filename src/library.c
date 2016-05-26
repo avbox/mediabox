@@ -90,8 +90,6 @@ mb_library_loadlist(const char *path)
 	resolved_path_len = strlen(resolved_path);
 	free(rpath);
 
-	fprintf(stderr, "mb_library: Opening %s\n", resolved_path);
-
 	if ((dir = opendir(resolved_path)) == NULL) {
 		fprintf(stderr, "mb_library: opendir() failed\n");
 		return -1;
@@ -145,7 +143,6 @@ mb_library_loadlist(const char *path)
 		strcat(filepath, "/");
 		strcat(filepath, ent->d_name);
 
-		fprintf(stderr, "Stating %s\n", filepath);
 		if (stat(filepath, &st) == -1) {
 			fprintf(stderr, "mb_library: stat() failed errno=%i\n", errno);
 			free(filepath);
@@ -169,8 +166,7 @@ mb_library_loadlist(const char *path)
 			return -1;
 		}
 
-		fprintf(stderr, "mb_library: Adding %s\n", title);
-
+		/* add item to menu */
 		mb_ui_menu_additem(menu, title, filepathrel);
 
 		free(filepath);
@@ -187,7 +183,7 @@ mb_library_loadlist(const char *path)
 int
 mb_library_init(void)
 {
-	/* create a new window for the menu dialog */
+	/* create a new window for the library dialog */
 	window = mbv_window_new("::[MEDIA LIBRARY]::",
 		(mbv_screen_width_get() / 2) - 225,
 		(mbv_screen_height_get() / 2) - 225,
@@ -229,8 +225,6 @@ mb_library_showdialog(void)
 				abort(); /* for now */
 			}
 
-			fprintf(stderr, "mb_mainmenu: Selected directory %s\n",
-				selected);
 			/* TODO: free strings first */
 			mb_ui_menu_clearitems(menu);
 			mb_library_loadlist(selected_copy);
@@ -239,7 +233,7 @@ mb_library_showdialog(void)
 		} else {
 			struct mbp* player;
 
-			fprintf(stderr, "mb_mainmenu: Selected %s\n",
+			fprintf(stderr, "mb_library: Selected %s\n",
 				selected);
 
 			/* get the active player instance */

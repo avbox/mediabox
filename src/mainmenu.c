@@ -52,17 +52,8 @@ mb_mainmenu_init(void)
 int
 mb_mainmenu_showdialog(void)
 {
-	int canvas_width, canvas_height;
-
-	/* get the canvas size */
-	mbv_window_getcanvassize(window, &canvas_width, &canvas_height);
-
-	fprintf(stderr, "mb_mainmenu: Canvas size %ix%i\n",
-		canvas_width, canvas_height);
-
 	/* show the menu window */
         mbv_window_show(window);
-
 
 	/* show the menu widget and run it's input loop */
 	if (mb_ui_menu_showdialog(menu) == 0) {
@@ -72,7 +63,9 @@ mb_mainmenu_showdialog(void)
 
 		if (!memcmp("LIB", selected, 4)) {
 			mb_library_init();
+			mbv_window_hide(window);
 			mb_library_showdialog();
+			mbv_window_show(window);
 			mb_library_destroy();
 		} else {
 			fprintf(stderr, "mb_mainmenu: Selected %s\n",
