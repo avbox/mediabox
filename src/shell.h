@@ -1,6 +1,14 @@
 #ifndef __MB_SHELL_H__
 #define __MB_SHELL_H__
 
+
+/**
+ * mbs_get_active_player() -- Gets the currently active player instance.
+ */
+struct mbp *
+mbs_get_active_player(void);
+
+
 /**
  * mbs_init() -- Initialize the MediaBox shell
  */

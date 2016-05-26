@@ -19,6 +19,16 @@ static struct mbp *player = NULL;
 
 
 /**
+ * mbs_get_active_player() -- Gets the currently active player instance.
+ */
+struct mbp *
+mbs_get_active_player(void)
+{
+	return player;
+}
+
+
+/**
  * mbs_init() -- Initialize the MediaBox shell
  */
 int

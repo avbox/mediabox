@@ -63,6 +63,7 @@ mb_mainmenu_showdialog(void)
 	/* show the menu window */
         mbv_window_show(window);
 
+
 	/* show the menu widget and run it's input loop */
 	if (mb_ui_menu_showdialog(menu) == 0) {
 		char *selected = mb_ui_menu_getselected(menu);

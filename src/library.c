@@ -13,12 +13,44 @@
 #include "video.h"
 #include "input.h"
 #include "ui-menu.h"
+#include "shell.h"
+#include "player.h"
 
 
 static struct mbv_window *window = NULL;
 static struct mb_ui_menu *menu = NULL;
 
 #define LIBRARY_ROOT "/media/UPnP"
+
+
+/**
+ * mb_library_stripext() -- Strip a file extension IN PLACE
+ * and return a pointer to the extension.
+ */
+static char *
+mb_library_stripext(char *filename)
+{
+	char *p;
+
+	assert(filename != NULL);
+
+	if (filename[0] == '.' && filename[1] == '.' && filename[2] == '\0') {
+		return NULL;
+	}
+
+	p = filename + strlen(filename);
+	assert(*p == '\0');
+
+	while (p != filename && *p != '.') {
+		p--;
+	}
+
+	if (*p == '.') {
+		*p = '\0';
+		return ++p;
+	}
+	return NULL;
+}
 
 
 static int
@@ -66,7 +98,7 @@ mb_library_loadlist(const char *path)
 	}
 
 	while ((ent = readdir(dir)) != NULL) {
-		char *filepath, *filepathrel;
+		char *filepath, *filepathrel, *title, *ext;
 		struct stat st;
 
 		/* do not show dot directories except .. */
@@ -81,10 +113,30 @@ mb_library_loadlist(const char *path)
 			continue;
 		}
 
+		/* get a copy of the filename (this will be the title) */
+		title = strdup(ent->d_name);
+		if (title == NULL) {
+			fprintf(stderr, "mb_library: Out of memory\n");
+			closedir(dir);
+			return -1;
+		}
+
+		/* strip the filename extension from the title */
+		ext = mb_library_stripext(title);
+
+		/* do not show subtitles */
+		if (ext != NULL) {
+			if (!strcasecmp("srt", ext) || !strcasecmp("sub", ext)) {
+				free(title);
+				continue;
+			}
+		}
+
 		/* allocate mem for a copy of the filepath */
 		filepath = malloc(resolved_path_len + strlen(ent->d_name) + 3);
 		if (filepath == NULL) {
 			fprintf(stderr, "mb_library: Out of memory\n");
+			free(title);
 			closedir(dir);
 			return -1;
 		}
@@ -97,29 +149,32 @@ mb_library_loadlist(const char *path)
 		if (stat(filepath, &st) == -1) {
 			fprintf(stderr, "mb_library: stat() failed errno=%i\n", errno);
 			free(filepath);
+			free(title);
 			continue;
 		}
 
 		if (S_ISDIR(st.st_mode)) {
 			strcat(filepath, "/");
+			/* This needs to be destroyed when it's no longer needed. The
+			 * ref to it is on the menu widget's item list */
+			filepathrel = strdup(filepath + sizeof(LIBRARY_ROOT) - 1);
+		} else {
+			filepathrel = strdup(filepath);
 		}
-
-		/* This needs to be destroyed when it's no longer needed. The
-		 * ref to it is on the menu widget's item list */
-		filepathrel = strdup(filepath + sizeof(LIBRARY_ROOT) - 1);
 		if (filepathrel == NULL) {
 			fprintf(stderr, "mb_library: Out of memory\n");
 			free(filepath);
+			free(title);
 			closedir(dir);
 			return -1;
 		}
 
-		fprintf(stderr, "mb_library: Adding %s\n",
-			ent->d_name);
+		fprintf(stderr, "mb_library: Adding %s\n", title);
 
-		mb_ui_menu_additem(menu, ent->d_name, filepathrel);
+		mb_ui_menu_additem(menu, title, filepathrel);
 
 		free(filepath);
+		free(title);
 	}
 	closedir(dir);
 	return 0;
@@ -133,7 +188,7 @@ int
 mb_library_init(void)
 {
 	/* create a new window for the menu dialog */
-	window = mbv_window_new("MEDIA_LIBRARY",
+	window = mbv_window_new("::[MEDIA LIBRARY]::",
 		(mbv_screen_width_get() / 2) - 225,
 		(mbv_screen_height_get() / 2) - 225,
 		450, 450);
@@ -179,11 +234,23 @@ mb_library_showdialog(void)
 			/* TODO: free strings first */
 			mb_ui_menu_clearitems(menu);
 			mb_library_loadlist(selected_copy);
-			mbv_window_show(window);
+			mbv_window_update(window);
 	
 		} else {
+			struct mbp* player;
+
 			fprintf(stderr, "mb_mainmenu: Selected %s\n",
 				selected);
+
+			/* get the active player instance */
+			player = mbs_get_active_player();
+			if (player == NULL) {
+				fprintf(stderr, "mb_library: Could not get active player\n");
+				break;
+			}
+
+			mbp_play(player, selected);
+			break;
 		}
 	}
 

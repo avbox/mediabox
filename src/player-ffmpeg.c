@@ -373,6 +373,7 @@ mb_player_playback_thread(void *arg)
 		if (inst->action != MB_PLAYER_ACTION_NONE) {
 
 			if (inst->action & MB_PLAYER_ACTION_STOP) {
+				inst->action &= ~MB_PLAYER_ACTION_STOP;
 				goto decoder_exit;
 			}
 
@@ -393,6 +394,8 @@ decoder_exit:
 	fprintf(stderr, "mb_player[ffmpeg]: Decoder exiting\n");
 	memset(inst->buf, 0, inst->bufsz);
 	mb_player_renderframe(inst);
+
+	inst->action = MB_PLAYER_ACTION_NONE;
 
 	/* cleanup */
 	if (buf != NULL) {
@@ -464,6 +467,11 @@ mbp_play(struct mbp *inst, const char * const path)
 		}
 		fprintf(stderr, "mbp_play() failed -- NULL path\n");
 		return -1;
+	}
+
+	/* if we're already playing a file stop it first */
+	if (inst->status != MB_PLAYER_STATUS_READY) {
+		mbp_stop(inst);
 	}
 
 	/* initialize player object */
