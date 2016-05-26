@@ -121,9 +121,8 @@ mbv_dfb_window_blit_buffer(
 	dsc.preallocated[0].pitch = width * 4;
 	dsc.preallocated[1].data = NULL;
 	dsc.preallocated[1].pitch = 0;
-	if (surface == NULL) {
+
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
-	}
 	DFBCHECK(window->content->Blit(window->content, surface, NULL, 0, 0));
 	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
 	//DFBCHECK(surface->Release(surface));
@@ -187,7 +186,7 @@ mbv_dfb_window_new(
 	win->font_height = DEFAULT_FONT_HEIGHT;
 	win->opacity = (uint8_t) ((0xFF * 80) / 100);
 
-	if (0 && root_window == NULL) {
+	if (root_window == NULL) {
 		DFBCHECK(layer->GetWindow(layer, 1, &win->dfb_window));
 	} else {
 		DFBCHECK(layer->CreateWindow(layer, &window_desc, &win->dfb_window));
@@ -200,8 +199,12 @@ mbv_dfb_window_new(
 	DFBCHECK(win->dfb_window->GetSurface(win->dfb_window, &win->surface));
 
 	/* set basic drawing flags */
+	if (root_window == NULL) {
+		DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_BLEND_ALPHACHANNEL));
+	} else {
+		DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_NOFX));
+	}
 	DFBCHECK(win->surface->SetPorterDuff(win->surface, DSPD_SRC_OVER));
-	DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_BLEND_ALPHACHANNEL));
 	DFBCHECK(win->surface->SetDrawingFlags(win->surface, DSDRAW_BLEND));
 
 	/* clear window */
