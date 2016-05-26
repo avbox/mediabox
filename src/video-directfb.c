@@ -452,6 +452,9 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &primary));
 	DFBCHECK(primary->GetSize(primary, &screen_width, &screen_height));
 	DFBCHECK(primary->Release(primary));
+	if (screen_width > 1280) {
+		DFBCHECK(dfb->SetVideoMode(dfb, 1280, 768, 32));
+	}
 	#endif
 
 	/* enumerate display layers */
