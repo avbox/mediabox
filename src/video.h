@@ -14,6 +14,7 @@ int
 mbv_window_blit_buffer(
 	struct mbv_window *window, void *buf, int width, int height);
 
+
 struct mbv_window*
 mbv_window_new(
 	char *title,
@@ -28,6 +29,10 @@ mbv_window_getchildwindow(struct mbv_window *window,
 	int x, int y, int width, int height);
 
 
+void
+mbv_window_update(struct mbv_window *window);
+
+
 struct mbv_window*
 mbv_getrootwindow(void);
 
@@ -36,8 +41,7 @@ mbv_getrootwindow(void);
  * mbv_window_clear() -- Clear the window surface
  */
 void
-mbv_window_clear(struct mbv_window *win,
-	unsigned char r, unsigned char g, unsigned char b, unsigned char a);
+mbv_window_clear(struct mbv_window *win, uint32_t color);
 
 
 void

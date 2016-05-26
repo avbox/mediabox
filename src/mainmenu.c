@@ -2,12 +2,14 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <assert.h>
 #include <unistd.h>
 
 
 #include "video.h"
 #include "input.h"
 #include "ui-menu.h"
+#include "library.h"
 
 
 static struct mbv_window *window = NULL;
@@ -38,10 +40,10 @@ mb_mainmenu_init(void)
 	}
 
 	/* populate the menu */
-	mb_ui_menu_additem(menu, "MEDIA LIBRARY", NULL);
-	mb_ui_menu_additem(menu, "DVD PLAYER", NULL);
-	mb_ui_menu_additem(menu, "DIGITAL VIDEO RECORDER", NULL);
-	mb_ui_menu_additem(menu, "PIRATE BOX", NULL);
+	mb_ui_menu_additem(menu, "MEDIA LIBRARY", "LIB");
+	mb_ui_menu_additem(menu, "DVD PLAYER", "DVD");
+	mb_ui_menu_additem(menu, "DIGITAL VIDEO RECORDER", "DVR");
+	mb_ui_menu_additem(menu, "PIRATE BOX", "PIR");
 
 	return 0;
 }
@@ -63,7 +65,18 @@ mb_mainmenu_showdialog(void)
 
 	/* show the menu widget and run it's input loop */
 	if (mb_ui_menu_showdialog(menu) == 0) {
-		fprintf(stderr, "mb_mainmenu: Menu item selected\n");
+		char *selected = mb_ui_menu_getselected(menu);
+
+		assert(selected != NULL);
+
+		if (!memcmp("LIB", selected, 4)) {
+			mb_library_init();
+			mb_library_showdialog();
+			mb_library_destroy();
+		} else {
+			fprintf(stderr, "mb_mainmenu: Selected %s\n",
+				selected);
+		}
 	}
 
 	/* hide the mainmenu window */

@@ -145,8 +145,8 @@ mbv_dfb_window_new(
 	DFBWindowDescription window_desc = {
 		.flags = DWDESC_POSX | DWDESC_POSY | DWDESC_WIDTH | DWDESC_HEIGHT |
 			 DWDESC_CAPS | DWDESC_SURFACE_CAPS,
-		.caps = DWCAPS_ALPHACHANNEL | DWCAPS_DOUBLEBUFFER /*| DWCAPS_NODECORATION */,
-		.surface_caps = 0 /*DSCAPS_PRIMARY | DSCAPS_PREMULTIPLIED | DSCAPS_VIDEOONLY */,
+		.caps = DWCAPS_ALPHACHANNEL | DWCAPS_DOUBLEBUFFER | DWCAPS_NODECORATION,
+		.surface_caps = /*DSCAPS_PRIMARY |*/ DSCAPS_PREMULTIPLIED | DSCAPS_VIDEOONLY,
 		.posx = posx,
 		.posy = posy,
 		.width = width,
@@ -292,13 +292,9 @@ mbv_dfb_window_getchildwindow(struct mbv_window *window,
 
 
 void
-mbv_dfb_window_clear(struct mbv_window *win,
-	unsigned char r,
-	unsigned char g,
-	unsigned char b,
-	unsigned char a)
+mbv_dfb_window_clear(struct mbv_window *win, uint32_t color)
 {
-	DFBCHECK(win->content->Clear(win->content, r, g, b, a));
+	DFBCHECK(win->content->Clear(win->content, DFBCOLOR(color)));
 	DFBCHECK(win->content->Flip(win->content, NULL, 0));
 }
 
@@ -338,6 +334,13 @@ mbv_dfb_window_drawstring(struct mbv_window *window,
 	DFBCHECK(window->content->DrawString(window->content,
 		str, -1, x, y, DSTF_TOP | DSTF_CENTER));
 	DFBCHECK(window->content->Flip(window->content, NULL, 0));
+}
+
+
+void
+mbv_dfb_window_update(struct mbv_window *window)
+{
+	DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_WAITFORSYNC));	
 }
 
 

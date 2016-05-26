@@ -47,15 +47,17 @@ mbv_getrootwindow(void)
 }
 
 void
-mbv_window_clear(struct mbv_window *win,
-	unsigned char r,
-	unsigned char g,
-	unsigned char b,
-	unsigned char a)
+mbv_window_clear(struct mbv_window *win, uint32_t color)
 {
-	mbv_dfb_window_clear(win, r, g, b, a);
+	mbv_dfb_window_clear(win, color);
 }
 
+
+void
+mbv_window_update(struct mbv_window *window)
+{
+	mbv_dfb_window_update(window);
+}
 
 void
 mbv_window_getcanvassize(struct mbv_window *window,

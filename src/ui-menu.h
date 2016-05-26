@@ -5,6 +5,14 @@
 struct mb_ui_menu;
 
 
+void *
+mb_ui_menu_getselected(struct mb_ui_menu *inst);
+
+
+void
+mb_ui_menu_clearitems(struct mb_ui_menu *inst);
+
+
 int
 mb_ui_menu_additem(struct mb_ui_menu *inst, char *name, void *data);
 

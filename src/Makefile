@@ -36,7 +36,8 @@ SOURCES=main.o \
 	player-ffmpeg.o \
 	shell.o \
 	ui-menu.o \
-	mainmenu.o
+	mainmenu.o \
+	library.o
 
 all: kernel
 

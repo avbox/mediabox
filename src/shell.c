@@ -50,7 +50,7 @@ mbs_show_dialog(void)
 	mbi_event e;
 
 	/* show the root window */
-	mbv_window_clear(root_window, 0x00, 0x00, 0x00, 0x00);
+	mbv_window_clear(root_window, 0x00000000);
 	mbv_window_setcolor(root_window, 0x8080ffff);
 	mbv_window_drawline(root_window, 0, mbv_screen_height_get() / 2,
 		mbv_screen_width_get() - 1, mbv_screen_height_get() / 2);
