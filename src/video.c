@@ -14,9 +14,10 @@ mbv_window_getsize(struct mbv_window *window, int *width, int *height)
 
 int
 mbv_window_blit_buffer(
-	struct mbv_window *window, void *buf, int width, int height)
+	struct mbv_window *window, void *buf, int width, int height,
+	int x, int y)
 {
-	return mbv_dfb_window_blit_buffer(window, buf, width, height);
+	return mbv_dfb_window_blit_buffer(window, buf, width, height, x, y);
 }
 
 

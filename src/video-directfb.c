@@ -104,7 +104,7 @@ mbv_dfb_window_getsize(struct mbv_window *window, int *width, int *height)
 int
 mbv_dfb_window_blit_buffer(
 	struct mbv_window *window,
-	void *buf, int width, int height)
+	void *buf, int width, int height, int x, int y)
 {
 	DFBSurfaceDescription dsc;
 	static IDirectFBSurface *surface = NULL;
@@ -115,7 +115,7 @@ mbv_dfb_window_blit_buffer(
 	dsc.width = width;
 	dsc.height = height;
 	dsc.flags = DSDESC_HEIGHT | DSDESC_WIDTH | DSDESC_PREALLOCATED | DSDESC_PIXELFORMAT;
-	dsc.caps = DSCAPS_NONE | DSCAPS_DOUBLE;
+	dsc.caps = DSCAPS_NONE;
 	dsc.pixelformat = DSPF_RGB32;
 	dsc.preallocated[0].data = buf;
 	dsc.preallocated[0].pitch = width * 4;
@@ -123,9 +123,10 @@ mbv_dfb_window_blit_buffer(
 	dsc.preallocated[1].pitch = 0;
 
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
-	DFBCHECK(window->content->Blit(window->content, surface, NULL, 0, 0));
-	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
-	//DFBCHECK(surface->Release(surface));
+	//DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
+	DFBCHECK(window->content->Blit(window->content, surface, NULL, x, y));
+	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_UPDATE));
+	DFBCHECK(surface->Release(surface));
 
 	return 0;
 }
@@ -199,7 +200,7 @@ mbv_dfb_window_new(
 	DFBCHECK(win->dfb_window->GetSurface(win->dfb_window, &win->surface));
 
 	/* set basic drawing flags */
-	if (root_window == NULL) {
+	if (root_window != NULL) {
 		DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_BLEND_ALPHACHANNEL));
 	} else {
 		DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_NOFX));
@@ -452,9 +453,11 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &primary));
 	DFBCHECK(primary->GetSize(primary, &screen_width, &screen_height));
 	DFBCHECK(primary->Release(primary));
+	/*
 	if (screen_width > 1280) {
 		DFBCHECK(dfb->SetVideoMode(dfb, 1280, 768, 32));
 	}
+	*/
 	#endif
 
 	/* enumerate display layers */

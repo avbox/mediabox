@@ -107,7 +107,7 @@ mb_player_renderframe(struct mbp *inst)
 	}
 
 	mbv_window_blit_buffer(inst->window, inst->buf,
-		inst->width, inst->height);
+		inst->width, inst->height, 0, 0);
 	inst->frames_rendered++;
 }
 #endif
