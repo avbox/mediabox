@@ -124,7 +124,7 @@ mbv_dfb_window_blit_buffer(
 
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
 	DFBCHECK(window->content->Blit(window->content, surface, NULL, 0, 0));
-	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC |  DSFLIP_BLIT));
+	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
 	DFBCHECK(surface->Release(surface));
 
 	return 0;
