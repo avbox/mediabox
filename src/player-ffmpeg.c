@@ -34,7 +34,7 @@
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_RGB32)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_DECODER_BUFFER_FRAMES	(3)
+#define MB_DECODER_BUFFER_FRAMES	(1)
 
 /* set to 1 to decode and render on the same thread.
  * useful for systems with a single core */
@@ -62,10 +62,10 @@ struct mbp
 	uint8_t *buf;
 	int bufsz;
 #if (MB_DECODER_BUFFER_FRAMES > 1)
-	uint8_t *buffers[MB_DECODER_BUFFER_FRAMES];
-	int buffers_state[MB_DECODER_BUFFER_FRAMES];
-	int64_t buffers_pts[MB_DECODER_BUFFER_FRAMES];
-	AVRational buffers_time_base[MB_DECODER_BUFFER_FRAMES];
+	uint8_t *frame_data[MB_DECODER_BUFFER_FRAMES];
+	int frame_state[MB_DECODER_BUFFER_FRAMES];
+	int64_t frame_pts[MB_DECODER_BUFFER_FRAMES];
+	AVRational frame_time_base[MB_DECODER_BUFFER_FRAMES];
 	int cached_frames;
 	int next_read_buf;
 	int next_write_buf;
@@ -108,7 +108,6 @@ mb_player_renderframe(struct mbp *inst)
 
 	mbv_window_blit_buffer(inst->window, inst->buf,
 		inst->width, inst->height);
-	mbv_window_show(inst->window);
 	inst->frames_rendered++;
 }
 #endif
@@ -129,9 +128,9 @@ mb_player_render(void *arg)
 
 	while (!inst->renderer_quit) {
 		/* if there's no frame ready we must wait */
-		if (inst->buffers_state[inst->next_read_buf] != 1) {
+		if (inst->frame_state[inst->next_read_buf] != 1) {
 			pthread_mutex_lock(&inst->renderer_lock);
-			if (inst->buffers_state[inst->next_read_buf] != 1) {
+			if (inst->frame_state[inst->next_read_buf] != 1) {
 				pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
 				pthread_mutex_unlock(&inst->renderer_lock);
 				continue;
@@ -139,15 +138,15 @@ mb_player_render(void *arg)
 			pthread_mutex_unlock(&inst->renderer_lock);
 		}
 
-		frame_pts = inst->buffers_pts[inst->next_read_buf];
-		buf = inst->buffers[inst->next_read_buf];
+		frame_pts = inst->frame_pts[inst->next_read_buf];
+		buf = inst->frame_data[inst->next_read_buf];
 
 		if  (frame_pts != AV_NOPTS_VALUE) {
 			if (last_pts != AV_NOPTS_VALUE) {
 				/* sleep roughly the right amount of time;
 				 * usleep is in microseconds, just like AV_TIME_BASE. */
 				delay = av_rescale_q(frame_pts - last_pts,
-					inst->buffers_time_base[inst->next_read_buf], AV_TIME_BASE_Q);
+					inst->frame_time_base[inst->next_read_buf], AV_TIME_BASE_Q);
 				if (delay > 0 && delay < 1000000) {
 					usleep(delay);
 				}
@@ -162,11 +161,14 @@ mb_player_render(void *arg)
 
 		/* update buffer state and signal decoder */
 		pthread_mutex_lock(&inst->renderer_lock);
-		inst->buffers_state[inst->next_read_buf] = 0;
+		inst->frame_state[inst->next_read_buf] = 0;
 		inst->next_read_buf++;
 		inst->next_read_buf %= MB_DECODER_BUFFER_FRAMES;
+		inst->cached_frames--;
 		pthread_cond_signal(&inst->renderer_signal);
 		pthread_mutex_unlock(&inst->renderer_lock);
+
+		fprintf(stderr, "Buffer %i\r", inst->cached_frames);
 	}
 
 	return NULL;
@@ -420,10 +422,11 @@ mb_player_vdec_thread(void *arg)
 	inst->renderer_quit = 0;
 	inst->next_read_buf = 0;
 	inst->next_write_buf = 0;
+	inst->cached_frames = 0;
 
 	for (i = 0; i < MB_DECODER_BUFFER_FRAMES; i++) {
-		inst->buffers[i] = buf + (i * inst->bufsz);
-		inst->buffers_state[i] = 0;
+		inst->frame_data[i] = buf + (i * inst->bufsz);
+		inst->frame_state[i] = 0;
 	}
 
 	/* we're ready to start decoding, but first let us fire
@@ -465,9 +468,9 @@ mb_player_vdec_thread(void *arg)
 
 #if (MB_DECODER_BUFFER_FRAMES > 1)
 					/* if the renderer has not finished we must wait */
-					while (inst->buffers_state[inst->next_write_buf] != 0) {
+					while (inst->frame_state[inst->next_write_buf] != 0) {
 						pthread_mutex_lock(&inst->renderer_lock);
-						if (inst->buffers_state[inst->next_write_buf] != 0) {
+						if (inst->frame_state[inst->next_write_buf] != 0) {
 							pthread_cond_wait(&inst->renderer_signal,
 								&inst->renderer_lock);
 						}
@@ -477,16 +480,17 @@ mb_player_vdec_thread(void *arg)
 					/* copy picture to buffer */
 					avpicture_layout((const AVPicture*) frame_flt,
 						MB_DECODER_PIX_FMT, inst->width, inst->height,
-						inst->buffers[inst->next_write_buf], inst->bufsz);
+						inst->frame_data[inst->next_write_buf], inst->bufsz);
 
 					/* update the buffer index and signal renderer thread */
 					pthread_mutex_lock(&inst->renderer_lock);
-					inst->buffers_state[inst->next_write_buf] = 1;
-					inst->buffers_pts[inst->next_write_buf] = frame_pts;
-					inst->buffers_time_base[inst->next_write_buf] = 
+					inst->frame_state[inst->next_write_buf] = 1;
+					inst->frame_pts[inst->next_write_buf] = frame_pts;
+					inst->frame_time_base[inst->next_write_buf] = 
 						buffersink_ctx->inputs[0]->time_base;
 					inst->next_write_buf++;
 					inst->next_write_buf %= MB_DECODER_BUFFER_FRAMES;
+					inst->cached_frames++;
 					pthread_cond_signal(&inst->renderer_signal);
 					pthread_mutex_unlock(&inst->renderer_lock);
 
@@ -539,7 +543,7 @@ decoder_exit:
 	pthread_mutex_lock(&inst->renderer_lock);
 	memset(inst->buf, 0, inst->bufsz);
 	for (i = 0; i < MB_DECODER_BUFFER_FRAMES; i++) {
-		inst->buffers_state[i] = 1;
+		inst->frame_state[i] = 1;
 	}
 	pthread_cond_signal(&inst->renderer_signal);
 	pthread_mutex_unlock(&inst->renderer_lock);
@@ -549,12 +553,14 @@ decoder_exit:
 #endif
 
 
+#if (MB_DECODER_BUFFER_FRAMES > 1)
 	/* signal the renderer thread to exit and join it */
 	pthread_mutex_lock(&inst->renderer_lock);
 	inst->renderer_quit = 1;
 	pthread_cond_signal(&inst->renderer_signal);
 	pthread_mutex_unlock(&inst->renderer_lock);
 	pthread_join(inst->renderer_thread, NULL);
+#endif
 
 
 	/* cleanup */
