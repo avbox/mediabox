@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <time.h>
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -19,6 +20,10 @@
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
 
+#include <linux/fb.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
 
 #include "video.h"
 #include "player.h"
@@ -31,21 +36,27 @@
  * formats (on video.h) and add it as an argument to that
  * function. Then use a LUT to map between those and ffmpeg's.
  */
-#define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_RGB32)
+//#define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_RGB565)
+//#define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_RGB32)
+#define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_BGRA)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_DECODER_BUFFER_FRAMES	(5)
+#define MB_DECODER_BUFFER_FRAMES	(3)
 
-/* set to 1 to decode and render on the same thread.
- * useful for systems with a single core */
-/* #define MB_INTHREAD_RENDERING */
+#define MB_DECODER_PRINT_FPS
+
+
+/* render directly to fbdev */
+#define MB_FBDEV_RENDERER
 
 
 enum mb_player_action
 {
-	MB_PLAYER_ACTION_NONE  = 0,
-	MB_PLAYER_ACTION_PAUSE = 1,
-	MB_PLAYER_ACTION_STOP  = 2
+	MB_PLAYER_ACTION_NONE        = 0,
+	MB_PLAYER_ACTION_PAUSE       = 1,
+	MB_PLAYER_ACTION_STOP        = 2,
+	MB_PLAYER_ACTION_FASTFORWARD = 4,
+	MB_PLAYER_ACTION_REWIND      = 8
 };
 
 
@@ -61,14 +72,16 @@ struct mbp
 	int last_err;
 	uint8_t *buf;
 	int bufsz;
+	uint8_t *render_mask;
+	int use_fbdev;
 #if (MB_DECODER_BUFFER_FRAMES > 1)
 	uint8_t *frame_data[MB_DECODER_BUFFER_FRAMES];
 	int frame_state[MB_DECODER_BUFFER_FRAMES];
 	int64_t frame_pts[MB_DECODER_BUFFER_FRAMES];
 	AVRational frame_time_base[MB_DECODER_BUFFER_FRAMES];
-	int cached_frames;
+	int frames_avail;
 	int next_read_buf;
-	int next_write_buf;
+	int decode_frame_index;
 	int renderer_quit;
 	pthread_cond_t renderer_signal;
 	pthread_mutex_t renderer_lock;
@@ -84,6 +97,8 @@ struct mbp
 };
 
 
+static int fbdev;
+
 #if (MB_DECODER_BUFFER_FRAMES == 1)
 static void
 mb_player_renderframe(struct mbp *inst)
@@ -92,6 +107,7 @@ mb_player_renderframe(struct mbp *inst)
 
 	assert(inst != NULL);
 	assert(inst->window != NULL);
+	abort();
 
 	if  (inst->frame_pts != AV_NOPTS_VALUE) {
 		if (inst->last_pts != AV_NOPTS_VALUE) {
@@ -113,6 +129,23 @@ mb_player_renderframe(struct mbp *inst)
 #endif
 
 
+#ifdef MB_DECODER_PRINT_FPS
+static struct timespec
+timediff(struct timespec *start, struct timespec *end)
+{
+	struct timespec temp;
+	if ((end->tv_nsec - start->tv_nsec)<0) {
+		temp.tv_sec = end->tv_sec - start->tv_sec - 1;
+		temp.tv_nsec = 1000000000 + end->tv_nsec - start->tv_nsec;
+	} else {
+		temp.tv_sec = end->tv_sec - start->tv_sec;
+		temp.tv_nsec = end->tv_nsec - start->tv_nsec;
+	}
+	return temp;
+}
+#endif
+
+
 /**
  * mb_player_vrend_thread() -- Video rendering thread.
  */
@@ -123,14 +156,60 @@ mb_player_render(void *arg)
 	uint8_t *buf;
 	int64_t last_pts = AV_NOPTS_VALUE, frame_pts, delay;
 	struct mbp *inst = (struct mbp*) arg;
+#ifdef MB_DECODER_PRINT_FPS
+	struct timespec new_tp, last_tp, elapsed_tp;
+	int frames = 0, fps = 0;
+#endif
+#ifdef MB_FBDEV_RENDERER
+	int bytes_per_pixel = -1;
+	struct fb_fix_screeninfo finfo;
+	struct fb_var_screeninfo vinfo;
+	void *fb_mem = NULL;
+#endif
 
 	assert(inst != NULL);
+
+	if (inst->use_fbdev) {
+		if ((fbdev = open("/dev/fb0", O_RDWR)) != -1) {
+			long screensize;
+			ioctl(fbdev, FBIOGET_VSCREENINFO, &vinfo);
+			ioctl(fbdev, FBIOGET_FSCREENINFO, &finfo);
+			fprintf(stderr, "mb_player[ffmpeg]: bpp=%i\n",
+				vinfo.bits_per_pixel);
+			bytes_per_pixel = vinfo.bits_per_pixel / 8;
+			screensize = vinfo.yres_virtual * finfo.line_length;
+			fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
+				MAP_SHARED, fbdev, (off_t) 0);
+			fprintf(stderr, "byts_per_pixel = %i xoffset=%i yoffset=%i\n",
+				bytes_per_pixel, vinfo.xoffset, vinfo.yoffset);
+
+
+
+int x,y;
+
+	for (x=0;x<vinfo.xres;x++)
+		for (y=0;y<vinfo.yres;y++)
+		{
+			long location = (x+vinfo.xoffset) * (vinfo.bits_per_pixel/8) + (y+vinfo.yoffset) * finfo.line_length;
+			*((uint32_t*)(fb_mem + location)) = 0xFFFFFFFF;
+		}
+
+		} else {
+			inst->use_fbdev = 0;
+		}
+	}
+
+#ifdef MB_DECODER_PRINT_FPS
+	(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
+	(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
+#endif
 
 	while (!inst->renderer_quit) {
 		/* if there's no frame ready we must wait */
 		if (inst->frame_state[inst->next_read_buf] != 1) {
 			pthread_mutex_lock(&inst->renderer_lock);
 			if (inst->frame_state[inst->next_read_buf] != 1) {
+				/*fprintf(stderr, "mb_player[ffmpeg]: Waiting for decoder\n");*/
 				pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
 				pthread_mutex_unlock(&inst->renderer_lock);
 				continue;
@@ -148,30 +227,55 @@ mb_player_render(void *arg)
 				delay = av_rescale_q(frame_pts - last_pts,
 					inst->frame_time_base[inst->next_read_buf], AV_TIME_BASE_Q);
 				if (delay > 0 && delay < 1000000) {
-					//usleep(delay/3);
+					usleep(delay);
 				}
 			}
 			last_pts = frame_pts;
 		}
 
-		/* blit the frame */
-		mbv_window_blit_buffer(inst->window, buf,
-			inst->width, inst->height, 0, 0);
-		inst->frames_rendered++;
+		if (inst->use_fbdev) {
+			//memcpy(fb_mem, buf, inst->width * inst->height * bytes_per_pixel);
+			int x,y;
+
+			for (y = 0;y < vinfo.yres; y++) {
+				for (x=0;x<vinfo.xres;x++) {
+					long location = (x+vinfo.xoffset) * (vinfo.bits_per_pixel/8) + (y+vinfo.yoffset) * finfo.line_length;
+					*((uint32_t*)(fb_mem + location)) = 
+						*(buf + (((inst->width * y) + x) * bytes_per_pixel));
+				}
+			}
+		} else  {
+			/* blit the frame */
+			mbv_window_blit_buffer(inst->window, buf,
+				inst->width, inst->height, 0, 0);
+		}
+
+#ifdef MB_DECODER_PRINT_FPS
+		/* calculate fps */
+		frames++;
+		(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
+		elapsed_tp = timediff(&last_tp, &new_tp);
+		if (elapsed_tp.tv_sec > 0) {
+			(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
+			fps = frames;
+			frames = 0;
+		}
+		fprintf(stderr, "Fps: %i | Frames available: %i\r",
+			fps, inst->frames_avail);
+#endif
 
 		/* update buffer state and signal decoder */
 		pthread_mutex_lock(&inst->renderer_lock);
 		inst->frame_state[inst->next_read_buf] = 0;
 		inst->next_read_buf++;
 		inst->next_read_buf %= MB_DECODER_BUFFER_FRAMES;
-		inst->cached_frames--;
+		inst->frames_avail--;
 		pthread_cond_signal(&inst->renderer_signal);
 		pthread_mutex_unlock(&inst->renderer_lock);
-
-		fprintf(stderr, "Buffer %i\r", inst->cached_frames);
 	}
 
 	return NULL;
+	
 }
 #endif
 
@@ -317,10 +421,11 @@ open_codec_context(int *stream_idx,
    return 0;
 }
 
+void *
+mbv_dfb_getscreenmask();
 
 /**
  * mb_player_vdec_thread() -- This is the main decoding loop
- * TODO: Split into decoding and rendering threads
  */
 static void*
 mb_player_vdec_thread(void *arg)
@@ -421,8 +526,8 @@ mb_player_vdec_thread(void *arg)
 #else
 	inst->renderer_quit = 0;
 	inst->next_read_buf = 0;
-	inst->next_write_buf = 0;
-	inst->cached_frames = 0;
+	inst->decode_frame_index = 0;
+	inst->frames_avail = 0;
 
 	for (i = 0; i < MB_DECODER_BUFFER_FRAMES; i++) {
 		inst->frame_data[i] = buf + (i * inst->bufsz);
@@ -468,9 +573,11 @@ mb_player_vdec_thread(void *arg)
 
 #if (MB_DECODER_BUFFER_FRAMES > 1)
 					/* if the renderer has not finished we must wait */
-					while (inst->frame_state[inst->next_write_buf] != 0) {
+					while (inst->frame_state[inst->decode_frame_index] != 0) {
 						pthread_mutex_lock(&inst->renderer_lock);
-						if (inst->frame_state[inst->next_write_buf] != 0) {
+						if (inst->frame_state[inst->decode_frame_index] != 0) {
+							/* fprintf(stderr, "mb_player[ffmpeg]: "
+								"Waiting for renderer\n"); */
 							pthread_cond_wait(&inst->renderer_signal,
 								&inst->renderer_lock);
 						}
@@ -480,17 +587,26 @@ mb_player_vdec_thread(void *arg)
 					/* copy picture to buffer */
 					avpicture_layout((const AVPicture*) frame_flt,
 						MB_DECODER_PIX_FMT, inst->width, inst->height,
-						inst->frame_data[inst->next_write_buf], inst->bufsz);
+						inst->frame_data[inst->decode_frame_index], inst->bufsz);
+
+					uint8_t *m = (uint8_t*) mbv_dfb_getscreenmask();
+					uint32_t *p = (uint32_t*) inst->frame_data[inst->decode_frame_index];
+					int bufsz = inst->width * inst->height;
+					for (i = 0; i < bufsz; i++) {
+						if (m[i]) {
+							p[i] = 0;
+						}
+					}
 
 					/* update the buffer index and signal renderer thread */
 					pthread_mutex_lock(&inst->renderer_lock);
-					inst->frame_state[inst->next_write_buf] = 1;
-					inst->frame_pts[inst->next_write_buf] = frame_pts;
-					inst->frame_time_base[inst->next_write_buf] = 
+					inst->frame_state[inst->decode_frame_index] = 1;
+					inst->frame_pts[inst->decode_frame_index] = frame_pts;
+					inst->frame_time_base[inst->decode_frame_index] = 
 						buffersink_ctx->inputs[0]->time_base;
-					inst->next_write_buf++;
-					inst->next_write_buf %= MB_DECODER_BUFFER_FRAMES;
-					inst->cached_frames++;
+					inst->decode_frame_index++;
+					inst->decode_frame_index %= MB_DECODER_BUFFER_FRAMES;
+					inst->frames_avail++;
 					pthread_cond_signal(&inst->renderer_signal);
 					pthread_mutex_unlock(&inst->renderer_lock);
 
@@ -729,6 +845,7 @@ mbp_init(void)
 	inst->media_file = NULL;
 	inst->buf = NULL;
 	inst->bufsz = 0;
+	inst->use_fbdev = 1;
 	inst->action = MB_PLAYER_ACTION_NONE;
 	inst->status = MB_PLAYER_STATUS_READY;
 

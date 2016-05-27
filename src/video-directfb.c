@@ -21,15 +21,16 @@ struct mbv_window
 	IDirectFBWindow *dfb_window;
 	IDirectFBSurface *surface;
 	IDirectFBSurface *content;
+	DFBRectangle rect;
 	char *title;
-	int x;
-	int y;
-	int width;
-	int height;
 	int visible;
 	int font_height;
 	uint8_t opacity;
 };
+
+
+static DFBRectangle* rects[10];
+static uint8_t *screen_mask = NULL;
 
 
 IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
@@ -41,7 +42,6 @@ static IDirectFBWindows *windows;
 struct mbv_window *root_window = NULL;
 static int screen_width = 0;
 static int screen_height = 0;
-
 
 #define DFBCHECK(x...)                                         \
 {                                                            \
@@ -60,6 +60,25 @@ static int screen_height = 0;
 	(color >>  8) & 0xFF, \
 	(color      ) & 0xFF
 
+
+static char *
+mbv_dfb_pixfmt_tostring(DFBSurfacePixelFormat fmt)
+{
+	static char pix_fmt[256];
+	switch (fmt) {
+	case DSPF_RGB32:  return "RBG32";
+	case DSPF_RGB24:  return "RGB24";
+	case DSPF_RGB16:  return "RGB16";
+	case DSPF_ARGB:   return "ARGB";
+	case DSPF_RGB332: return "RGB332";
+	case DSPF_YUY2:   return "YUY2";
+	case DSPF_UYVY:   return "UYVY";
+	case DSPF_YV12:   return "YV12";
+	default:
+		sprintf(pix_fmt, "PIXFMT: OTHER: %i", fmt);
+		return pix_fmt;
+	}
+}
 
 /**
  * mb_video_clear()
@@ -89,14 +108,55 @@ mbv_dfb_screen_height_get(void)
 }
 
 
+void
+mbv_dfb_getscreensize(int *w, int *h)
+{
+	*w = screen_width;
+	*h = screen_height;
+}
+
+
+void *
+mbv_dfb_getscreenmask(void *buf)
+{
+	return (void *) screen_mask;
+}
+
+static void
+mbv_dfb_regeneratemask()
+{
+	int i, x, y;
+
+	/* for now one byte per pixel */
+	if (screen_mask == NULL) {
+		screen_mask = malloc(screen_width * screen_height);
+		if (screen_mask == NULL) {
+			fprintf(stderr, "mbv: malloc() failed\n");
+		}
+	}
+
+	memset(screen_mask, 0, screen_width * screen_height);
+
+	for (i = 0; i < 10; i++) {
+		if (rects[i] != NULL) {
+			for (y = rects[i]->y; y < (rects[i]->y + rects[i]->h); y++) {
+				for (x = rects[i]->x; x < (rects[i]->x + rects[i]->w); x++) {
+					*(screen_mask + (y * screen_width) + x) = 1;
+				}
+			}
+		}
+	}
+}
+
+
 int
 mbv_dfb_window_getsize(struct mbv_window *window, int *width, int *height)
 {
 	if (window == NULL) {
 		return -1;
 	}
-	*width = window->width;
-	*height = window->height;
+	*width = window->rect.w;
+	*height = window->rect.h;
 	return 0;
 }
 
@@ -106,6 +166,7 @@ mbv_dfb_window_blit_buffer(
 	struct mbv_window *window,
 	void *buf, int width, int height, int x, int y)
 {
+#if 1	
 	DFBSurfaceDescription dsc;
 	static IDirectFBSurface *surface = NULL;
 
@@ -123,14 +184,29 @@ mbv_dfb_window_blit_buffer(
 	dsc.preallocated[1].pitch = 0;
 
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
-	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
+	//DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
 	DFBCHECK(window->content->Blit(window->content, surface, NULL, x, y));
-	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
+	//DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
 	DFBCHECK(surface->Release(surface));
+#else
+	void *dst;
+	int pitch;
+	DFBCHECK(window->surface->Lock(window->surface, DSLF_READ | DSLF_WRITE, &dst, &pitch));
+	memcpy(dst, buf, height * pitch);
+	DFBCHECK(window->surface->Unlock(window->surface));;
+	//DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_NONE));
+#endif
 
 	return 0;
 }
 
+void *
+autoflip_root(void *arg) {
+	while (1) {
+		DFBCHECK(root_window->surface->Flip(root_window->surface, NULL, DSFLIP_NONE));
+		usleep(33333);
+	}
+}
 
 /**
  * mbv_dfb_window_new() -- Creates a new window
@@ -143,12 +219,13 @@ mbv_dfb_window_new(
 	int width,
 	int height)
 {
+	int i;
 	struct mbv_window *win;
 	DFBWindowDescription window_desc = {
 		.flags = DWDESC_POSX | DWDESC_POSY | DWDESC_WIDTH | DWDESC_HEIGHT |
 			 DWDESC_CAPS | DWDESC_SURFACE_CAPS,
-		.caps = DWCAPS_ALPHACHANNEL | DWCAPS_DOUBLEBUFFER | DWCAPS_NODECORATION,
-		.surface_caps = DSCAPS_PREMULTIPLIED,
+		.caps = /*DWCAPS_ALPHACHANNEL | |*/ /*DWCAPS_DOUBLEBUFFER | */DWCAPS_NODECORATION,
+		.surface_caps = DSCAPS_NONE,
 		.posx = posx,
 		.posy = posy,
 		.width = width,
@@ -156,8 +233,8 @@ mbv_dfb_window_new(
 	};
 
 	/* if this is the root window set as primary */
-	if (0 && root_window == NULL) {
-		window_desc.caps |= DSCAPS_PRIMARY;
+	if (root_window == NULL) {
+		window_desc.surface_caps |= DSCAPS_PRIMARY;
 	}
 
 	/* first allocate the window structure */
@@ -182,31 +259,37 @@ mbv_dfb_window_new(
 	/* initialize window structure */
 	win->parent = NULL;
 	win->visible = 0;
-	win->width = width;
-	win->height = height;
+	win->rect.w = width;
+	win->rect.h = height;
+	win->rect.x = posx;
+	win->rect.y = posy;
 	win->font_height = DEFAULT_FONT_HEIGHT;
-	win->opacity = (uint8_t) ((0xFF * 80) / 100);
+	win->opacity = (uint8_t) ((0xFF * 60) / 100);
 
-	if (0 &&root_window == NULL) {
+	if (0 && root_window == NULL) {
 		DFBCHECK(layer->GetWindow(layer, 1, &win->dfb_window));
 	} else {
 		DFBCHECK(layer->CreateWindow(layer, &window_desc, &win->dfb_window));
 	}
 
 	/* set opacity to 100% */
-	DFBCHECK(win->dfb_window->SetOpacity(win->dfb_window, win->opacity));
+	if (root_window == NULL) {
+		DFBCHECK(win->dfb_window->SetOpacity(win->dfb_window, 0xff));
+	} else {
+		DFBCHECK(win->dfb_window->SetOpacity(win->dfb_window, win->opacity));
+	}
 
 	/* get the window surface */
 	DFBCHECK(win->dfb_window->GetSurface(win->dfb_window, &win->surface));
 
 	/* set basic drawing flags */
-	if (root_window != NULL) {
-		DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_BLEND_ALPHACHANNEL));
-	} else {
+	//if (root_window != NULL) {
+	//	DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_BLEND_ALPHACHANNEL));
+	//} else {
 		DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_NOFX));
-	}
-	DFBCHECK(win->surface->SetPorterDuff(win->surface, DSPD_SRC_OVER));
-	DFBCHECK(win->surface->SetDrawingFlags(win->surface, DSDRAW_BLEND));
+	//}
+	//DFBCHECK(win->surface->SetPorterDuff(win->surface, DSPD_SRC_OVER));
+	//DFBCHECK(win->surface->SetDrawingFlags(win->surface, DSDRAW_BLEND));
 
 	/* clear window */
 	DFBCHECK(win->surface->Clear(win->surface, 0x33, 0x49, 0xff, 0xFF));
@@ -231,6 +314,14 @@ mbv_dfb_window_new(
 	}
 
 	DFBCHECK(win->content->SetFont(win->content, font));
+
+	for (i = 0; i < 10; i++) {
+		if (rects[i] == NULL) {
+			rects[i] = &win->rect;
+			break;
+		}
+	}
+	mbv_dfb_regeneratemask();
 
 	return win;
 }
@@ -381,6 +472,8 @@ mbv_dfb_window_hide(struct mbv_window *window)
 void
 mbv_dfb_window_destroy(struct mbv_window *window)
 {
+	int i;
+
 	assert(window != NULL);
 
 #ifdef DEBUG_MEMORY
@@ -399,6 +492,14 @@ mbv_dfb_window_destroy(struct mbv_window *window)
 	if (window->parent == NULL) {
 		DFBCHECK(window->dfb_window->Release(window->dfb_window));
 	}
+
+	for (i = 0; i < 10; i++) {
+		if (rects[i] == &window->rect) {
+			rects[i] = NULL;
+		}
+	}
+
+	mbv_dfb_regeneratemask();
 
 	/* free window object */
 	free(window);
@@ -433,31 +534,38 @@ mbv_dfb_window_added(void *context, const DFBWindowInfo info)
 #endif
 
 
+static DFBEnumerationResult
+mbv_dfb_video_mode_callback(int width, int height, int bpp, void *arg)
+{
+	(void) arg;
+	fprintf(stderr, "mbv: Video mode detected %ix%ix%i\n",
+		width, height, bpp);
+	return DFENUM_OK;
+}
+
+
 /**
  * mbv_init() -- Initialize video device
  */
 void
 mbv_dfb_init(int argc, char **argv)
 {
+	int i;
 	DFBCHECK(DirectFBInit(&argc, &argv));
 	DFBCHECK(DirectFBCreate(&dfb));
-	//DFBCHECK(dfb->SetCooperativeLevel(dfb, DFSCL_NORMAL));
-	//DFBCHECK(dfb->SetVideoMode(dfb, 1024, 768, 24));
+	DFBCHECK(dfb->SetCooperativeLevel(dfb, DFSCL_NORMAL));
+	DFBCHECK(dfb->EnumVideoModes(dfb, mbv_dfb_video_mode_callback, NULL));
+	//DFBCHECK(dfb->SetVideoMode(dfb, 1024, 720, 32));
 
 	/* IDirectFBScreen does not return the correct size on SDL */
 	#if 1
 	DFBSurfaceDescription dsc;
 	dsc.flags = DSDESC_CAPS;
-	dsc.caps  = DSCAPS_PRIMARY | DSCAPS_FLIPPING;
+	dsc.caps  = DSCAPS_PRIMARY /*| DSCAPS_FLIPPING*/;
 	IDirectFBSurface *primary;
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &primary));
 	DFBCHECK(primary->GetSize(primary, &screen_width, &screen_height));
 	DFBCHECK(primary->Release(primary));
-	/*
-	if (screen_width > 1280) {
-		DFBCHECK(dfb->SetVideoMode(dfb, 1280, 768, 32));
-	}
-	*/
 	#endif
 
 	/* enumerate display layers */
@@ -468,8 +576,8 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(layer->SetCooperativeLevel(layer, DLSCL_ADMINISTRATIVE));
 	DFBCHECK(layer->SetBackgroundColor(layer, 0x00, 0x00, 0x00, 0xff));
 	DFBCHECK(layer->EnableCursor(layer, 0));
-	//DFBCHECK(layer->SetCooperativeLevel(layer, DLSCL_SHARED));
-	DFBCHECK(layer->SwitchContext(layer, DFB_FALSE));
+	DFBCHECK(layer->SetCooperativeLevel(layer, DLSCL_ADMINISTRATIVE));
+	//DFBCHECK(layer->SwitchContext(layer, DFB_FALSE));
 	
 
 	/* load default font */
@@ -501,8 +609,20 @@ mbv_dfb_init(int argc, char **argv)
 		screen_height);
 	if (root_window == NULL) {
 		fprintf(stderr, "Could not create root window\n");
-		//return -1;
+		abort();
 	}
+
+	DFBSurfacePixelFormat pix_fmt;
+	DFBCHECK(root_window->content->GetPixelFormat(root_window->content, &pix_fmt));
+	fprintf(stderr, "PIXFMT: %s\n", mbv_dfb_pixfmt_tostring(pix_fmt));
+
+	mbv_dfb_regeneratemask();
+	for (i = 0; i < 10; i++) {
+		rects[i] = NULL;
+	}
+
+	//pthread_t t;
+	//pthread_create(&t, NULL, autoflip_root, NULL);
 
 
 }
@@ -519,5 +639,6 @@ mbv_dfb_destroy()
 	layer->Release(layer);
 	font->Release(font);
 	dfb->Release(dfb);
+	free(screen_mask);
 }
 
