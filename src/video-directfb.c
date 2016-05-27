@@ -123,9 +123,9 @@ mbv_dfb_window_blit_buffer(
 	dsc.preallocated[1].pitch = 0;
 
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
-	//DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
+	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
 	DFBCHECK(window->content->Blit(window->content, surface, NULL, x, y));
-	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_UPDATE));
+	DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
 	DFBCHECK(surface->Release(surface));
 
 	return 0;
@@ -187,7 +187,7 @@ mbv_dfb_window_new(
 	win->font_height = DEFAULT_FONT_HEIGHT;
 	win->opacity = (uint8_t) ((0xFF * 80) / 100);
 
-	if (root_window == NULL) {
+	if (0 &&root_window == NULL) {
 		DFBCHECK(layer->GetWindow(layer, 1, &win->dfb_window));
 	} else {
 		DFBCHECK(layer->CreateWindow(layer, &window_desc, &win->dfb_window));

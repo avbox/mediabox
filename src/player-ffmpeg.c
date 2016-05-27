@@ -34,7 +34,7 @@
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_RGB32)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_DECODER_BUFFER_FRAMES	(1)
+#define MB_DECODER_BUFFER_FRAMES	(5)
 
 /* set to 1 to decode and render on the same thread.
  * useful for systems with a single core */
@@ -148,7 +148,7 @@ mb_player_render(void *arg)
 				delay = av_rescale_q(frame_pts - last_pts,
 					inst->frame_time_base[inst->next_read_buf], AV_TIME_BASE_Q);
 				if (delay > 0 && delay < 1000000) {
-					usleep(delay);
+					//usleep(delay/3);
 				}
 			}
 			last_pts = frame_pts;
@@ -156,7 +156,7 @@ mb_player_render(void *arg)
 
 		/* blit the frame */
 		mbv_window_blit_buffer(inst->window, buf,
-			inst->width, inst->height);
+			inst->width, inst->height, 0, 0);
 		inst->frames_rendered++;
 
 		/* update buffer state and signal decoder */
