@@ -5,17 +5,25 @@
 
 struct mbv_window;
 
+
 /**
  * mb_video_clear()
  */
 void
 mbv_dfb_clear(void);
 
+
+int
+mbv_dfb_isfbdev(void);
+
+
 int
 mbv_dfb_screen_width_get(void);
 
+
 int
 mbv_dfb_screen_height_get(void);
+
 
 void
 mbv_dfb_window_clear(struct mbv_window *win, uint32_t color);
@@ -24,8 +32,10 @@ mbv_dfb_window_clear(struct mbv_window *win, uint32_t color);
 void
 mbv_dfb_window_update(struct mbv_window *window);
 
+
 int
 mbv_dfb_window_getsize(struct mbv_window *window, int *width, int *height);
+
 
 int
 mbv_dfb_window_blit_buffer(

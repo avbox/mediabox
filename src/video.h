@@ -11,18 +11,18 @@ mbv_window_getsize(struct mbv_window *window, int *width, int *height);
 
 
 int
+mbv_isfbdev(void);
+
+
+int
 mbv_window_blit_buffer(
 	struct mbv_window *window, void *buf, int width, int height,
 	int x, int y);
 
 
 struct mbv_window*
-mbv_window_new(
-	char *title,
-	int x,
-	int y,
-	int width,
-	int height);
+mbv_window_new(char *title,
+	int x, 	int y, int width, int height);
 
 
 struct mbv_window*
@@ -61,6 +61,7 @@ mbv_window_getcanvassize(struct mbv_window *window,
 void
 mbv_window_setcolor(struct mbv_window *window, uint32_t color);
 
+
 void
 mbv_window_drawline(struct mbv_window *window,
 	int x1, int y1, int x2, int y2);
@@ -74,17 +75,22 @@ mbv_window_drawstring(struct mbv_window *window,
 void
 mbv_window_destroy(struct mbv_window *win);
 
+
 void
 mbv_clear(void);
+
 
 int
 mbv_screen_width_get(void);
 
+
 int
 mbv_screen_height_get(void);
 
+
 void
 mbv_init(int argc, char **argv);
+
 
 void
 mbv_destroy();

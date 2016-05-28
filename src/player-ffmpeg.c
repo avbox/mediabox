@@ -97,8 +97,6 @@ struct mbp
 };
 
 
-static int fbdev;
-
 #if (MB_DECODER_BUFFER_FRAMES == 1)
 static void
 mb_player_renderframe(struct mbp *inst)
@@ -145,6 +143,10 @@ timediff(struct timespec *start, struct timespec *end)
 }
 #endif
 
+void *
+mbv_dfb_getscreenmask();
+
+
 
 /**
  * mb_player_vrend_thread() -- Video rendering thread.
@@ -161,7 +163,8 @@ mb_player_render(void *arg)
 	int frames = 0, fps = 0;
 #endif
 #ifdef MB_FBDEV_RENDERER
-	int bytes_per_pixel = -1;
+	int fd;
+	long screensize;
 	struct fb_fix_screeninfo finfo;
 	struct fb_var_screeninfo vinfo;
 	void *fb_mem = NULL;
@@ -170,30 +173,23 @@ mb_player_render(void *arg)
 	assert(inst != NULL);
 
 	if (inst->use_fbdev) {
-		if ((fbdev = open("/dev/fb0", O_RDWR)) != -1) {
-			long screensize;
-			ioctl(fbdev, FBIOGET_VSCREENINFO, &vinfo);
-			ioctl(fbdev, FBIOGET_FSCREENINFO, &finfo);
-			fprintf(stderr, "mb_player[ffmpeg]: bpp=%i\n",
-				vinfo.bits_per_pixel);
-			bytes_per_pixel = vinfo.bits_per_pixel / 8;
-			screensize = vinfo.yres_virtual * finfo.line_length;
-			fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
-				MAP_SHARED, fbdev, (off_t) 0);
-			fprintf(stderr, "byts_per_pixel = %i xoffset=%i yoffset=%i\n",
-				bytes_per_pixel, vinfo.xoffset, vinfo.yoffset);
-
-
-
-int x,y;
-
-	for (x=0;x<vinfo.xres;x++)
-		for (y=0;y<vinfo.yres;y++)
-		{
-			long location = (x+vinfo.xoffset) * (vinfo.bits_per_pixel/8) + (y+vinfo.yoffset) * finfo.line_length;
-			*((uint32_t*)(fb_mem + location)) = 0xFFFFFFFF;
-		}
-
+		if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
+			if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
+				ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1) {
+				fprintf(stderr, "mb_player[ffmpeg]: ioctl() failed. "
+					"Direct rendering disabled\n");
+				inst->use_fbdev = 0;
+			} else {
+				screensize = vinfo.yres_virtual * finfo.line_length;
+				fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
+					MAP_SHARED, fd, (off_t) 0);
+				if (fb_mem == MAP_FAILED) {
+					fprintf(stderr, "mb_player[ffmpeg]: mmap() failed. "
+						"Direct rendering disabled\n");
+					inst->use_fbdev = 0;
+					close(fd);
+				}
+			}
 		} else {
 			inst->use_fbdev = 0;
 		}
@@ -234,14 +230,21 @@ int x,y;
 		}
 
 		if (inst->use_fbdev) {
-			//memcpy(fb_mem, buf, inst->width * inst->height * bytes_per_pixel);
-			int x,y;
+			int x, y, pixelsz;
+			uint8_t *m = (uint8_t*) mbv_dfb_getscreenmask();
 
-			for (y = 0;y < vinfo.yres; y++) {
-				for (x=0;x<vinfo.xres;x++) {
-					long location = (x+vinfo.xoffset) * (vinfo.bits_per_pixel/8) + (y+vinfo.yoffset) * finfo.line_length;
-					*((uint32_t*)(fb_mem + location)) = 
-						*(buf + (((inst->width * y) + x) * bytes_per_pixel));
+			pixelsz = vinfo.bits_per_pixel / CHAR_BIT;
+
+			for (y = 0; y < vinfo.yres; y++) {
+				for (x = 0; x < vinfo.xres; x++) {
+					if (!m[(inst->width * y) + x]) {
+						long location = (x+vinfo.xoffset) *
+							pixelsz + (y+vinfo.yoffset) *
+							finfo.line_length;
+						uint32_t *ppix = (uint32_t*) buf;
+						*((uint32_t*)(fb_mem + location)) = 
+							*(ppix + (((inst->width * y) + x)));
+					}
 				}
 			}
 		} else  {
@@ -272,6 +275,11 @@ int x,y;
 		inst->frames_avail--;
 		pthread_cond_signal(&inst->renderer_signal);
 		pthread_mutex_unlock(&inst->renderer_lock);
+	}
+
+	/* denitialize fbdev */
+	if (inst->use_fbdev) {
+		close(fd);
 	}
 
 	return NULL;
@@ -421,8 +429,6 @@ open_codec_context(int *stream_idx,
    return 0;
 }
 
-void *
-mbv_dfb_getscreenmask();
 
 /**
  * mb_player_vdec_thread() -- This is the main decoding loop
@@ -589,6 +595,7 @@ mb_player_vdec_thread(void *arg)
 						MB_DECODER_PIX_FMT, inst->width, inst->height,
 						inst->frame_data[inst->decode_frame_index], inst->bufsz);
 
+					#if 0
 					uint8_t *m = (uint8_t*) mbv_dfb_getscreenmask();
 					uint32_t *p = (uint32_t*) inst->frame_data[inst->decode_frame_index];
 					int bufsz = inst->width * inst->height;
@@ -597,6 +604,7 @@ mb_player_vdec_thread(void *arg)
 							p[i] = 0;
 						}
 					}
+					#endif
 
 					/* update the buffer index and signal renderer thread */
 					pthread_mutex_lock(&inst->renderer_lock);
@@ -797,6 +805,11 @@ mbp_pause(struct mbp* inst)
 int
 mbp_stop(struct mbp* inst)
 {
+	/* if the video is paused then unpause it first. */
+	if (inst->status == MB_PLAYER_STATUS_PAUSED) {
+		mbp_play(inst, NULL);
+	}
+
 	if (inst->status != MB_PLAYER_STATUS_READY) {
 		inst->action |= MB_PLAYER_ACTION_STOP;
 		/* TODO: Don't spin */
@@ -804,6 +817,94 @@ mbp_stop(struct mbp* inst)
 		return 0;
 	}
 	return -1;
+}
+
+
+static void
+mb_player_checkfbdev(struct mbp *inst)
+{
+	gid_t gid;
+	uid_t uid;
+	int root_gained = 0, fd;
+
+	assert(inst != NULL);
+	assert(inst->window != NULL);
+
+	if (!mbv_isfbdev()) {
+		fprintf(stderr, "mb_player[ffmpeg]: WARNING!!: Direct rendering disabled\n");
+		inst->use_fbdev = 0;
+		return;
+	}
+
+	fprintf(stderr, "mb_player[ffmpeg]: Initializing /dev/fb0\n");
+
+	/* try to gain root */
+	if (geteuid() != 0 && getuid() == 0) {
+		fprintf(stderr, "mb_player[ffmpeg]: Gaining root rights\n");
+		gid = getegid();
+		uid = geteuid();
+		if (seteuid(0) == -1 || setegid(0) == -1) {
+			fprintf(stderr, "mb_player[ffmpeg]: Could not get root rights\n");
+		} else {
+			root_gained = 1;
+		}
+	}
+
+	if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
+		struct fb_fix_screeninfo finfo;
+		struct fb_var_screeninfo vinfo;
+		void *fb_mem = NULL;
+		long screensize;
+
+		/* get screeninfo */
+		if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
+			ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1)
+		{
+			fprintf(stderr, "mb_player[ffmpeg]: ioctl() failed\n");
+			inst->use_fbdev = 0;
+			goto end;
+		}
+
+		/* dump some screen info */
+		fprintf(stderr, "mb_player[ffmpeg]: bpp=%i\n", vinfo.bits_per_pixel);
+		fprintf(stderr, "mb_player[ffmpeg]: type=%i\n", finfo.type);
+		fprintf(stderr, "mb_player[ffmpeg]: visual=%i\n", finfo.visual);
+		fprintf(stderr, "mb_player[ffmpeg]: FOURCC (grayscale): '%c%c%c%c'\n",
+			((char*)&vinfo.grayscale)[0], ((char*)&vinfo.grayscale)[1],
+			((char*)&vinfo.grayscale)[2], ((char*)&vinfo.grayscale)[3]);
+		fprintf(stderr, "mb_player[ffmpeg]: xoffset=%i yoffset=%i r=%i g=%i b=%i\n"
+			"mb_player[ffmpeg]: r=%i g=%i b=%i\n",
+			vinfo.xoffset, vinfo.yoffset,
+			vinfo.red.offset, vinfo.green.offset, vinfo.blue.offset,
+			vinfo.red.length, vinfo.green.length, vinfo.blue.length);
+
+		/* try to mmap video memory */
+		screensize = vinfo.yres_virtual * finfo.line_length;
+		fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
+			MAP_SHARED, fd, (off_t) 0);
+		if (fb_mem == MAP_FAILED) {
+			fprintf(stderr, "mb_player[ffmpeg]: mmap() failed\n");
+			inst->use_fbdev = 0;
+			close(fd);
+			goto end;
+		}
+
+		/* framebuffer device is good */
+		inst->use_fbdev = 1;
+
+		/* unmap memory and cleanup */
+		munmap(fb_mem, screensize);
+		close(fd);
+
+	} else {
+		inst->use_fbdev = 0;
+	}
+end:
+	if (root_gained) {
+		if (seteuid(uid) == -1 || setegid(gid) == -1) {
+			fprintf(stderr, "mb_player[ffmpeg]: WARNING!!: Could not drop root rights!\n");
+		}
+	}
 }
 
 
@@ -860,6 +961,10 @@ mbp_init(void)
 		free(inst);
 		return NULL;
 	}
+
+	/* check if the framebuffer device is usable for
+	 * direct rendering */
+	mb_player_checkfbdev(inst);
 
 	return inst;
 }

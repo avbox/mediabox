@@ -14,6 +14,7 @@
 
 #define MEDIA_FILE "/mov.mp4"
 
+
 static struct mbv_window *root_window = NULL;
 static struct mbp *player = NULL;
 
@@ -45,7 +46,6 @@ mbs_init(void)
 	player = mbp_init();
 	if (player == NULL) {
 		fprintf(stderr, "Could not initialize main media player\n");
-		mbv_window_destroy(root_window);
 		return -1;
 	}
 
@@ -138,6 +138,5 @@ void
 mbs_destroy(void)
 {
 	mbp_destroy(player);
-	mbv_window_destroy(root_window);
 }
 

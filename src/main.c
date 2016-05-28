@@ -40,7 +40,7 @@ main (int argc, char **argv)
 	}
 
 	/* drop root prividges after initializing framebuffer */
-	if (getuid() == 0) {
+	if (0 && getuid() == 0) {
 		uid_t mb_uid;
 		gid_t mb_gid;
 

@@ -5,13 +5,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <directfb.h>
-
 #include <directfb_windows.h>
 
-//#define DEBUG_MEMORY
-#define DEFAULT_FONT "/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf"
+/* #define DEBUG_MEMORY */
+#define DEFAULT_FONT        ("/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf")
 #define DEFAULT_FONT_HEIGHT (16)
 #define DEFAULT_FOREGROUND  (0xFFFFFFFF)
+#define DEFAULT_OPACITY     (100)
 
 
 /* window object structure */
@@ -36,12 +36,20 @@ static uint8_t *screen_mask = NULL;
 IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
 static IDirectFBDisplayLayer *layer = NULL;
 static IDirectFBFont *font = NULL;
-#ifdef MULTIAPP
+#ifdef ENABLE_MULTIAPP
 static IDirectFBWindows *windows;
 #endif
-struct mbv_window *root_window = NULL;
 static int screen_width = 0;
 static int screen_height = 0;
+static int is_fbdev = 0;
+
+
+static struct mbv_window *root_window = NULL;
+static int root_window_flipper_exit = 0;
+static pthread_t root_window_flipper;
+static pthread_mutex_t root_window_lock = PTHREAD_MUTEX_INITIALIZER;
+
+
 
 #define DFBCHECK(x...)                                         \
 {                                                            \
@@ -80,6 +88,17 @@ mbv_dfb_pixfmt_tostring(DFBSurfacePixelFormat fmt)
 	}
 }
 
+
+/**
+ * mbv_dfb_isfbdev() -- Returns one if we're running on a real framebuffer.
+ */
+int
+mbv_dfb_isfbdev(void)
+{
+	return is_fbdev;
+}
+
+
 /**
  * mb_video_clear()
  */
@@ -94,6 +113,7 @@ mbv_dfb_clear(void)
 }
 
 
+/* DEPRECATED */
 int
 mbv_dfb_screen_width_get(void)
 {
@@ -101,6 +121,7 @@ mbv_dfb_screen_width_get(void)
 }
 
 
+/* DEPRECATED */
 int
 mbv_dfb_screen_height_get(void)
 {
@@ -108,6 +129,9 @@ mbv_dfb_screen_height_get(void)
 }
 
 
+/**
+ * mbv_dfb_getscreensize() -- Gets the screen width and height
+ */
 void
 mbv_dfb_getscreensize(int *w, int *h)
 {
@@ -116,24 +140,30 @@ mbv_dfb_getscreensize(int *w, int *h)
 }
 
 
+/**
+ * mbv_dfb_getscreenmask() -- Gets a pointer to the screen mask.
+ * Please see the description of mbv_dfb_regeneratemask() for more
+ * details
+ */
 void *
 mbv_dfb_getscreenmask(void *buf)
 {
 	return (void *) screen_mask;
 }
 
+
+/**
+ * mbv_dfb_regenerate_mask() -- Generates a mask of all visible windows.
+ * Since rendering video to a DirectFB window is very inneficient the
+ * media player object will render the video directly to the framebuffer
+ * whenever possible. This mask contains areas that are being used by other
+ * windows so that the player doesn't draw over them. TODO: When supported
+ * this should be done in hardware (layers).
+ */
 static void
-mbv_dfb_regeneratemask()
+mbv_dfb_regeneratemask(void)
 {
 	int i, x, y;
-
-	/* for now one byte per pixel */
-	if (screen_mask == NULL) {
-		screen_mask = malloc(screen_width * screen_height);
-		if (screen_mask == NULL) {
-			fprintf(stderr, "mbv: malloc() failed\n");
-		}
-	}
 
 	memset(screen_mask, 0, screen_width * screen_height);
 
@@ -184,7 +214,7 @@ mbv_dfb_window_blit_buffer(
 	dsc.preallocated[1].pitch = 0;
 
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
-	//DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
+	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
 	DFBCHECK(window->content->Blit(window->content, surface, NULL, x, y));
 	//DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
 	DFBCHECK(surface->Release(surface));
@@ -200,13 +230,29 @@ mbv_dfb_window_blit_buffer(
 	return 0;
 }
 
-void *
-autoflip_root(void *arg) {
-	while (1) {
+
+/**
+ * mbv_dfb_autofliproot() -- Tries to flip the root window at 30 Hz.
+ * When we're rendering video to the root window DirectFB may not be able
+ * to keep up with this rate, so by running a separate thread for flipping
+ * the video stays synchronized but some frames get dropped. Hhopefully this
+ * will only be the case when running inside an X server. When running on the
+ * framebuffer the video player should draw directly to the framebuffer).
+ */
+static void *
+mbv_dfb_autofliproot(void *arg)
+{
+	(void) arg;
+
+	while (!root_window_flipper_exit) {
+		pthread_mutex_lock(&root_window_lock);
 		DFBCHECK(root_window->surface->Flip(root_window->surface, NULL, DSFLIP_NONE));
+		pthread_mutex_unlock(&root_window_lock);
 		usleep(33333);
 	}
+	return NULL;
 }
+
 
 /**
  * mbv_dfb_window_new() -- Creates a new window
@@ -264,7 +310,7 @@ mbv_dfb_window_new(
 	win->rect.x = posx;
 	win->rect.y = posy;
 	win->font_height = DEFAULT_FONT_HEIGHT;
-	win->opacity = (uint8_t) ((0xFF * 60) / 100);
+	win->opacity = (uint8_t) ((0xFF * DEFAULT_OPACITY) / 100);
 
 	if (0 && root_window == NULL) {
 		DFBCHECK(layer->GetWindow(layer, 1, &win->dfb_window));
@@ -313,20 +359,28 @@ mbv_dfb_window_new(
 		DFBCHECK(win->content->SetColor(win->content, DFBCOLOR(DEFAULT_FOREGROUND)));
 	}
 
+	/* set the window font */
 	DFBCHECK(win->content->SetFont(win->content, font));
-
+	
+	/* add window to stack and regenerate mask */
 	for (i = 0; i < 10; i++) {
 		if (rects[i] == NULL) {
 			rects[i] = &win->rect;
 			break;
 		}
 	}
-	mbv_dfb_regeneratemask();
+	if (root_window != NULL) {
+		mbv_dfb_regeneratemask();
+	}
 
 	return win;
 }
 
 
+/**
+ * mbv_dfb_window_getcanvassize() -- Gets the width and height of
+ * a window's drawing area.
+ */
 void
 mbv_dfb_window_getcanvassize(struct mbv_window *window,
 	int *width, int *height)
@@ -517,6 +571,9 @@ enum_display_layers(DFBDisplayLayerID id, DFBDisplayLayerDescription desc, void 
 }
 
 
+/**
+ * Gets a pointer to the root window
+ */
 struct mbv_window*
 mbv_dfb_getrootwindow(void)
 {
@@ -555,7 +612,6 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(DirectFBCreate(&dfb));
 	DFBCHECK(dfb->SetCooperativeLevel(dfb, DFSCL_NORMAL));
 	DFBCHECK(dfb->EnumVideoModes(dfb, mbv_dfb_video_mode_callback, NULL));
-	//DFBCHECK(dfb->SetVideoMode(dfb, 1024, 720, 32));
 
 	/* IDirectFBScreen does not return the correct size on SDL */
 	#if 1
@@ -577,9 +633,7 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(layer->SetBackgroundColor(layer, 0x00, 0x00, 0x00, 0xff));
 	DFBCHECK(layer->EnableCursor(layer, 0));
 	DFBCHECK(layer->SetCooperativeLevel(layer, DLSCL_ADMINISTRATIVE));
-	//DFBCHECK(layer->SwitchContext(layer, DFB_FALSE));
 	
-
 	/* load default font */
 	DFBFontDescription font_dsc = { .flags = DFDESC_HEIGHT, .height = 16 };
 	DFBCHECK(dfb->CreateFont(dfb, DEFAULT_FONT, &font_dsc, &font));
@@ -591,7 +645,7 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(screen->Release(screen));
 	#endif
 
-#ifdef MULTIAPP
+#ifdef ENABLE_MULTIAPP
 	/* register a window watcher */
 	DFBWindowsWatcher watcher;
 	memset(&watcher, 0, sizeof(DFBWindowsWatcher));
@@ -602,29 +656,39 @@ mbv_dfb_init(int argc, char **argv)
 
 	/* create root window */
 	root_window = mbv_dfb_window_new(
-		NULL,
-		0,
-		0,
-		screen_width,
-		screen_height);
+		NULL, 0, 0, screen_width, screen_height);
 	if (root_window == NULL) {
 		fprintf(stderr, "Could not create root window\n");
 		abort();
 	}
 
+	/* print the pixel format of the root window */
 	DFBSurfacePixelFormat pix_fmt;
 	DFBCHECK(root_window->content->GetPixelFormat(root_window->content, &pix_fmt));
-	fprintf(stderr, "PIXFMT: %s\n", mbv_dfb_pixfmt_tostring(pix_fmt));
+	fprintf(stderr, "mbv: Root window pixel format: %s\n", mbv_dfb_pixfmt_tostring(pix_fmt));
 
+	/* for now one byte per pixel */
+	screen_mask = malloc(screen_width * screen_height);
+	if (screen_mask == NULL) {
+		fprintf(stderr, "mbv: malloc() failed\n");
+		abort();
+	}
+
+	/* regenerate the screen mask */
 	mbv_dfb_regeneratemask();
 	for (i = 0; i < 10; i++) {
 		rects[i] = NULL;
 	}
 
-	//pthread_t t;
-	//pthread_create(&t, NULL, autoflip_root, NULL);
-
-
+	/* try to detect if we're running inside an X server */
+	/* TODO: Use a more reliable way */
+	is_fbdev = (getenv("DISPLAY") == NULL);
+	if (!is_fbdev) {
+		if (pthread_create(&root_window_flipper, NULL, mbv_dfb_autofliproot, NULL) != 0) {
+			fprintf(stderr, "mbv: Could not create autoflip thread\n");
+			abort();
+		}
+	}
 }
 
 /**
@@ -633,7 +697,13 @@ mbv_dfb_init(int argc, char **argv)
 void
 mbv_dfb_destroy()
 {
-#ifdef MULTIAPP
+	if (!is_fbdev) {
+		root_window_flipper_exit = 1;
+		pthread_join(root_window_flipper, NULL);
+	}
+
+	mbv_dfb_window_destroy(root_window);
+#ifdef ENABLE_MULTIAPP
 	DFBCHECK(windows->Release(windows));
 #endif
 	layer->Release(layer);

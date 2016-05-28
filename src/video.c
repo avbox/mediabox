@@ -13,6 +13,13 @@ mbv_window_getsize(struct mbv_window *window, int *width, int *height)
 
 
 int
+mbv_isfbdev(void)
+{
+	return mbv_dfb_isfbdev();
+}
+
+
+int
 mbv_window_blit_buffer(
 	struct mbv_window *window, void *buf, int width, int height,
 	int x, int y)
@@ -47,6 +54,7 @@ mbv_getrootwindow(void)
 	return mbv_dfb_getrootwindow();
 }
 
+
 void
 mbv_window_clear(struct mbv_window *win, uint32_t color)
 {
@@ -59,6 +67,7 @@ mbv_window_update(struct mbv_window *window)
 {
 	mbv_dfb_window_update(window);
 }
+
 
 void
 mbv_window_getcanvassize(struct mbv_window *window,
@@ -104,11 +113,13 @@ mbv_window_hide(struct mbv_window *win)
 	mbv_dfb_window_hide(win);
 }
 
+
 void
 mbv_window_destroy(struct mbv_window *win)
 {
 	mbv_dfb_window_destroy(win);
 }
+
 
 void
 mbv_clear(void)
@@ -116,11 +127,13 @@ mbv_clear(void)
 	mbv_dfb_clear();
 }
 
+
 int
 mbv_screen_height_get(void)
 {
 	return mbv_dfb_screen_height_get();
 }
+
 
 int
 mbv_screen_width_get(void)
@@ -128,11 +141,13 @@ mbv_screen_width_get(void)
 	return mbv_dfb_screen_width_get();
 }
 
+
 void
 mbv_init(int argc, char **argv)
 {
 	mbv_dfb_init(argc, argv);
 }
+
 
 void
 mbv_destroy()
