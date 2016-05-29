@@ -429,7 +429,7 @@ mb_player_initaudiofilters(
     AVFilterInOut *outputs = avfilter_inout_alloc();
     AVFilterInOut *inputs  = avfilter_inout_alloc();
     static const enum AVSampleFormat out_sample_fmts[] = { AV_SAMPLE_FMT_S16, -1 };
-    static const int64_t out_channel_layouts[] = { AV_CH_LAYOUT_MONO, -1 };
+    static const int64_t out_channel_layouts[] = { AV_CH_LAYOUT_STEREO, -1 };
     static const int out_sample_rates[] = { 48000, -1 };
     const AVFilterLink *outlink;
     AVRational time_base = fmt_ctx->streams[audio_stream_index]->time_base;
@@ -579,7 +579,7 @@ static void*
 mb_player_adec_thread(void *arg)
 {
 	const char *device = "default";
-	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=mono";
+	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
 	int i, audio_stream_index = -1, finished;
 	struct mbp *inst = (struct mbp*) arg;
 	AVFormatContext *fmt_ctx = NULL;;
@@ -598,6 +598,7 @@ mb_player_adec_thread(void *arg)
 	assert(inst->media_file != NULL);
 	assert(inst->window != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_PLAYING);
+	assert(inst->audio_quit == 0);
 
 
 	fprintf(stderr, "mb_player[ffmpeg]: Attempting to audio (%ix%i) '%s'\n",
@@ -652,8 +653,8 @@ mb_player_adec_thread(void *arg)
 	}
 	if ((i = snd_pcm_set_params(handle,
 		SND_PCM_FORMAT_S16,
-		SND_PCM_ACCESS_RW_NONINTERLEAVED,
-		1,
+		SND_PCM_ACCESS_RW_INTERLEAVED,
+		2,
 		48000,
 		1,
 		500000)) < 0) {
@@ -664,7 +665,6 @@ mb_player_adec_thread(void *arg)
 
 	/* signal video thread that we're ready to start */
 	pthread_mutex_lock(&inst->audio_lock);
-	inst->audio_quit = 0;
 	pthread_cond_signal(&inst->audio_signal);
 	pthread_mutex_unlock(&inst->audio_lock);
 
@@ -708,11 +708,9 @@ mb_player_adec_thread(void *arg)
 							goto decoder_exit;
 						}
 
-		void * data[] = { audio_frame_flt->data[0], NULL };
-		frames = snd_pcm_writen(handle, data,
+		frames = snd_pcm_writei(handle, audio_frame_flt->data[0],
 			audio_frame_flt->nb_samples);
 		if (frames < 0) {
-			fprintf(stderr, "writei: %i\n", frames);
 			frames = snd_pcm_recover(handle, frames, 0);
 		}
 		if (frames < 0) {
