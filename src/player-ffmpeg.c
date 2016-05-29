@@ -20,10 +20,16 @@
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
 
+
+/* for direct rendering */
 #include <linux/fb.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+
+
+#include <alsa/asoundlib.h>
+
 
 #include "video.h"
 #include "player.h"
@@ -83,9 +89,13 @@ struct mbp
 	int next_read_buf;
 	int decode_frame_index;
 	int renderer_quit;
+	int audio_quit;
 	pthread_cond_t renderer_signal;
+	pthread_cond_t audio_signal;
 	pthread_mutex_t renderer_lock;
+	pthread_mutex_t audio_lock;
 	pthread_t renderer_thread;
+	pthread_t audio_thread;
 #else
 	int64_t last_pts;
 	int64_t frame_pts;
@@ -179,6 +189,7 @@ mb_player_render(void *arg)
 				fprintf(stderr, "mb_player[ffmpeg]: ioctl() failed. "
 					"Direct rendering disabled\n");
 				inst->use_fbdev = 0;
+				close(fd);
 			} else {
 				screensize = vinfo.yres_virtual * finfo.line_length;
 				fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
@@ -292,7 +303,7 @@ mb_player_render(void *arg)
  * mb_player_initfilters() -- Initialize ffmpeg's filter graph
  */
 static int
-mb_player_initfilters(
+mb_player_initvideofilters(
 	AVFormatContext *fmt_ctx,
 	AVCodecContext *dec_ctx,
 	AVFilterContext **buffersink_ctx,
@@ -305,6 +316,7 @@ mb_player_initfilters(
 	int ret = 0;
 	AVFilter *buffersrc  = avfilter_get_by_name("buffer");
 	AVFilter *buffersink = avfilter_get_by_name("buffersink");
+
 	AVFilterInOut *outputs = avfilter_inout_alloc();
 	AVFilterInOut *inputs  = avfilter_inout_alloc();
 	AVRational time_base = fmt_ctx->streams[stream_index]->time_base;
@@ -390,6 +402,128 @@ end:
 	return ret;
 }
 
+
+static int
+mb_player_initaudiofilters(
+	AVFormatContext *fmt_ctx,
+	AVCodecContext *dec_ctx,
+	AVFilterContext **buffersink_ctx,
+	AVFilterContext **buffersrc_ctx,
+	AVFilterGraph **filter_graph,
+	const char *filters_descr,
+	int audio_stream_index)
+{
+    char args[512];
+    int ret = 0;
+    AVFilter *abuffersrc  = avfilter_get_by_name("abuffer");
+    AVFilter *abuffersink = avfilter_get_by_name("abuffersink");
+    AVFilterInOut *outputs = avfilter_inout_alloc();
+    AVFilterInOut *inputs  = avfilter_inout_alloc();
+    static const enum AVSampleFormat out_sample_fmts[] = { AV_SAMPLE_FMT_S16, -1 };
+    static const int64_t out_channel_layouts[] = { AV_CH_LAYOUT_MONO, -1 };
+    static const int out_sample_rates[] = { 48000, -1 };
+    const AVFilterLink *outlink;
+    AVRational time_base = fmt_ctx->streams[audio_stream_index]->time_base;
+
+    *filter_graph = avfilter_graph_alloc();
+    if (!outputs || !inputs || !*filter_graph) {
+        ret = AVERROR(ENOMEM);
+        goto end;
+    }
+
+    /* buffer audio source: the decoded frames from the decoder will be inserted here. */
+    if (!dec_ctx->channel_layout)
+        dec_ctx->channel_layout = av_get_default_channel_layout(dec_ctx->channels);
+    snprintf(args, sizeof(args),
+            "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
+             time_base.num, time_base.den, dec_ctx->sample_rate,
+             av_get_sample_fmt_name(dec_ctx->sample_fmt), dec_ctx->channel_layout);
+    ret = avfilter_graph_create_filter(buffersrc_ctx, abuffersrc, "in",
+                                       args, NULL, *filter_graph);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot create audio buffer source\n");
+        goto end;
+    }
+
+    /* buffer audio sink: to terminate the filter chain. */
+    ret = avfilter_graph_create_filter(buffersink_ctx, abuffersink, "out",
+                                       NULL, NULL, *filter_graph);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot create audio buffer sink\n");
+        goto end;
+    }
+
+    ret = av_opt_set_int_list(*buffersink_ctx, "sample_fmts", out_sample_fmts, -1,
+                              AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot set output sample format\n");
+        goto end;
+    }
+
+    ret = av_opt_set_int_list(*buffersink_ctx, "channel_layouts", out_channel_layouts, -1,
+                              AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot set output channel layout\n");
+        goto end;
+    }
+
+    ret = av_opt_set_int_list(*buffersink_ctx, "sample_rates", out_sample_rates, -1,
+                              AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot set output sample rate\n");
+        goto end;
+    }
+
+    /*
+     * Set the endpoints for the filter graph. The filter_graph will
+     * be linked to the graph described by filters_descr.
+     */
+    /*
+     * The buffer source output must be connected to the input pad of
+     * the first filter described by filters_descr; since the first
+     * filter input label is not specified, it is set to "in" by
+     * default.
+     */
+    outputs->name       = av_strdup("in");
+    outputs->filter_ctx = *buffersrc_ctx;
+    outputs->pad_idx    = 0;
+    outputs->next       = NULL;
+
+    /*
+     * The buffer sink input must be connected to the output pad of
+     * the last filter described by filters_descr; since the last
+     * filter output label is not specified, it is set to "out" by
+     * default.
+     */
+    inputs->name       = av_strdup("out");
+    inputs->filter_ctx = *buffersink_ctx;
+    inputs->pad_idx    = 0;
+    inputs->next       = NULL;
+
+    if ((ret = avfilter_graph_parse_ptr(*filter_graph, filters_descr,
+                                        &inputs, &outputs, NULL)) < 0)
+        goto end;
+
+    if ((ret = avfilter_graph_config(*filter_graph, NULL)) < 0)
+        goto end;
+
+    /* Print summary of the sink buffer
+     * Note: args buffer is reused to store channel layout string */
+    outlink = (*buffersink_ctx)->inputs[0];
+    av_get_channel_layout_string(args, sizeof(args), -1, outlink->channel_layout);
+    av_log(NULL, AV_LOG_INFO, "Output: srate:%dHz fmt:%s chlayout:%s\n",
+           (int)outlink->sample_rate,
+           (char *)av_x_if_null(av_get_sample_fmt_name(outlink->format), "?"),
+           args);
+
+end:
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+
+    return ret;
+}
+
+
 static int
 open_codec_context(int *stream_idx,
                               AVFormatContext *fmt_ctx, enum AVMediaType type)
@@ -429,6 +563,190 @@ open_codec_context(int *stream_idx,
    return 0;
 }
 
+/**
+ * mb_player_adec_thread() -- This is the main decoding loop
+ */
+static void*
+mb_player_adec_thread(void *arg)
+{
+	const char *device = "default";
+	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=mono";
+	int i, audio_stream_index = -1, finished;
+	struct mbp *inst = (struct mbp*) arg;
+	AVFormatContext *fmt_ctx = NULL;;
+	AVCodecContext *audio_codec_ctx = NULL;
+	AVFrame *audio_frame_nat = NULL, *audio_frame_flt = NULL;
+	AVFilterGraph *audio_filter_graph = NULL;
+	AVFilterContext *audio_buffersink_ctx = NULL;
+	AVFilterContext *audio_buffersrc_ctx = NULL;
+	AVPacket packet, packet1;
+
+	snd_pcm_t *handle = NULL;
+	snd_pcm_sframes_t frames;
+
+
+	assert(inst != NULL);
+	assert(inst->media_file != NULL);
+	assert(inst->window != NULL);
+	assert(inst->status == MB_PLAYER_STATUS_PLAYING);
+
+
+	fprintf(stderr, "mb_player[ffmpeg]: Attempting to audio (%ix%i) '%s'\n",
+		inst->width, inst->height, inst->media_file);
+
+	/* open file */
+	if (avformat_open_input(&fmt_ctx, inst->media_file, NULL, NULL) != 0) {
+		fprintf(stderr, "mb_player[ffmpeg]: Could not open '%s'\n",
+			inst->media_file);
+		goto decoder_exit;
+	}
+
+	if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
+		fprintf(stderr, "mb_player[ffmpeg]: Could not find stream info\n");
+		goto decoder_exit;
+	}
+
+	/* open the audio codec */
+	if (open_codec_context(&audio_stream_index, fmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
+		audio_codec_ctx = fmt_ctx->streams[audio_stream_index]->codec;	
+	}
+	if (audio_codec_ctx == NULL) {
+		goto decoder_exit;
+	}
+
+	/* allocate audio frames */
+	audio_frame_nat = av_frame_alloc(); /* native */
+	if (audio_frame_nat == NULL) {
+		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate audio frames\n");
+		goto decoder_exit;
+	}
+
+	/* initialize video filter graph */
+	fprintf(stderr, "mb_player[ffmpeg]: audio_filters: %s\n",
+		audio_filters);
+	if (mb_player_initaudiofilters(fmt_ctx, audio_codec_ctx,
+		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
+		audio_filters, audio_stream_index) < 0) {
+		fprintf(stderr, "mb_player[ffmpeg]: Could not init filter graph!\n");
+		goto decoder_exit;
+	}
+
+	/* allocate filtered frame */
+	audio_frame_flt = av_frame_alloc();
+	assert(audio_frame_flt != NULL);
+
+	/* initialize alsa device */
+	if ((i = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK, SND_PCM_ASYNC)) < 0) {
+		fprintf(stderr, "mb_player[ffmpeg]: snd_pcm_open() failed, ret=%i\n",
+			i);
+		return NULL;
+	}
+	if ((i = snd_pcm_set_params(handle,
+		SND_PCM_FORMAT_S16,
+		SND_PCM_ACCESS_RW_NONINTERLEAVED,
+		1,
+		48000,
+		1,
+		500000)) < 0) {
+		fprintf(stderr, "mb_player[ffmpeg]: snd_pcm_set_params() failed. ret=%i\n", i);
+		snd_pcm_close(handle);
+		return NULL;
+	}
+
+	/* signal video thread that we're ready to start */
+	pthread_mutex_lock(&inst->audio_lock);
+	inst->audio_quit = 0;
+	pthread_cond_signal(&inst->audio_signal);
+	pthread_mutex_unlock(&inst->audio_lock);
+
+
+	/* start decoding */
+	while (inst->audio_quit == 0 && av_read_frame(fmt_ctx, &packet) >= 0) {
+		if (packet.stream_index == audio_stream_index) {
+
+			packet1 = packet;
+
+			/* decode audio frame */
+			while (packet1.size > 0) {
+				finished = 0;
+				i = avcodec_decode_audio4(audio_codec_ctx, audio_frame_nat,
+					&finished, &packet1);
+				if (i < 0) {
+					av_log(NULL, AV_LOG_ERROR, "Error decoding audio\n");
+					continue;
+				}
+				packet1.size -= i;
+				packet1.data += i;
+
+				if (finished) {
+			                /* push the audio data from decoded frame into the filtergraph */
+					if (av_buffersrc_add_frame_flags(audio_buffersrc_ctx,
+						audio_frame_nat, 0) < 0) {
+						av_log(NULL, AV_LOG_ERROR, "Error while feeding the audio filtergraph\n");
+						break;
+					}
+
+					/* pull filtered audio from the filtergraph */
+					while (1) {
+						i = av_buffersink_get_frame(audio_buffersink_ctx,
+							audio_frame_flt);
+						if (i == AVERROR(EAGAIN) || i == AVERROR_EOF) {
+							av_frame_unref(audio_frame_flt);
+							break;
+						}
+						if (i < 0) {
+							av_frame_unref(audio_frame_flt);
+							goto decoder_exit;
+						}
+
+		void * data[] = { audio_frame_flt->data[0], NULL };
+		frames = snd_pcm_writen(handle, data,
+			audio_frame_flt->nb_samples);
+		if (frames < 0) {
+			fprintf(stderr, "writei: %i\n", frames);
+			frames = snd_pcm_recover(handle, frames, 0);
+		}
+		if (frames < 0) {
+			fprintf(stderr, "mb_player[ffmpeg]: "
+				"snd_pcm_writei() failed: %s\n",
+				snd_strerror(frames));
+			av_frame_unref(audio_frame_flt);
+			abort();
+		}
+		/* free frame */
+		av_frame_unref(audio_frame_flt);
+
+
+
+
+						/*print_frame(filt_frame); */
+					}
+				}
+			}
+		}
+		/* free packet */
+		av_free_packet(&packet);
+	}
+
+decoder_exit:
+	fprintf(stderr, "mb_player[ffmpeg]: Audio decoder exiting\n");
+
+	if (audio_frame_flt != NULL) {
+		av_free(audio_frame_flt);
+	}
+	if (audio_frame_nat != NULL) {
+		av_free(audio_frame_nat);
+	}
+	if (audio_codec_ctx != NULL) {
+		avcodec_close(audio_codec_ctx);
+	}
+	if (fmt_ctx != NULL) {
+		avformat_close_input(&fmt_ctx);
+	}
+
+	return NULL;
+}
+
 
 /**
  * mb_player_vdec_thread() -- This is the main decoding loop
@@ -436,19 +754,18 @@ open_codec_context(int *stream_idx,
 static void*
 mb_player_vdec_thread(void *arg)
 {
-	int i, stream_index, finished;
+	int i, video_stream_index = -1, finished;
 	uint8_t *buf = NULL;
 	struct mbp *inst = (struct mbp*) arg;
-	char filters[512];
+	char video_filters[512];
 	AVFormatContext *fmt_ctx = NULL;;
-	AVCodecContext *codec_ctx_orig = NULL;
-	AVCodecContext *codec_ctx = NULL;
-	AVCodec *codec = NULL;
-	AVFilterGraph *filter_graph = NULL;
-	AVFrame *frame_nat = NULL, *frame_rgb = NULL, *frame_flt = NULL;
-	AVFilterContext *buffersink_ctx = NULL;
-	AVFilterContext *buffersrc_ctx = NULL;
+	AVCodecContext *video_codec_ctx = NULL;
+	AVFrame *video_frame_nat = NULL, *video_frame_flt = NULL;
+	AVFilterGraph *video_filter_graph = NULL;
+	AVFilterContext *video_buffersink_ctx = NULL;
+	AVFilterContext *video_buffersrc_ctx = NULL;
 	AVPacket packet;
+
 
 	assert(inst != NULL);
 	assert(inst->media_file != NULL);
@@ -478,40 +795,35 @@ mb_player_vdec_thread(void *arg)
 		goto decoder_exit;
 	}
 
-	if (open_codec_context(&stream_index, fmt_ctx, AVMEDIA_TYPE_VIDEO) >= 0) {
-		codec_ctx = fmt_ctx->streams[stream_index]->codec;	
-	}
-	if (codec_ctx == NULL) {
-		goto decoder_exit;
-	}
-
 	/* dump file info */
 	av_dump_format(fmt_ctx, 0, inst->media_file, 0);
 
-	/* find decoder */
-	codec = avcodec_find_decoder(codec_ctx->codec_id);
-	if (codec == NULL) {
-		fprintf(stderr, "mb_player[ffmpeg]: Unsupported codec!\n");
+	/* open the video codec */
+	if (open_codec_context(&video_stream_index, fmt_ctx, AVMEDIA_TYPE_VIDEO) >= 0) {
+		video_codec_ctx = fmt_ctx->streams[video_stream_index]->codec;	
+	}
+	if (video_codec_ctx == NULL) {
 		goto decoder_exit;
 	}
 
-	/* initialize filter graph */
-	snprintf(filters, sizeof(filters), "scale='if(gt(a,4/3),%i,-1)':'if(gt(a,4/3),-1,%i)',"
+	/* initialize video filter graph */
+	snprintf(video_filters, sizeof(video_filters),
+		"scale='if(gt(a,4/3),%i,-1)':'if(gt(a,4/3),-1,%i)',"
 		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
 		inst->width, inst->height, inst->width, inst->height);
-	fprintf(stderr, "mb_player[ffmpeg]: filters: %s\n",
-		filters);
-	if (mb_player_initfilters(fmt_ctx, codec_ctx,
-		&buffersink_ctx, &buffersrc_ctx, &filter_graph,
-		filters, stream_index) < 0) {
+	fprintf(stderr, "mb_player[ffmpeg]: video_filters: %s\n",
+		video_filters);
+	if (mb_player_initvideofilters(fmt_ctx, video_codec_ctx,
+		&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
+		video_filters, video_stream_index) < 0) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not init filter graph!\n");
 		goto decoder_exit;
 	}
 
-	/* allocate frames */
-	frame_nat = av_frame_alloc(); /* native */
-	frame_flt = av_frame_alloc(); /* filtered */
-	if (frame_nat == NULL || frame_flt == NULL) {
+	/* allocate video frames */
+	video_frame_nat = av_frame_alloc(); /* native */
+	video_frame_flt = av_frame_alloc(); /* filtered */
+	if (video_frame_nat == NULL || video_frame_flt == NULL) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate frames\n");
 		goto decoder_exit;
 	}
@@ -524,8 +836,8 @@ mb_player_vdec_thread(void *arg)
 		goto decoder_exit;
 	}
 
-	fprintf(stderr, "mb_player[ffmpeg]: codec_ctx: width=%i height=%i pix_fmt=%i\n",
-		inst->width, inst->height, codec_ctx->pix_fmt);
+	fprintf(stderr, "mb_player[ffmpeg]: video_codec_ctx: width=%i height=%i pix_fmt=%i\n",
+		inst->width, inst->height, video_codec_ctx->pix_fmt);
 
 #if (MB_DECODER_BUFFER_FRAMES == 1)
 	inst->last_pts = AV_NOPTS_VALUE;
@@ -550,26 +862,35 @@ mb_player_vdec_thread(void *arg)
 	}
 #endif
 
+	/* start audio thread and wait until it's ready to play */
+	pthread_mutex_lock(&inst->audio_lock);
+	inst->audio_quit = 0;
+	if (pthread_create(&inst->audio_thread, NULL, mb_player_adec_thread, inst) != 0) {
+		abort();
+	}
+	pthread_cond_wait(&inst->audio_signal, &inst->audio_lock);
+	pthread_mutex_unlock(&inst->audio_lock);
+
 	/* start decoding */
 	while (av_read_frame(fmt_ctx, &packet) >= 0) {
-		if (packet.stream_index == stream_index) {
+		if (packet.stream_index == video_stream_index) {
 			/* decode frame */
-			avcodec_decode_video2(codec_ctx, frame_nat, &finished, &packet);
+			avcodec_decode_video2(video_codec_ctx, video_frame_nat, &finished, &packet);
 			if (finished) {
 
-				int64_t frame_pts = frame_nat->pts =
-					av_frame_get_best_effort_timestamp(frame_nat);
+				int64_t frame_pts = video_frame_nat->pts =
+					av_frame_get_best_effort_timestamp(video_frame_nat);
 
 				/* push the decoded frame into the filtergraph */
-				if (av_buffersrc_add_frame_flags(buffersrc_ctx,
-					frame_nat, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+				if (av_buffersrc_add_frame_flags(video_buffersrc_ctx,
+					video_frame_nat, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
 					fprintf(stderr, "mb_player[ffmpeg]: Error feeding filterchain\n");
 					goto decoder_exit;
 				}
 
 				/* pull filtered frames from the filtergraph */
 				while (1) {
-					i = av_buffersink_get_frame(buffersink_ctx, frame_flt);
+					i = av_buffersink_get_frame(video_buffersink_ctx, video_frame_flt);
 					if (i == AVERROR(EAGAIN) || i == AVERROR_EOF) {
 						break;
 					}
@@ -591,7 +912,7 @@ mb_player_vdec_thread(void *arg)
 					}
 
 					/* copy picture to buffer */
-					avpicture_layout((const AVPicture*) frame_flt,
+					avpicture_layout((const AVPicture*) video_frame_flt,
 						MB_DECODER_PIX_FMT, inst->width, inst->height,
 						inst->frame_data[inst->decode_frame_index], inst->bufsz);
 
@@ -611,7 +932,7 @@ mb_player_vdec_thread(void *arg)
 					inst->frame_state[inst->decode_frame_index] = 1;
 					inst->frame_pts[inst->decode_frame_index] = frame_pts;
 					inst->frame_time_base[inst->decode_frame_index] = 
-						buffersink_ctx->inputs[0]->time_base;
+						video_buffersink_ctx->inputs[0]->time_base;
 					inst->decode_frame_index++;
 					inst->decode_frame_index %= MB_DECODER_BUFFER_FRAMES;
 					inst->frames_avail++;
@@ -631,9 +952,9 @@ mb_player_vdec_thread(void *arg)
 					/* render frame */
 					mb_player_renderframe(inst);
 #endif
-					av_frame_unref(frame_flt);
+					av_frame_unref(video_frame_flt);
 				}
-				av_frame_unref(frame_nat);
+				av_frame_unref(video_frame_nat);
 			}
 		}
 		/* free packet */
@@ -686,23 +1007,22 @@ decoder_exit:
 	pthread_join(inst->renderer_thread, NULL);
 #endif
 
+	/* signal and wait for the audio thread to exit */
+	inst->audio_quit = 1;
+	pthread_join(inst->audio_thread, NULL);
 
-	/* cleanup */
 	if (buf != NULL) {
 		av_free(buf);
 		inst->buf = NULL;
 	}
-	if (frame_rgb != NULL) {
-		av_free(frame_rgb);
+	if (video_frame_nat != NULL) {
+		av_free(video_frame_nat);
 	}
-	if (frame_nat != NULL) {
-		av_free(frame_nat);
+	if (video_frame_flt != NULL) {
+		av_free(video_frame_flt);
 	}
-	if (codec_ctx != NULL) {
-		avcodec_close(codec_ctx);
-	}
-	if (codec_ctx_orig != NULL) {
-		avcodec_close(codec_ctx_orig);
+	if (video_codec_ctx != NULL) {
+		avcodec_close(video_codec_ctx);
 	}
 	if (fmt_ctx != NULL) {
 		avformat_close_input(&fmt_ctx);
@@ -713,6 +1033,7 @@ decoder_exit:
 
 	return NULL;
 }
+
 
 
 enum mb_player_status
@@ -954,6 +1275,8 @@ mbp_init(void)
 	if (pthread_mutex_init(&inst->resume_lock, NULL) != 0 ||
 #if (MB_DECODER_BUFFER_FRAMES > 1)
 		pthread_mutex_init(&inst->renderer_lock, NULL) != 0 ||
+		pthread_mutex_init(&inst->audio_lock, NULL) != 0 ||
+		pthread_cond_init(&inst->audio_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->renderer_signal, NULL) != 0 ||
 #endif
 		pthread_cond_init(&inst->resume_signal, NULL) != 0) {

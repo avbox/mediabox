@@ -23,7 +23,7 @@ endif
 
 CFLAGS=-ggdb -std=gnu99 -fno-stack-protector -I/usr/include/directfb -Wunused-variable -Wall
 ASFLAGS=-ggdb
-LDFLAGS=-ldirectfb -pthread -lavutil -lavformat -lavcodec -lswscale -lavfilter -lz -lm
+LDFLAGS=-ldirectfb -pthread -lavutil -lavformat -lavcodec -lswscale -lavfilter -lz -lm -lasound
 
 
 SOURCES=main.o \
