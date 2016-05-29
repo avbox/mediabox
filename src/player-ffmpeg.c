@@ -167,6 +167,7 @@ mb_player_render(void *arg)
 {
 	uint8_t *buf;
 	int64_t last_pts = AV_NOPTS_VALUE, frame_pts, delay;
+	struct timespec last_real_pts, real_pts;
 	struct mbp *inst = (struct mbp*) arg;
 #ifdef MB_DECODER_PRINT_FPS
 	struct timespec new_tp, last_tp, elapsed_tp;
@@ -229,16 +230,24 @@ mb_player_render(void *arg)
 
 		if  (frame_pts != AV_NOPTS_VALUE) {
 			if (last_pts != AV_NOPTS_VALUE) {
+				int64_t elapsed;
 				/* sleep roughly the right amount of time;
 				 * usleep is in microseconds, just like AV_TIME_BASE. */
 				delay = av_rescale_q(frame_pts - last_pts,
 					inst->frame_time_base[inst->next_read_buf], AV_TIME_BASE_Q);
+				(void) clock_gettime(CLOCK_MONOTONIC, &real_pts);
+				elapsed = real_pts.tv_sec * 1000000000LL + real_pts.tv_nsec - 
+					(last_real_pts.tv_sec * 1000000000LL + last_real_pts.tv_nsec);
+				delay -= elapsed / 1000 + (elapsed % 1000 >= 500);
 				if (delay > 0 && delay < 1000000) {
 					usleep(delay);
 				}
 			}
 			last_pts = frame_pts;
 		}
+
+		/* save the last real pts */
+		(void) clock_gettime(CLOCK_MONOTONIC, &last_real_pts);
 
 		if (inst->use_fbdev) {
 			int x, y, pixelsz;
