@@ -49,7 +49,7 @@
 
 /* This is the # of frames to decode ahead of time */
 #define MB_VIDEO_BUFFER_FRAMES	(3)
-#define MB_AUDIO_BUFFER_FRAMES  (500)
+#define MB_AUDIO_BUFFER_FRAMES  (50)
 
 #define MB_DECODER_PRINT_FPS
 
@@ -83,6 +83,8 @@ struct mbp
 	uint8_t *render_mask;
 	int use_fbdev;
 
+	AVFormatContext *fmt_ctx;
+
 	AVFrame *audio_frame[MB_AUDIO_BUFFER_FRAMES];
 	char audio_frame_state[MB_AUDIO_BUFFER_FRAMES];
 	int audio_playback_index;
@@ -92,7 +94,9 @@ struct mbp
 	pthread_mutex_t audio_lock;
 	pthread_t audio_thread;
 
-#if (MB_VIDEO_BUFFER_FRAMES > 1)
+	int video_stream_index;
+	AVPacket video_packet;
+	int video_packet_state;
 	uint8_t *frame_data[MB_VIDEO_BUFFER_FRAMES];
 	char frame_state[MB_VIDEO_BUFFER_FRAMES];
 	int64_t frame_pts[MB_VIDEO_BUFFER_FRAMES];
@@ -102,14 +106,13 @@ struct mbp
 	int decode_frame_index;
 	int renderer_quit;
 	int audio_quit;
+	pthread_cond_t video_decoder_signal;
+	pthread_mutex_t video_decoder_lock;
+	pthread_t video_decoder_thread;
 	pthread_cond_t renderer_signal;
 	pthread_mutex_t renderer_lock;
 	pthread_t renderer_thread;
-#else
-	int64_t last_pts;
-	int64_t frame_pts;
-	AVRational time_base;
-#endif
+
 	pthread_cond_t resume_signal;
 	pthread_mutex_t resume_lock;
 	pthread_t thread;
@@ -194,6 +197,8 @@ mb_player_render(void *arg)
 
 	assert(inst != NULL);
 
+	fprintf(stderr, "mb_player: Renderer thread started\n");
+
 	if (inst->use_fbdev) {
 		if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
 			if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
@@ -218,6 +223,13 @@ mb_player_render(void *arg)
 		}
 	}
 
+	fprintf(stderr, "mb_player: Video renderer ready\n");
+
+	/* signal control thread that we're ready */
+	pthread_mutex_lock(&inst->renderer_lock);
+	pthread_cond_signal(&inst->renderer_signal);
+	pthread_mutex_unlock(&inst->renderer_lock);
+
 #ifdef MB_DECODER_PRINT_FPS
 	(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
 	(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
@@ -228,7 +240,7 @@ mb_player_render(void *arg)
 		if (inst->frame_state[inst->next_read_buf] != 1) {
 			pthread_mutex_lock(&inst->renderer_lock);
 			if (inst->frame_state[inst->next_read_buf] != 1) {
-				/*fprintf(stderr, "mb_player[ffmpeg]: Waiting for decoder\n");*/
+				/* fprintf(stderr, "mb_player[ffmpeg]: Waiting for decoder\n"); */
 				pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
 				pthread_mutex_unlock(&inst->renderer_lock);
 				continue;
@@ -678,26 +690,200 @@ audio_exit:
 
 
 /**
+ * mb_player_video_decode() -- Decodes video frames in the background.
+ */
+static void *
+mb_player_video_decode(void *arg)
+{
+	int i, finished;
+	uint8_t *buf = NULL;
+	struct mbp *inst = (struct mbp*) arg;
+	char video_filters[512];
+	AVFrame *video_frame_nat = NULL, *video_frame_flt = NULL;
+	AVCodecContext *video_codec_ctx = NULL;
+	AVFilterGraph *video_filter_graph = NULL;
+	AVFilterContext *video_buffersink_ctx = NULL;
+	AVFilterContext *video_buffersrc_ctx = NULL;
+
+	MB_DEBUG_SET_THREAD_NAME("video_decode");
+
+	assert(inst != NULL);
+	assert(inst->fmt_ctx != NULL);
+	assert(inst->video_stream_index == -1);
+
+	/* open the video codec */
+	if (open_codec_context(&inst->video_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_VIDEO) >= 0) {
+		video_codec_ctx = inst->fmt_ctx->streams[inst->video_stream_index]->codec;	
+	}
+	if (video_codec_ctx == NULL) {
+		goto decoder_exit;
+	}
+
+	/* initialize video filter graph */
+	snprintf(video_filters, sizeof(video_filters),
+		"scale='if(gt(a,4/3),%i,-1)':'if(gt(a,4/3),-1,%i)',"
+		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
+		inst->width, inst->height, inst->width, inst->height);
+	fprintf(stderr, "mb_player[ffmpeg]: video_filters: %s\n",
+		video_filters);
+	if (mb_player_initvideofilters(inst->fmt_ctx, video_codec_ctx,
+		&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
+		video_filters, inst->video_stream_index) < 0) {
+		fprintf(stderr, "mb_player[ffmpeg]: Could not init filter graph!\n");
+		goto decoder_exit;
+	}
+
+	/* calculate the size of each frame and allocate buffer for it */
+	/* TODO: Make sure buffers are aligned */
+	inst->bufsz = avpicture_get_size(MB_DECODER_PIX_FMT, inst->width, inst->height);
+	inst->buf = buf = av_malloc(inst->bufsz * sizeof(uint8_t) * MB_VIDEO_BUFFER_FRAMES);
+	if (buf == NULL) {
+		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate buffer\n");
+		goto decoder_exit;
+	}
+
+	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
+		inst->frame_data[i] = buf + (i * inst->bufsz);
+		inst->frame_state[i] = 0;
+	}
+
+	fprintf(stderr, "mb_player[ffmpeg]: video_codec_ctx: width=%i height=%i pix_fmt=%i\n",
+		inst->width, inst->height, video_codec_ctx->pix_fmt);
+
+	/* allocate video frames */
+	video_frame_nat = av_frame_alloc(); /* native */
+	video_frame_flt = av_frame_alloc(); /* filtered */
+	if (video_frame_nat == NULL || video_frame_flt == NULL) {
+		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate frames\n");
+		goto decoder_exit;
+	}
+
+	fprintf(stderr, "mb_player: Video decoder ready\n");
+
+	/* signal control trhead that we're ready */
+	pthread_mutex_lock(&inst->video_decoder_lock);
+	pthread_cond_signal(&inst->video_decoder_signal);
+	pthread_mutex_unlock(&inst->video_decoder_lock);
+
+	while (!inst->renderer_quit) {
+		/* if there's no frame to decode wait */
+		if (inst->video_packet_state != 1) {
+			pthread_mutex_lock(&inst->video_decoder_lock);
+			if (inst->video_packet_state != 1) {
+				pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
+				pthread_mutex_unlock(&inst->video_decoder_lock);
+				continue;
+			}
+			pthread_mutex_unlock(&inst->video_decoder_lock);
+		}
+
+		/* decode frame */
+		if ((i = avcodec_decode_video2(video_codec_ctx, video_frame_nat, &finished, &inst->video_packet)) < 0) {
+			fprintf(stderr, "mp_player: avcodec_decode_video2() returned %i\n", i);
+		}
+
+		if (finished) {
+			/* free packet */
+			av_free_packet(&inst->video_packet);
+
+			pthread_mutex_lock(&inst->video_decoder_lock);
+			inst->video_packet_state = 0;
+			pthread_cond_signal(&inst->video_decoder_signal);
+			pthread_mutex_unlock(&inst->video_decoder_lock);
+
+
+			int64_t frame_pts = video_frame_nat->pts =
+				av_frame_get_best_effort_timestamp(video_frame_nat);
+
+			/* push the decoded frame into the filtergraph */
+			if (av_buffersrc_add_frame_flags(video_buffersrc_ctx,
+				video_frame_nat, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+				fprintf(stderr, "mb_player[ffmpeg]: Error feeding filterchain\n");
+				goto decoder_exit;
+			}
+
+			/* pull filtered frames from the filtergraph */
+			while (1) {
+				i = av_buffersink_get_frame(video_buffersink_ctx, video_frame_flt);
+				if (i == AVERROR(EAGAIN) || i == AVERROR_EOF) {
+					break;
+				}
+				if (i < 0) {
+					goto decoder_exit;
+				}
+
+				/* if the renderer has not finished we must wait */
+				while (inst->frame_state[inst->decode_frame_index] != 0) {
+					pthread_mutex_lock(&inst->renderer_lock);
+					if (inst->frame_state[inst->decode_frame_index] != 0) {
+						/*fprintf(stderr, "mb_player[ffmpeg]: "
+							"Waiting for renderer\n"); */
+						pthread_cond_wait(&inst->renderer_signal,
+							&inst->renderer_lock);
+					}
+					pthread_mutex_unlock(&inst->renderer_lock);
+					if (inst->renderer_quit) {
+						goto decoder_exit;
+					}
+				}
+
+				/* copy picture to buffer */
+				avpicture_layout((const AVPicture*) video_frame_flt,
+					MB_DECODER_PIX_FMT, inst->width, inst->height,
+					inst->frame_data[inst->decode_frame_index], inst->bufsz);
+
+
+				/* update the buffer index and signal renderer thread */
+				pthread_mutex_lock(&inst->renderer_lock);
+				inst->frame_state[inst->decode_frame_index] = 1;
+				inst->frame_pts[inst->decode_frame_index] = frame_pts;
+				inst->frame_time_base[inst->decode_frame_index] = 
+					video_buffersink_ctx->inputs[0]->time_base;
+				inst->decode_frame_index++;
+				inst->decode_frame_index %= MB_VIDEO_BUFFER_FRAMES;
+				inst->frames_avail++;
+				pthread_cond_signal(&inst->renderer_signal);
+				pthread_mutex_unlock(&inst->renderer_lock);
+
+				av_frame_unref(video_frame_flt);
+			}
+			av_frame_unref(video_frame_nat);
+		} else {
+			pthread_mutex_unlock(&inst->video_decoder_lock);
+		}
+	}
+decoder_exit:
+	if (buf != NULL) {
+		av_free(buf);
+		inst->buf = NULL;
+	}
+	if (video_frame_nat != NULL) {
+		av_free(video_frame_nat);
+	}
+	if (video_frame_flt != NULL) {
+		av_free(video_frame_flt);
+	}
+	if (video_codec_ctx != NULL) {
+		avcodec_close(video_codec_ctx);
+	}
+
+
+	return NULL;
+}
+
+
+/**
  * mb_player_vdec_thread() -- This is the main decoding loop
  */
 static void*
-mb_player_vdec_thread(void *arg)
+mb_player_stream_decode(void *arg)
 {
 	struct mbp *inst = (struct mbp*) arg;
 	int i, finished;
-	uint8_t *buf = NULL;
-	AVFormatContext *fmt_ctx = NULL;
 	AVPacket packet, packet1;
 
 	MB_DEBUG_SET_THREAD_NAME("stream_decoder");
 
-	char video_filters[512];
-	int video_stream_index = -1;
-	AVCodecContext *video_codec_ctx = NULL;
-	AVFrame *video_frame_nat = NULL, *video_frame_flt = NULL;
-	AVFilterGraph *video_filter_graph = NULL;
-	AVFilterContext *video_buffersink_ctx = NULL;
-	AVFilterContext *video_buffersrc_ctx = NULL;
 
 	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
 	int audio_stream_index = -1;
@@ -711,6 +897,7 @@ mb_player_vdec_thread(void *arg)
 	assert(inst->media_file != NULL);
 	assert(inst->window != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_PLAYING);
+	assert(inst->fmt_ctx == NULL);
 
 
 	/* get the size of the window */
@@ -724,87 +911,51 @@ mb_player_vdec_thread(void *arg)
 		inst->width, inst->height, inst->media_file);
 
 	/* open file */
-	if (avformat_open_input(&fmt_ctx, inst->media_file, NULL, NULL) != 0) {
+	if (avformat_open_input(&inst->fmt_ctx, inst->media_file, NULL, NULL) != 0) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not open '%s'\n",
 			inst->media_file);
 		goto decoder_exit;
 	}
 
-	if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
+	if (avformat_find_stream_info(inst->fmt_ctx, NULL) < 0) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not find stream info\n");
 		goto decoder_exit;
 	}
 
+	/* fire the video decoder thread */
+	pthread_mutex_lock(&inst->video_decoder_lock);
+	if (pthread_create(&inst->video_decoder_thread, NULL, mb_player_video_decode, inst) != 0) {
+		abort();
+	}
+	pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
+	pthread_mutex_unlock(&inst->video_decoder_lock);
+	fprintf(stderr, "mb_player: Video stream: %i\n", inst->video_stream_index);
+
+
 	/* dump file info */
-	av_dump_format(fmt_ctx, 0, inst->media_file, 0);
+	av_dump_format(inst->fmt_ctx, 0, inst->media_file, 0);
 
-	/* open the video codec */
-	if (open_codec_context(&video_stream_index, fmt_ctx, AVMEDIA_TYPE_VIDEO) >= 0) {
-		video_codec_ctx = fmt_ctx->streams[video_stream_index]->codec;	
-	}
-	if (video_codec_ctx == NULL) {
-		goto decoder_exit;
-	}
-
-	/* initialize video filter graph */
-	snprintf(video_filters, sizeof(video_filters),
-		"scale='if(gt(a,4/3),%i,-1)':'if(gt(a,4/3),-1,%i)',"
-		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
-		inst->width, inst->height, inst->width, inst->height);
-	fprintf(stderr, "mb_player[ffmpeg]: video_filters: %s\n",
-		video_filters);
-	if (mb_player_initvideofilters(fmt_ctx, video_codec_ctx,
-		&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
-		video_filters, video_stream_index) < 0) {
-		fprintf(stderr, "mb_player[ffmpeg]: Could not init filter graph!\n");
-		goto decoder_exit;
-	}
-
-	/* allocate video frames */
-	video_frame_nat = av_frame_alloc(); /* native */
-	video_frame_flt = av_frame_alloc(); /* filtered */
-	if (video_frame_nat == NULL || video_frame_flt == NULL) {
-		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate frames\n");
-		goto decoder_exit;
-	}
-
-	/* calculate the size of each frame and allocate buffer for it */
-	inst->bufsz = avpicture_get_size(MB_DECODER_PIX_FMT, inst->width, inst->height);
-	inst->buf = buf = av_malloc(inst->bufsz * sizeof(uint8_t) * MB_VIDEO_BUFFER_FRAMES);
-	if (buf == NULL) {
-		fprintf(stderr, "mb_player[ffmpeg]: Could not allocate buffer\n");
-		goto decoder_exit;
-	}
-
-	fprintf(stderr, "mb_player[ffmpeg]: video_codec_ctx: width=%i height=%i pix_fmt=%i\n",
-		inst->width, inst->height, video_codec_ctx->pix_fmt);
-
-#if (MB_VIDEO_BUFFER_FRAMES == 1)
-	inst->last_pts = AV_NOPTS_VALUE;
-#else
 	inst->renderer_quit = 0;
 	inst->next_read_buf = 0;
 	inst->decode_frame_index = 0;
 	inst->frames_avail = 0;
-
-	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
-		inst->frame_data[i] = buf + (i * inst->bufsz);
-		inst->frame_state[i] = 0;
-	}
+	inst->video_packet_state = 0;
 
 	/* we're ready to start decoding, but first let us fire
 	 * the rendering thread */
+	pthread_mutex_lock(&inst->renderer_lock);
 	if (pthread_create(&inst->renderer_thread, NULL, mb_player_render, inst) != 0) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not start renderer thread\n");
-		pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
 		pthread_mutex_unlock(&inst->renderer_lock);
 		goto decoder_exit;
 	}
-#endif
+	pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
+	pthread_mutex_unlock(&inst->renderer_lock);
+
 
 	/* open the audio codec */
-	if (open_codec_context(&audio_stream_index, fmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
-		audio_codec_ctx = fmt_ctx->streams[audio_stream_index]->codec;	
+	if (open_codec_context(&audio_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
+		audio_codec_ctx = inst->fmt_ctx->streams[audio_stream_index]->codec;	
 	}
 	if (audio_codec_ctx == NULL) {
 		goto decoder_exit;
@@ -820,7 +971,7 @@ mb_player_vdec_thread(void *arg)
 	/* initialize video filter graph */
 	fprintf(stderr, "mb_player[ffmpeg]: audio_filters: %s\n",
 		audio_filters);
-	if (mb_player_initaudiofilters(fmt_ctx, audio_codec_ctx,
+	if (mb_player_initaudiofilters(inst->fmt_ctx, audio_codec_ctx,
 		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
 		audio_filters, audio_stream_index) < 0) {
 		fprintf(stderr, "mb_player[ffmpeg]: Could not init filter graph!\n");
@@ -848,90 +999,28 @@ mb_player_vdec_thread(void *arg)
 	pthread_mutex_unlock(&inst->audio_lock);
 
 	/* start decoding */
-	while (av_read_frame(fmt_ctx, &packet) >= 0) {
-		if (packet.stream_index == video_stream_index) {
-			/* decode frame */
-			avcodec_decode_video2(video_codec_ctx, video_frame_nat, &finished, &packet);
-			if (finished) {
-
-				int64_t frame_pts = video_frame_nat->pts =
-					av_frame_get_best_effort_timestamp(video_frame_nat);
-
-				/* push the decoded frame into the filtergraph */
-				if (av_buffersrc_add_frame_flags(video_buffersrc_ctx,
-					video_frame_nat, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
-					fprintf(stderr, "mb_player[ffmpeg]: Error feeding filterchain\n");
-					goto decoder_exit;
-				}
-
-				/* pull filtered frames from the filtergraph */
-				while (1) {
-					i = av_buffersink_get_frame(video_buffersink_ctx, video_frame_flt);
-					if (i == AVERROR(EAGAIN) || i == AVERROR_EOF) {
-						break;
-					}
-					if (i < 0) {
+	while (av_read_frame(inst->fmt_ctx, &packet) >= 0) {
+		if (packet.stream_index == inst->video_stream_index) {
+			/* wait for the decoder to finish decoding the current frame */
+			while (inst->video_packet_state == 1) {
+				pthread_mutex_lock(&inst->video_decoder_lock);
+				if (inst->video_packet_state == 1) {
+					pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
+					pthread_mutex_unlock(&inst->video_decoder_lock);
+					if (inst->action & MB_PLAYER_ACTION_STOP) {
 						goto decoder_exit;
 					}
-
-#if (MB_VIDEO_BUFFER_FRAMES > 1)
-					/* if the renderer has not finished we must wait */
-					while (inst->frame_state[inst->decode_frame_index] != 0) {
-						pthread_mutex_lock(&inst->renderer_lock);
-						if (inst->frame_state[inst->decode_frame_index] != 0) {
-							/* fprintf(stderr, "mb_player[ffmpeg]: "
-								"Waiting for renderer\n"); */
-							pthread_cond_wait(&inst->renderer_signal,
-								&inst->renderer_lock);
-						}
-						pthread_mutex_unlock(&inst->renderer_lock);
-					}
-
-					/* copy picture to buffer */
-					avpicture_layout((const AVPicture*) video_frame_flt,
-						MB_DECODER_PIX_FMT, inst->width, inst->height,
-						inst->frame_data[inst->decode_frame_index], inst->bufsz);
-
-					#if 0
-					uint8_t *m = (uint8_t*) mbv_dfb_getscreenmask();
-					uint32_t *p = (uint32_t*) inst->frame_data[inst->decode_frame_index];
-					int bufsz = inst->width * inst->height;
-					for (i = 0; i < bufsz; i++) {
-						if (m[i]) {
-							p[i] = 0;
-						}
-					}
-					#endif
-
-					/* update the buffer index and signal renderer thread */
-					pthread_mutex_lock(&inst->renderer_lock);
-					inst->frame_state[inst->decode_frame_index] = 1;
-					inst->frame_pts[inst->decode_frame_index] = frame_pts;
-					inst->frame_time_base[inst->decode_frame_index] = 
-						video_buffersink_ctx->inputs[0]->time_base;
-					inst->decode_frame_index++;
-					inst->decode_frame_index %= MB_VIDEO_BUFFER_FRAMES;
-					inst->frames_avail++;
-					pthread_cond_signal(&inst->renderer_signal);
-					pthread_mutex_unlock(&inst->renderer_lock);
-
-#else
-					/* copy picture to buffer */
-					avpicture_layout((const AVPicture*) frame_flt,
-						MB_DECODER_PIX_FMT, inst->width, inst->height,
-						inst->buf, inst->bufsz);
-
-					/* get timebase */
-					inst->frame_pts = frame_pts;
-					inst->time_base = buffersink_ctx->inputs[0]->time_base;
-
-					/* render frame */
-					mb_player_renderframe(inst);
-#endif
-					av_frame_unref(video_frame_flt);
+					continue;
 				}
-				av_frame_unref(video_frame_nat);
 			}
+			
+			/* save the packet and signal decoder thread */
+			inst->video_packet = packet;
+			//av_packet_ref(&inst->video_packet, &packet);
+			inst->video_packet_state = 1;
+			pthread_cond_signal(&inst->video_decoder_signal);
+			pthread_mutex_unlock(&inst->video_decoder_lock);
+
 		} else if (packet.stream_index == audio_stream_index) {
 
 			packet1 = packet;
@@ -994,35 +1083,16 @@ mb_player_vdec_thread(void *arg)
 					}
 				}
 			}
+			/* free packet */
+			av_free_packet(&packet);
 		}
 
-		/* free packet */
-		av_free_packet(&packet);
 
-		if (inst->action != MB_PLAYER_ACTION_NONE) {
-
-			if (inst->action & MB_PLAYER_ACTION_STOP) {
-				inst->action &= ~MB_PLAYER_ACTION_STOP;
-				goto decoder_exit;
-			}
-
-			/* this is where we pause -- not done yet */
-			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
-				fprintf(stderr, "decoder: pausing\n");
-				pthread_mutex_lock(&inst->resume_lock);
-				inst->action &= ~MB_PLAYER_ACTION_PAUSE;
-				inst->status = MB_PLAYER_STATUS_PAUSED;
-				pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
-				inst->status = MB_PLAYER_STATUS_PLAYING;
-				pthread_mutex_unlock(&inst->resume_lock);
-			}
-		}
 	}
 
 decoder_exit:
 	fprintf(stderr, "mb_player[ffmpeg]: Decoder exiting\n");
 
-#if (MB_VIDEO_BUFFER_FRAMES > 1)
 	/* clear the screen */
 	pthread_mutex_lock(&inst->renderer_lock);
 	memset(inst->buf, 0, inst->bufsz);
@@ -1031,20 +1101,21 @@ decoder_exit:
 	}
 	pthread_cond_signal(&inst->renderer_signal);
 	pthread_mutex_unlock(&inst->renderer_lock);
-#else
-	memset(inst->buf, 0, inst->bufsz);
-	mb_player_renderframe(inst);
-#endif
 
-
-#if (MB_VIDEO_BUFFER_FRAMES > 1)
 	/* signal the renderer thread to exit and join it */
 	pthread_mutex_lock(&inst->renderer_lock);
 	inst->renderer_quit = 1;
 	pthread_cond_signal(&inst->renderer_signal);
 	pthread_mutex_unlock(&inst->renderer_lock);
 	pthread_join(inst->renderer_thread, NULL);
-#endif
+
+	/* signal the video decoder thread to exit and join it */
+	pthread_mutex_lock(&inst->video_decoder_lock);
+	inst->action |= MB_PLAYER_ACTION_STOP;
+	pthread_cond_signal(&inst->video_decoder_signal);
+	pthread_mutex_unlock(&inst->video_decoder_lock);
+	pthread_join(inst->video_decoder_thread, NULL);
+	inst->action &= ~MB_PLAYER_ACTION_STOP;
 
 	/* signal and wait for the audio thread to exit */
 	pthread_mutex_lock(&inst->audio_lock);
@@ -1065,23 +1136,12 @@ decoder_exit:
 	}
 
 	/* clean video stuff */
-	if (buf != NULL) {
-		av_free(buf);
-		inst->buf = NULL;
-	}
-	if (video_frame_nat != NULL) {
-		av_free(video_frame_nat);
-	}
-	if (video_frame_flt != NULL) {
-		av_free(video_frame_flt);
-	}
-	if (video_codec_ctx != NULL) {
-		avcodec_close(video_codec_ctx);
-	}
-	if (fmt_ctx != NULL) {
-		avformat_close_input(&fmt_ctx);
+	if (inst->fmt_ctx != NULL) {
+		avformat_close_input(&inst->fmt_ctx);
+		inst->fmt_ctx = NULL;
 	}
 
+	inst->video_stream_index = -1;
 	inst->action = MB_PLAYER_ACTION_NONE;
 	inst->status = MB_PLAYER_STATUS_READY;
 
@@ -1145,7 +1205,7 @@ mbp_play(struct mbp *inst, const char * const path)
 	inst->status = MB_PLAYER_STATUS_PLAYING;
 
 	/* start the main decoder thread */
-	if (pthread_create(&inst->thread, NULL, mb_player_vdec_thread, inst) != 0) {
+	if (pthread_create(&inst->thread, NULL, mb_player_stream_decode, inst) != 0) {
 		fprintf(stderr, "pthread_create() failed!\n");
 		inst->status = MB_PLAYER_STATUS_READY;
 		return -1;
@@ -1320,8 +1380,10 @@ mbp_init(void)
 	inst->window = window;
 	inst->media_file = NULL;
 	inst->buf = NULL;
+	inst->fmt_ctx = NULL;
 	inst->bufsz = 0;
 	inst->use_fbdev = 1;
+	inst->video_stream_index = -1;
 	inst->action = MB_PLAYER_ACTION_NONE;
 	inst->status = MB_PLAYER_STATUS_READY;
 
@@ -1330,6 +1392,8 @@ mbp_init(void)
 #if (MB_VIDEO_BUFFER_FRAMES > 1)
 		pthread_mutex_init(&inst->renderer_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->audio_lock, NULL) != 0 ||
+		pthread_mutex_init(&inst->video_decoder_lock, NULL) != 0 ||
+		pthread_cond_init(&inst->video_decoder_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->audio_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->renderer_signal, NULL) != 0 ||
 #endif
