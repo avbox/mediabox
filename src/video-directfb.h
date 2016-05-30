@@ -17,6 +17,10 @@ int
 mbv_dfb_isfbdev(void);
 
 
+void
+mbv_dfb_getscreensize(int *width, int *height);
+
+
 int
 mbv_dfb_screen_width_get(void);
 

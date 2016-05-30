@@ -6,6 +6,10 @@
 struct mbv_window;
 
 
+void
+mbv_getscreensize(int *width, int *height);
+
+
 int
 mbv_window_getsize(struct mbv_window *window, int *width, int *height);
 

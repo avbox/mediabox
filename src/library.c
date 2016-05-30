@@ -183,11 +183,17 @@ mb_library_loadlist(const char *path)
 int
 mb_library_init(void)
 {
+	int resx, resy, width;
+	const int height = 450;
+
+	mbv_getscreensize(&resx, &resy);
+	width = (resx * 90) / 100;
+
 	/* create a new window for the library dialog */
-	window = mbv_window_new("::[MEDIA LIBRARY]::",
-		(mbv_screen_width_get() / 2) - 225,
-		(mbv_screen_height_get() / 2) - 225,
-		450, 450);
+	window = mbv_window_new("MEDIA LIBRARY",
+		(resx / 2) - (width / 2),
+		(resy / 2) - (height / 2),
+		width, height);
 	if (window == NULL) {
 		fprintf(stderr, "mb_mainmenu: Could not create new window!\n");
 		return -1;

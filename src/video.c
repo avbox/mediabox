@@ -12,6 +12,13 @@ mbv_window_getsize(struct mbv_window *window, int *width, int *height)
 }
 
 
+void
+mbv_getscreensize(int *width, int *height)
+{
+	mbv_dfb_getscreensize(width, height);
+}
+
+
 int
 mbv_isfbdev(void)
 {
