@@ -33,6 +33,7 @@
 
 #include "video.h"
 #include "player.h"
+#include "debug.h"
 
 
 /*
@@ -188,6 +189,8 @@ mb_player_render(void *arg)
 	struct fb_var_screeninfo vinfo;
 	void *fb_mem = NULL;
 #endif
+
+	MB_DEBUG_SET_THREAD_NAME("video_playback");
 
 	assert(inst != NULL);
 
@@ -592,6 +595,7 @@ mb_player_adec_thread(void *arg)
 	snd_pcm_t *handle = NULL;
 	snd_pcm_sframes_t frames;
 
+	MB_DEBUG_SET_THREAD_NAME("audio_playback");
 
 	assert(inst != NULL);
 	assert(inst->audio_quit == 0);
@@ -684,6 +688,8 @@ mb_player_vdec_thread(void *arg)
 	uint8_t *buf = NULL;
 	AVFormatContext *fmt_ctx = NULL;
 	AVPacket packet, packet1;
+
+	MB_DEBUG_SET_THREAD_NAME("stream_decoder");
 
 	char video_filters[512];
 	int video_stream_index = -1;
@@ -1056,9 +1062,6 @@ decoder_exit:
 	}
 	if (audio_codec_ctx != NULL) {
 		avcodec_close(audio_codec_ctx);
-	}
-	if (fmt_ctx != NULL) {
-		avformat_close_input(&fmt_ctx);
 	}
 
 	/* clean video stuff */
