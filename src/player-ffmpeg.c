@@ -239,6 +239,10 @@ mb_player_render(void *arg)
 		/* if there's no frame ready we must wait */
 		if (inst->frame_state[inst->next_read_buf] != 1) {
 			pthread_mutex_lock(&inst->renderer_lock);
+			if (inst->renderer_quit) {
+				pthread_mutex_unlock(&inst->renderer_lock);
+				goto video_exit;
+			}
 			if (inst->frame_state[inst->next_read_buf] != 1) {
 				/* fprintf(stderr, "mb_player[ffmpeg]: Waiting for decoder\n"); */
 				pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
@@ -320,6 +324,7 @@ mb_player_render(void *arg)
 		pthread_mutex_unlock(&inst->renderer_lock);
 	}
 
+video_exit:
 	/* denitialize fbdev */
 	if (inst->use_fbdev) {
 		close(fd);
@@ -769,6 +774,10 @@ mb_player_video_decode(void *arg)
 		/* if there's no frame to decode wait */
 		if (inst->video_packet_state != 1) {
 			pthread_mutex_lock(&inst->video_decoder_lock);
+			if (inst->renderer_quit) {
+				pthread_mutex_unlock(&inst->video_decoder_lock);
+				goto decoder_exit;
+			}
 			if (inst->video_packet_state != 1) {
 				pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
 				pthread_mutex_unlock(&inst->video_decoder_lock);
@@ -815,6 +824,10 @@ mb_player_video_decode(void *arg)
 				/* if the renderer has not finished we must wait */
 				while (inst->frame_state[inst->decode_frame_index] != 0) {
 					pthread_mutex_lock(&inst->renderer_lock);
+					if (inst->renderer_quit) {
+						pthread_mutex_unlock(&inst->renderer_lock);
+						goto decoder_exit;
+					}
 					if (inst->frame_state[inst->decode_frame_index] != 0) {
 						/*fprintf(stderr, "mb_player[ffmpeg]: "
 							"Waiting for renderer\n"); */
