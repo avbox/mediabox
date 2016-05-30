@@ -9,7 +9,7 @@
 
 /* #define DEBUG_MEMORY */
 #define DEFAULT_FONT        ("/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf")
-#define DEFAULT_FONT_HEIGHT (16)
+#define DEFAULT_FONT_HEIGHT (default_font_height)
 #define DEFAULT_FOREGROUND  (0xFFFFFFFF)
 #define DEFAULT_OPACITY     (100)
 
@@ -42,6 +42,7 @@ static IDirectFBWindows *windows;
 static int screen_width = 0;
 static int screen_height = 0;
 static int is_fbdev = 0;
+static int default_font_height;
 
 
 static struct mbv_window *root_window = NULL;
@@ -126,6 +127,13 @@ int
 mbv_dfb_screen_height_get(void)
 {
 	return screen_height;
+}
+
+
+int
+mbv_dfb_getdefaultfontheight(void)
+{
+	return default_font_height;
 }
 
 
@@ -635,7 +643,14 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(layer->SetCooperativeLevel(layer, DLSCL_ADMINISTRATIVE));
 	
 	/* load default font */
-	DFBFontDescription font_dsc = { .flags = DFDESC_HEIGHT, .height = 16 };
+	default_font_height = 16;
+	switch (screen_width) {
+	case 640:  default_font_height = 20; break;
+	case 1024: default_font_height = 18; break;
+	case 1280: default_font_height = 20; break;
+	case 1960: default_font_height = 22; break;
+	}
+	DFBFontDescription font_dsc = { .flags = DFDESC_HEIGHT, .height = default_font_height };
 	DFBCHECK(dfb->CreateFont(dfb, DEFAULT_FONT, &font_dsc, &font));
 
 	#if 0

@@ -20,6 +20,13 @@ mbv_getscreensize(int *width, int *height)
 
 
 int
+mbv_getdefaultfontheight(void)
+{
+	return mbv_dfb_getdefaultfontheight();
+}
+
+
+int
 mbv_isfbdev(void)
 {
 	return mbv_dfb_isfbdev();

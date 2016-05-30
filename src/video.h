@@ -19,6 +19,10 @@ mbv_isfbdev(void);
 
 
 int
+mbv_getdefaultfontheight(void);
+
+
+int
 mbv_window_blit_buffer(
 	struct mbv_window *window, void *buf, int width, int height,
 	int x, int y);

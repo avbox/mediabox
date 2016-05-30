@@ -9,9 +9,6 @@
 #include "linkedlist.h"
 
 
-#define MB_ITEM_HEIGHT (25)
-
-
 /* Listable type for storing menuitem objects */
 LISTABLE_TYPE(mb_ui_menuitem,
 	struct mbv_window *window;
@@ -325,10 +322,15 @@ mb_ui_menu_new(struct mbv_window *window)
 	inst->selection_changed_callback = NULL;
 	inst->count = 0;
 
+	/* calculate item height */
+	int itemheight = mbv_getdefaultfontheight();
+	itemheight += 10;
+
+
 	/* get the widget window size and calculate the
 	 * number of visible items */
 	mbv_window_getcanvassize(window, &width, &height);
-	inst->visible_items = height / MB_ITEM_HEIGHT;
+	inst->visible_items = height / itemheight;
 
 	/* allocate memory for an array of pointers to
 	 * window objects for each visible item */
@@ -343,7 +345,7 @@ mb_ui_menu_new(struct mbv_window *window)
 	/* preallocate a window for each visible item */
 	for (i = 0; i < inst->visible_items; i++) {
 		inst->item_windows[i] = mbv_window_getchildwindow(inst->window, 0,
-			MB_ITEM_HEIGHT * i, -1, MB_ITEM_HEIGHT);
+			itemheight * i, -1, itemheight);
 		if (inst->item_windows[i] == NULL) {
 			int j;
 			for (j = 0; j < i; j++) {
