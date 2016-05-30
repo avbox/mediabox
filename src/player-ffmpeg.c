@@ -236,6 +236,20 @@ mb_player_render(void *arg)
 #endif
 
 	while (!inst->renderer_quit) {
+
+		if (inst->action != MB_PLAYER_ACTION_NONE) {
+			/* this is where we pause -- not done yet */
+			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
+				fprintf(stderr, "decoder: pausing\n");
+				pthread_mutex_lock(&inst->resume_lock);
+				inst->action &= ~MB_PLAYER_ACTION_PAUSE;
+				inst->status = MB_PLAYER_STATUS_PAUSED;
+				pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
+				inst->status = MB_PLAYER_STATUS_PLAYING;
+				pthread_mutex_unlock(&inst->resume_lock);
+			}
+		}
+
 		/* if there's no frame ready we must wait */
 		if (inst->frame_state[inst->next_read_buf] != 1) {
 			pthread_mutex_lock(&inst->renderer_lock);
@@ -272,6 +286,10 @@ mb_player_render(void *arg)
 			}
 			last_pts = frame_pts;
 		}
+
+		/* wait for vsync */
+		unsigned int screen = 0;
+		(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
 
 		/* save the last real pts */
 		(void) clock_gettime(CLOCK_MONOTONIC, &last_real_pts);
@@ -1238,6 +1256,7 @@ mbp_pause(struct mbp* inst)
 
 	/* can't pause if we're not playing */
 	if (inst->status != MB_PLAYER_STATUS_PLAYING) {
+		fprintf(stderr, "mb_player: Cannot puase, not playing\n");
 		return -1;
 	}
 
