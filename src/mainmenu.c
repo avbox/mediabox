@@ -22,11 +22,28 @@ static struct mb_ui_menu *menu = NULL;
 int
 mb_mainmenu_init(void)
 {
+	int xres, yres;
+	int font_height;
+	int window_height, window_width;
+
+	/* set height according to font size */
+	mbv_getscreensize(&xres, &yres);
+	font_height = mbv_getdefaultfontheight();
+	window_height = 30 + font_height + ((font_height + 10) * 4);
+
+	/* set width according to screen size */
+	switch (xres) {
+	case 640:  window_width = 300; break;
+	case 1024: window_width = 400; break;
+	case 1280: window_width = 500; break;
+	case 1920: window_width = 600; break;
+	}
+
 	/* create a new window for the menu dialog */
 	window = mbv_window_new("MAIN MENU",
-		(mbv_screen_width_get() / 2) - 150,
-		(mbv_screen_height_get() / 2) - 75,
-		300, 150);
+		(xres / 2) - (window_width / 2),
+		(yres / 2) - (window_height / 2),
+		window_width, window_height);
 	if (window == NULL) {
 		fprintf(stderr, "mb_mainmenu: Could not create new window!\n");
 		return -1;
