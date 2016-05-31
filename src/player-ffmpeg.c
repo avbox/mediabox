@@ -224,7 +224,7 @@ mb_player_video(void *arg)
 	int frames = 0, fps = 0;
 #endif
 #ifdef MB_FBDEV_RENDERER
-	int fd;
+	int fd = -1;
 	long screensize;
 	struct fb_fix_screeninfo finfo;
 	struct fb_var_screeninfo vinfo;
@@ -1087,11 +1087,15 @@ mb_player_audio_decode(void * arg)
 				}
 
 				/* pull filtered audio from the filtergraph */
-				while (1) {
+				while (!inst->audio_decoder_quit) {
 
 					/* if the renderer has not finished we must wait */
-					while (inst->audio_frame_state[inst->audio_decode_index] != 0) {
+					if (inst->audio_frame_state[inst->audio_decode_index] != 0) {
 						pthread_mutex_lock(&inst->audio_lock);
+						if (inst->audio_decoder_quit) {
+							pthread_mutex_unlock(&inst->audio_lock);
+							continue;
+						}
 						if (inst->audio_frame_state[inst->audio_decode_index] != 0) {
 							/*fprintf(stderr, "mb_player: "
 								"Decoder waiting for audio thread\n"); */
@@ -1099,6 +1103,7 @@ mb_player_audio_decode(void * arg)
 								&inst->audio_lock);
 						}
 						pthread_mutex_unlock(&inst->audio_lock);
+						continue;
 					}
 
 					ret = av_buffersink_get_frame(audio_buffersink_ctx,
@@ -1356,7 +1361,7 @@ decoder_exit:
 	pthread_mutex_unlock(&inst->audio_lock);
 
 	pthread_mutex_lock(&inst->audio_decoder_lock);
-	inst->video_decoder_quit = 1;
+	inst->audio_decoder_quit = 1;
 	pthread_cond_signal(&inst->audio_decoder_signal);
 	pthread_mutex_unlock(&inst->audio_decoder_lock);
 

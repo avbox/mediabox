@@ -225,7 +225,7 @@ mbv_dfb_window_blit_buffer(
 	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
 	DFBCHECK(window->content->Blit(window->content, surface, NULL, x, y));
 	//DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
-	DFBCHECK(surface->Release(surface));
+	surface->Release(surface);
 #else
 	void *dst;
 	int pitch;
@@ -546,13 +546,13 @@ mbv_dfb_window_destroy(struct mbv_window *window)
 	mbv_dfb_window_hide(window);
 
 	/* release window surfaces */
-	DFBCHECK(window->content->Release(window->content));
-	DFBCHECK(window->surface->Release(window->surface));
+	window->content->Release(window->content);
+	window->surface->Release(window->surface);
 
 	/* if this is not a subwindow then destroy the directfb
 	 * window object as well */
 	if (window->parent == NULL) {
-		DFBCHECK(window->dfb_window->Release(window->dfb_window));
+		window->dfb_window->Release(window->dfb_window);
 	}
 
 	for (i = 0; i < 10; i++) {
@@ -629,7 +629,7 @@ mbv_dfb_init(int argc, char **argv)
 	IDirectFBSurface *primary;
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &primary));
 	DFBCHECK(primary->GetSize(primary, &screen_width, &screen_height));
-	DFBCHECK(primary->Release(primary));
+	primary->Release(primary);
 	#endif
 
 	/* enumerate display layers */

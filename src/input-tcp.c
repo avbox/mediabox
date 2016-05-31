@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/types.h> 
@@ -14,15 +15,19 @@
 
 
 static int sockfd = -1;
+static int newsockfd = -1;
+static int server_quit = 0;
 static pthread_t thread;
 
 static void *
 mbi_tcp_server(void *arg)
 {
-	int newsockfd = -1, portno;
+	int portno;
 	unsigned int clilen;
 	char buffer[256];
 	struct sockaddr_in serv_addr, cli_addr;
+	struct timeval tv;
+	fd_set fds;
 	int n;
 
 
@@ -30,7 +35,9 @@ mbi_tcp_server(void *arg)
 
 	fprintf(stderr, "TCP Server starting\n");
 
-	while (1) {
+
+
+	while (!server_quit) {
 
 		sockfd = socket(AF_INET, SOCK_STREAM, 0);
 		if (sockfd < 0) {
@@ -48,17 +55,68 @@ mbi_tcp_server(void *arg)
 			fprintf(stderr, "mbi_tcp: Could not bind to socket\n");
 			close(sockfd);
 			sockfd = -1;
-			sleep(1);
+			sleep(5);
 			continue;
 		}
 
-		listen(sockfd,5);
+		listen(sockfd, 1);
 		clilen = sizeof(cli_addr);
-		while((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) > 0) {
-			bzero(buffer,256);
-			while ((n = read(newsockfd, buffer, 255)) > 0) {
 
-				fprintf(stderr, "Here is the message: %s\n",buffer);
+
+		while(!server_quit) {
+			FD_ZERO(&fds);
+			FD_SET(sockfd, &fds);
+
+
+			tv.tv_sec = 1;
+			tv.tv_usec = 0;
+			if ((n = select(sockfd + 1, &fds, NULL, NULL, &tv)) == 0) {
+				continue;
+			} else if (n < 0) {
+				if (errno == EINTR) {
+					continue;
+				}
+				fprintf(stderr, "input-tcp: select() returned %i\n", n);
+				break;
+			}
+
+			fprintf(stderr, "input-tcp: got connection\n");
+			
+			if (!FD_ISSET(sockfd, &fds)) {
+				continue;
+			}
+
+			if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) <= 0) {
+				fprintf(stderr, "input-tcp: Could not accept socket. ret=%i\n",
+					newsockfd);
+				continue;
+			}
+
+			bzero(buffer,256);
+			while (!server_quit) {
+
+				FD_ZERO(&fds);
+				FD_SET(newsockfd, &fds);
+
+				tv.tv_sec = 1;
+				tv.tv_usec = 0;
+				if ((n = select(newsockfd + 1, &fds, NULL, NULL, &tv)) == 0) {
+					continue;
+				} else if (n < 0) {
+					if (errno == EINTR) {
+						continue;
+					}
+					fprintf(stderr, "input-tcp: select() returned %i\n", n);
+					break;
+				}
+
+				if (!FD_ISSET(newsockfd, &fds)) {
+					continue;
+				}
+
+				if ((n = read(newsockfd, buffer, 255)) <= 0) {
+					break;
+				}
 
 				if (!memcmp("MENU", buffer, 4)) {
 					mbi_event_send(MBI_EVENT_MENU);
@@ -84,16 +142,11 @@ mbi_tcp_server(void *arg)
 			close(newsockfd);
 			newsockfd = -1;
 		}
+		close(sockfd);
+		sockfd = -1;
 	}
 
 	fprintf(stderr, "input-tcp: TCP Input server exiting\n");
-	if (newsockfd != -1) {
-		close(newsockfd);
-	}
-	close(sockfd);
-	sockfd = -1;
-
- 
 
 	return NULL;
 }
@@ -116,6 +169,11 @@ mbi_tcp_init(void)
 void
 mbi_tcp_destroy(void)
 {
+	fprintf(stderr, "input-tcp: Exiting (give me 2 secs)\n");
+	server_quit = 1;
+	if (newsockfd != -1) {
+		close(newsockfd);
+	}
 	close(sockfd);
 	pthread_join(thread, NULL);
 }
