@@ -50,6 +50,7 @@
 /* This is the # of frames to decode ahead of time */
 #define MB_VIDEO_BUFFER_FRAMES	(3)
 #define MB_AUDIO_BUFFER_FRAMES  (1)
+#define MB_AUDIO_BUFFER_PACKETS (50)
 
 #define MB_DECODER_PRINT_FPS
 
@@ -94,6 +95,17 @@ struct mbp
 	pthread_cond_t audio_signal;
 	pthread_mutex_t audio_lock;
 	pthread_t audio_thread;
+
+	int audio_decoder_quit;
+	AVPacket audio_packet[MB_AUDIO_BUFFER_PACKETS];
+	char audio_packet_state[MB_AUDIO_BUFFER_PACKETS];
+	int audio_packet_read_index;
+	int audio_packet_write_index;
+
+	int audio_stream_index;
+	pthread_cond_t audio_decoder_signal;
+	pthread_mutex_t audio_decoder_lock;
+	pthread_t audio_decoder_thread;
 
 	int video_stream_index;
 	AVPacket video_packet;
@@ -695,7 +707,7 @@ mb_player_adec_thread(void *arg)
 
 
 	/* initialize alsa device */
-	if ((ret = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK, SND_PCM_ASYNC)) < 0) {
+	if ((ret = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
 		fprintf(stderr, "mb_player: snd_pcm_open() failed, ret=%i\n",
 			ret);
 		return NULL;
@@ -969,10 +981,166 @@ decoder_exit:
 		avcodec_close(video_codec_ctx);
 	}
 
-
 	return NULL;
 }
 
+
+/**
+ * mb_player_audio_decode() -- Decodes the audio stream.
+ */
+static void *
+mb_player_audio_decode(void * arg)
+{
+	int finished = 0, ret;
+	struct mbp* inst = (struct mbp*) arg;
+	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
+	AVCodecContext *audio_codec_ctx = NULL;
+	AVFrame *audio_frame_nat = NULL;
+	AVFilterGraph *audio_filter_graph = NULL;
+	AVFilterContext *audio_buffersink_ctx = NULL;
+	AVFilterContext *audio_buffersrc_ctx = NULL;
+	AVPacket packet, packet1;
+
+	MB_DEBUG_SET_THREAD_NAME("audio_decoder");
+
+
+	assert(inst != NULL);
+	assert(inst->audio_decoder_quit == 0);
+	assert(inst->fmt_ctx != NULL);
+	assert(inst->audio_stream_index == -1);
+
+
+	/* open the audio codec */
+	if (open_codec_context(&inst->audio_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
+		audio_codec_ctx = inst->fmt_ctx->streams[inst->audio_stream_index]->codec;	
+	}
+	if (audio_codec_ctx == NULL) {
+		goto decoder_exit;
+	}
+
+	/* allocate audio frames */
+	audio_frame_nat = av_frame_alloc(); /* native */
+	if (audio_frame_nat == NULL) {
+		fprintf(stderr, "mb_player: Could not allocate audio frames\n");
+		goto decoder_exit;
+	}
+
+	/* initialize video filter graph */
+	fprintf(stderr, "mb_player: audio_filters: %s\n",
+		audio_filters);
+	if (mb_player_initaudiofilters(inst->fmt_ctx, audio_codec_ctx,
+		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
+		audio_filters, inst->audio_stream_index) < 0) {
+		fprintf(stderr, "mb_player: Could not init filter graph!\n");
+		goto decoder_exit;
+	}
+
+	/* signl control thread that we're ready */
+	fprintf(stderr, "player: Audio decoder ready\n");
+	pthread_mutex_lock(&inst->audio_decoder_lock);
+	pthread_cond_signal(&inst->audio_decoder_signal);
+	pthread_mutex_unlock(&inst->audio_decoder_lock);
+
+
+	while (!inst->audio_decoder_quit) {
+		/* wait for the stream decoder to give us some packets */
+		if (inst->audio_packet_state[inst->audio_packet_read_index] != 1) {
+			pthread_mutex_lock(&inst->audio_decoder_lock);
+			if (inst->audio_decoder_quit) {
+				pthread_mutex_unlock(&inst->audio_decoder_lock);
+				continue;
+			}
+			if  (inst->audio_packet_state[inst->audio_packet_read_index] != 1) {
+				pthread_cond_wait(&inst->audio_decoder_signal, &inst->audio_decoder_lock);
+				pthread_mutex_unlock(&inst->audio_decoder_lock);
+				continue;
+			}
+		}
+
+		/* grab the packet and signal the stream decoder thread */
+		packet = packet1 = inst->audio_packet[inst->audio_packet_read_index];
+		inst->audio_packet_state[inst->audio_packet_read_index] = 0;
+		pthread_cond_signal(&inst->audio_decoder_signal);
+		pthread_mutex_unlock(&inst->audio_decoder_lock);
+
+		inst->audio_packet_read_index++;
+		inst->audio_packet_read_index %= MB_AUDIO_BUFFER_PACKETS;
+
+		/* decode audio frame */
+		while (packet1.size > 0) {
+			finished = 0;
+			ret = avcodec_decode_audio4(audio_codec_ctx, audio_frame_nat,
+				&finished, &packet1);
+			if (ret < 0) {
+				av_log(NULL, AV_LOG_ERROR, "Error decoding audio\n");
+				continue;
+			}
+			packet1.size -= ret;
+			packet1.data += ret;
+
+			if (finished) {
+				/* push the audio data from decoded frame into the filtergraph */
+				if (av_buffersrc_add_frame_flags(audio_buffersrc_ctx,
+					audio_frame_nat, 0) < 0) {
+					av_log(NULL, AV_LOG_ERROR, "Error while feeding the audio filtergraph\n");
+					break;
+				}
+
+				/* pull filtered audio from the filtergraph */
+				while (1) {
+
+					/* if the renderer has not finished we must wait */
+					while (inst->audio_frame_state[inst->audio_decode_index] != 0) {
+						pthread_mutex_lock(&inst->audio_lock);
+						if (inst->audio_frame_state[inst->audio_decode_index] != 0) {
+							/*fprintf(stderr, "mb_player: "
+								"Decoder waiting for audio thread\n"); */
+							pthread_cond_wait(&inst->audio_signal,
+								&inst->audio_lock);
+						}
+						pthread_mutex_unlock(&inst->audio_lock);
+					}
+
+					ret = av_buffersink_get_frame(audio_buffersink_ctx,
+						inst->audio_frame[inst->audio_decode_index]);
+					if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+						av_frame_unref(inst->audio_frame[inst->audio_decode_index]);
+						break;
+					}
+					if (ret < 0) {
+						av_frame_unref(inst->audio_frame[inst->audio_decode_index]);
+						goto decoder_exit;
+					}
+
+					/* update the buffer index and signal renderer thread */
+					pthread_mutex_lock(&inst->audio_lock);
+					inst->audio_frame_state[inst->audio_decode_index] = 1;
+					inst->audio_decode_index++;
+					inst->audio_decode_index %= MB_AUDIO_BUFFER_FRAMES;
+					inst->audio_frames++;
+					pthread_cond_signal(&inst->audio_signal);
+					pthread_mutex_unlock(&inst->audio_lock);
+
+				}
+			}
+		}
+		/* free packet */
+		av_free_packet(&packet);
+	}
+
+decoder_exit:
+	fprintf(stderr, "player: Audio decoder exiting\n");
+
+	if (audio_frame_nat != NULL) {
+		av_free(audio_frame_nat);
+	}
+	if (audio_codec_ctx != NULL) {
+		avcodec_close(audio_codec_ctx);
+	}
+
+
+	return NULL;
+}
 
 /**
  * mb_player_vdec_thread() -- This is the main decoding loop
@@ -981,19 +1149,12 @@ static void*
 mb_player_stream_decode(void *arg)
 {
 	struct mbp *inst = (struct mbp*) arg;
-	int i, finished;
-	AVPacket packet, packet1;
+	int i;
+	AVPacket packet;
+
 
 	MB_DEBUG_SET_THREAD_NAME("stream_decoder");
 
-
-	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
-	int audio_stream_index = -1;
-	AVCodecContext *audio_codec_ctx = NULL;
-	AVFrame *audio_frame_nat = NULL;
-	AVFilterGraph *audio_filter_graph = NULL;
-	AVFilterContext *audio_buffersink_ctx = NULL;
-	AVFilterContext *audio_buffersrc_ctx = NULL;
 
 	assert(inst != NULL);
 	assert(inst->media_file != NULL);
@@ -1024,6 +1185,9 @@ mb_player_stream_decode(void *arg)
 		goto decoder_exit;
 	}
 
+	/* dump file info */
+	av_dump_format(inst->fmt_ctx, 0, inst->media_file, 0);
+
 	inst->renderer_quit = 0;
 	inst->video_decoder_quit = 0;
 	inst->video_playback_index = 0;
@@ -1041,9 +1205,6 @@ mb_player_stream_decode(void *arg)
 	fprintf(stderr, "mb_player: Video stream: %i\n", inst->video_stream_index);
 
 
-	/* dump file info */
-	av_dump_format(inst->fmt_ctx, 0, inst->media_file, 0);
-
 	/* we're ready to start decoding, but first let us fire
 	 * the rendering thread */
 	pthread_mutex_lock(&inst->renderer_lock);
@@ -1056,41 +1217,23 @@ mb_player_stream_decode(void *arg)
 	pthread_mutex_unlock(&inst->renderer_lock);
 
 
-	/* open the audio codec */
-	if (open_codec_context(&audio_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
-		audio_codec_ctx = inst->fmt_ctx->streams[audio_stream_index]->codec;	
-	}
-	if (audio_codec_ctx == NULL) {
-		goto decoder_exit;
-	}
-
-	/* allocate audio frames */
-	audio_frame_nat = av_frame_alloc(); /* native */
-	if (audio_frame_nat == NULL) {
-		fprintf(stderr, "mb_player: Could not allocate audio frames\n");
-		goto decoder_exit;
-	}
-
-	/* initialize video filter graph */
-	fprintf(stderr, "mb_player: audio_filters: %s\n",
-		audio_filters);
-	if (mb_player_initaudiofilters(inst->fmt_ctx, audio_codec_ctx,
-		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
-		audio_filters, audio_stream_index) < 0) {
-		fprintf(stderr, "mb_player: Could not init filter graph!\n");
-		goto decoder_exit;
-	}
-
-	/* allocate filtered frames */
+	/* allocate filtered audio frames */
 	inst->audio_decode_index = 0;
 	inst->audio_playback_index = 0;
 	inst->audio_frames = 0;
 	inst->audio_quit = 0;
+	inst->audio_decoder_quit = 0;
+	inst->audio_stream_index = -1;
+	inst->audio_packet_write_index = 0;
+	inst->audio_packet_read_index = 0;
 
 	for (i = 0; i < MB_AUDIO_BUFFER_FRAMES; i++) {
 		inst->audio_frame[i] = av_frame_alloc();
 		inst->audio_frame_state[i] = 0;
 		assert(inst->audio_frame[i] != NULL);
+	}
+	for (i = 0; i < MB_AUDIO_BUFFER_PACKETS; i++) {
+		inst->audio_packet_state[i] = 0;
 	}
 
 	/* start audio thread and wait until it's ready to play */
@@ -1100,6 +1243,16 @@ mb_player_stream_decode(void *arg)
 	}
 	pthread_cond_wait(&inst->audio_signal, &inst->audio_lock);
 	pthread_mutex_unlock(&inst->audio_lock);
+
+	/* start the audio decoder thread and wait until it's ready to decode */
+	pthread_mutex_lock(&inst->audio_decoder_lock);
+	if (pthread_create(&inst->audio_decoder_thread, NULL, mb_player_audio_decode, inst) != 0) {
+		abort();
+	}
+	pthread_cond_wait(&inst->audio_decoder_signal, &inst->audio_decoder_lock);
+	pthread_mutex_unlock(&inst->audio_decoder_lock);
+
+	fprintf(stderr, "Stream decoder ready\n");
 
 	/* start decoding */
 	while ((inst->action & MB_PLAYER_ACTION_STOP) == 0 && av_read_frame(inst->fmt_ctx, &packet) >= 0) {
@@ -1115,6 +1268,7 @@ mb_player_stream_decode(void *arg)
 					}
 					continue;
 				}
+				/* unlocked bellow */
 			}
 			
 			/* save the packet and signal decoder thread */
@@ -1123,70 +1277,27 @@ mb_player_stream_decode(void *arg)
 			pthread_cond_signal(&inst->video_decoder_signal);
 			pthread_mutex_unlock(&inst->video_decoder_lock);
 
-		} else if (packet.stream_index == audio_stream_index) {
-
-			packet1 = packet;
-
-			/* decode audio frame */
-			while (packet1.size > 0) {
-				finished = 0;
-				i = avcodec_decode_audio4(audio_codec_ctx, audio_frame_nat,
-					&finished, &packet1);
-				if (i < 0) {
-					av_log(NULL, AV_LOG_ERROR, "Error decoding audio\n");
+		} else if (packet.stream_index == inst->audio_stream_index) {
+			while (inst->audio_packet_state[inst->audio_packet_write_index] == 1) {
+				pthread_mutex_lock(&inst->audio_decoder_lock);
+				if (inst->audio_packet_state[inst->audio_packet_write_index] == 1) {
+					pthread_cond_wait(&inst->audio_decoder_signal, &inst->audio_decoder_lock);
+					pthread_mutex_unlock(&inst->audio_decoder_lock);
+					if (inst->action & MB_PLAYER_ACTION_STOP) {
+						goto decoder_exit;
+					}
 					continue;
 				}
-				packet1.size -= i;
-				packet1.data += i;
-
-				if (finished) {
-			                /* push the audio data from decoded frame into the filtergraph */
-					if (av_buffersrc_add_frame_flags(audio_buffersrc_ctx,
-						audio_frame_nat, 0) < 0) {
-						av_log(NULL, AV_LOG_ERROR, "Error while feeding the audio filtergraph\n");
-						break;
-					}
-
-					/* pull filtered audio from the filtergraph */
-					while (1) {
-
-						/* if the renderer has not finished we must wait */
-						while (inst->audio_frame_state[inst->audio_decode_index] != 0) {
-							pthread_mutex_lock(&inst->audio_lock);
-							if (inst->audio_frame_state[inst->audio_decode_index] != 0) {
-								/*fprintf(stderr, "mb_player: "
-									"Decoder waiting for audio thread\n"); */
-								pthread_cond_wait(&inst->audio_signal,
-									&inst->audio_lock);
-							}
-							pthread_mutex_unlock(&inst->audio_lock);
-						}
-
-						i = av_buffersink_get_frame(audio_buffersink_ctx,
-							inst->audio_frame[inst->audio_decode_index]);
-						if (i == AVERROR(EAGAIN) || i == AVERROR_EOF) {
-							av_frame_unref(inst->audio_frame[inst->audio_decode_index]);
-							break;
-						}
-						if (i < 0) {
-							av_frame_unref(inst->audio_frame[inst->audio_decode_index]);
-							goto decoder_exit;
-						}
-
-						/* update the buffer index and signal renderer thread */
-						pthread_mutex_lock(&inst->audio_lock);
-						inst->audio_frame_state[inst->audio_decode_index] = 1;
-						inst->audio_decode_index++;
-						inst->audio_decode_index %= MB_AUDIO_BUFFER_FRAMES;
-						inst->audio_frames++;
-						pthread_cond_signal(&inst->audio_signal);
-						pthread_mutex_unlock(&inst->audio_lock);
-
-					}
-				}
+				/* unlock below */
 			}
-			/* free packet */
-			av_free_packet(&packet);
+			/* save the packet and signal decoder */
+			inst->audio_packet[inst->audio_packet_write_index] = packet;
+			inst->audio_packet_state[inst->audio_packet_write_index] = 1;
+			pthread_cond_signal(&inst->audio_decoder_signal);
+			pthread_mutex_unlock(&inst->audio_decoder_lock);
+
+			inst->audio_packet_write_index++;
+			inst->audio_packet_write_index %= MB_AUDIO_BUFFER_PACKETS;
 		}
 	}
 
@@ -1202,6 +1313,7 @@ decoder_exit:
 	fprintf(stderr, "player: Video renderer exited\n");
 
 	/* signal the video decoder thread to exit and join it */
+	/* NOTE: Since this thread it's a midleman it waits on both locks */
 	pthread_mutex_lock(&inst->video_decoder_lock);
 	inst->video_decoder_quit = 1;
 	pthread_cond_signal(&inst->video_decoder_signal);
@@ -1232,17 +1344,34 @@ decoder_exit:
 	pthread_join(inst->audio_thread, NULL);
 	fprintf(stderr, "player: Audio player exited\n");
 
+	/* signal the audio decoder thread to exit and join it */
+	/* NOTE: Since this thread it's a midleman it waits on both locks */
+	pthread_mutex_lock(&inst->audio_decoder_lock);
+	inst->audio_decoder_quit = 1;
+	pthread_cond_signal(&inst->audio_decoder_signal);
+	pthread_mutex_unlock(&inst->audio_decoder_lock);
+
+	pthread_mutex_lock(&inst->audio_lock);
+	pthread_cond_signal(&inst->audio_signal);
+	pthread_mutex_unlock(&inst->audio_lock);
+
+	pthread_mutex_lock(&inst->audio_decoder_lock);
+	inst->video_decoder_quit = 1;
+	pthread_cond_signal(&inst->audio_decoder_signal);
+	pthread_mutex_unlock(&inst->audio_decoder_lock);
+
+	pthread_mutex_lock(&inst->audio_lock);
+	pthread_cond_signal(&inst->audio_signal);
+	pthread_mutex_unlock(&inst->audio_lock);
+
+	pthread_join(inst->audio_decoder_thread, NULL);
+	fprintf(stderr, "player: Audio decoder exited\n");
+
+
 	/* clean audio stuff */
 	for (i = 0; i < MB_AUDIO_BUFFER_FRAMES; i++) {
 		av_free(inst->audio_frame[i]);
 	}
-	if (audio_frame_nat != NULL) {
-		av_free(audio_frame_nat);
-	}
-	if (audio_codec_ctx != NULL) {
-		avcodec_close(audio_codec_ctx);
-	}
-
 	/* clean video stuff */
 	if (inst->fmt_ctx != NULL) {
 		avformat_close_input(&inst->fmt_ctx);
@@ -1503,14 +1632,14 @@ mbp_init(void)
 
 	/* initialize pthreads primitives */
 	if (pthread_mutex_init(&inst->resume_lock, NULL) != 0 ||
-#if (MB_VIDEO_BUFFER_FRAMES > 1)
 		pthread_mutex_init(&inst->renderer_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->audio_lock, NULL) != 0 ||
+		pthread_mutex_init(&inst->audio_decoder_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->video_decoder_lock, NULL) != 0 ||
 		pthread_cond_init(&inst->video_decoder_signal, NULL) != 0 ||
+		pthread_cond_init(&inst->audio_decoder_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->audio_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->renderer_signal, NULL) != 0 ||
-#endif
 		pthread_cond_init(&inst->resume_signal, NULL) != 0) {
 		fprintf(stderr, "mb_player: pthreads initialization failed\n");
 		free(inst);
