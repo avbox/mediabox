@@ -48,9 +48,9 @@
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_BGRA)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_VIDEO_BUFFER_FRAMES	(3)
-#define MB_AUDIO_BUFFER_FRAMES  (10)
-#define MB_AUDIO_BUFFER_PACKETS (50)
+#define MB_VIDEO_BUFFER_FRAMES	(5)
+#define MB_AUDIO_BUFFER_FRAMES  (30)
+#define MB_AUDIO_BUFFER_PACKETS (100)
 
 #define MB_DECODER_PRINT_FPS
 
@@ -336,8 +336,9 @@ mb_player_video(void *arg)
 			fps = frames;
 			frames = 0;
 		}
-		fprintf(stderr, "Fps: %i | Video frames available: %i | Audio Frames: %i\r",
+		fprintf(stdout, "Fps: %i | Video frames available: %i | Audio Frames: %i\r",
 			fps, inst->frames_avail, inst->audio_frames);
+		fflush(stdout);
 #endif
 
 		/* update buffer state and signal decoder */
