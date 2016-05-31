@@ -6,4 +6,7 @@
 int
 mbi_tcp_init(void);
 
+void
+mbi_tcp_destroy(void);
+
 #endif

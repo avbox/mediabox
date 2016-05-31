@@ -160,6 +160,7 @@ void
 mbi_destroy(void)
 {
 	mbi_directfb_destroy();
+	mbi_tcp_destroy();
 	/* mbi_tcp_destroy(); */
 	mbi_event_send(MBI_EVENT_EXIT);
 	pthread_join(input_loop_thread, NULL);

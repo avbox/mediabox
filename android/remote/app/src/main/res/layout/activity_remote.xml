@@ -10,8 +10,114 @@
     android:paddingTop="@dimen/activity_vertical_margin"
     tools:context="com.mediabox.mediaboxremote.RemoteActivity">
 
-    <TextView
+    <Button
+        style="?android:attr/buttonStyleSmall"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Hello World!"/>
+        android:text="MENU"
+        android:id="@+id/btnMenu"
+        android:layout_marginTop="64dp"
+        android:layout_below="@+id/button11"
+        android:layout_centerHorizontal="true"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="  UP  "
+        android:id="@+id/btnUp"
+        android:layout_alignBottom="@+id/btnMenu"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="54dp"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="DOWN"
+        android:id="@+id/btnDown"
+        android:layout_centerHorizontal="true"
+        android:layout_below="@+id/btnMenu"
+        android:layout_toLeftOf="@+id/btnRight"
+        android:layout_toStartOf="@+id/btnRight"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="LEFT"
+        android:id="@+id/btnLeft"
+        android:layout_alignTop="@+id/btnMenu"
+        android:layout_toLeftOf="@+id/btnDown"
+        android:layout_toStartOf="@+id/btnDown"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="RIGHT"
+        android:id="@+id/btnRight"
+        android:layout_alignTop="@+id/btnMenu"
+        android:layout_toRightOf="@+id/btnUp"
+        android:layout_toEndOf="@+id/btnUp"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="PLAY"
+        android:id="@+id/btnPlay"
+        android:layout_marginBottom="33dp"
+        android:layout_alignParentBottom="true"
+        android:layout_toLeftOf="@+id/btnPause"
+        android:layout_toStartOf="@+id/btnPause"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="PAUSE"
+        android:id="@+id/btnPause"
+        android:layout_alignTop="@+id/btnPlay"
+        android:layout_alignRight="@+id/btnRight"
+        android:layout_alignEnd="@+id/btnRight"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="STOP"
+        android:id="@+id/btnStop"
+        android:layout_alignTop="@+id/btnPlay"
+        android:layout_toLeftOf="@+id/btnPlay"
+        android:layout_toStartOf="@+id/btnPlay"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="BACK"
+        android:id="@+id/btnBack"
+        android:layout_below="@+id/btnDown"
+        android:layout_alignParentLeft="true"
+        android:layout_alignParentStart="true"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ENTER"
+        android:id="@+id/btnNext"
+        android:layout_below="@+id/btnDown"
+        android:layout_alignParentRight="true"
+        android:layout_alignParentEnd="true"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="CONNECT"
+        android:id="@+id/button11"
+        android:layout_alignParentTop="true"
+        android:layout_centerHorizontal="true"/>
 </RelativeLayout>
