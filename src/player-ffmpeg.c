@@ -49,7 +49,7 @@
 
 /* This is the # of frames to decode ahead of time */
 #define MB_VIDEO_BUFFER_FRAMES	(3)
-#define MB_AUDIO_BUFFER_FRAMES  (1)
+#define MB_AUDIO_BUFFER_FRAMES  (10)
 #define MB_AUDIO_BUFFER_PACKETS (50)
 
 #define MB_DECODER_PRINT_FPS
