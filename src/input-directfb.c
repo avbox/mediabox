@@ -44,6 +44,8 @@ mbi_directfb_event_loop(void *arg)
 				case DIKS_SMALL_Q:      mbi_event_send(MBI_EVENT_QUIT); break;
 				case DIKS_CAPITAL_P:    mbi_event_send(MBI_EVENT_PLAY); break;
 				case DIKS_SMALL_P:      mbi_event_send(MBI_EVENT_PLAY); break;
+				case DIKS_CAPITAL_S:    mbi_event_send(MBI_EVENT_STOP); break;
+				case DIKS_SMALL_S:      mbi_event_send(MBI_EVENT_STOP); break;
 				default: break;
 				}
 				break;

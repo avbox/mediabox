@@ -77,8 +77,10 @@ mbs_show_dialog(void)
 		switch (e) {
 		case MBI_EVENT_QUIT:
 		{
+#ifndef NDEBUG
 			close(fd);
 			quit = 1;
+#endif
 			break;
 		}
 		case MBI_EVENT_MENU:
@@ -114,6 +116,8 @@ mbs_show_dialog(void)
 		}
 		case MBI_EVENT_STOP:
 		{
+			fprintf(stderr, "shell: STOP event received\n");
+
 			enum mb_player_status status;
 			status = mb_player_getstatus(player);
 			if (status != MB_PLAYER_STATUS_READY) {
