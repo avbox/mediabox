@@ -49,7 +49,7 @@
 
 /* This is the # of frames to decode ahead of time */
 #define MB_VIDEO_BUFFER_FRAMES	(3)
-#define MB_AUDIO_BUFFER_FRAMES  (50)
+#define MB_AUDIO_BUFFER_FRAMES  (1)
 
 #define MB_DECODER_PRINT_FPS
 
@@ -97,12 +97,13 @@ struct mbp
 	int video_stream_index;
 	AVPacket video_packet;
 	int video_packet_state;
+	uint8_t frame_repeat[MB_VIDEO_BUFFER_FRAMES];
 	uint8_t *frame_data[MB_VIDEO_BUFFER_FRAMES];
 	char frame_state[MB_VIDEO_BUFFER_FRAMES];
 	int64_t frame_pts[MB_VIDEO_BUFFER_FRAMES];
 	AVRational frame_time_base[MB_VIDEO_BUFFER_FRAMES];
 	int frames_avail;
-	int next_read_buf;
+	int video_playback_index;
 	int decode_frame_index;
 	int renderer_quit;
 	int audio_quit;
@@ -179,8 +180,10 @@ mb_player_render(void *arg)
 {
 	uint8_t *buf;
 	int64_t last_pts = AV_NOPTS_VALUE, frame_pts, delay;
-	struct timespec last_real_pts, real_pts;
+	struct timespec last_timestamp, timestamp;
 	struct mbp *inst = (struct mbp*) arg;
+	unsigned int screen = 0;
+	
 #ifdef MB_DECODER_PRINT_FPS
 	struct timespec new_tp, last_tp, elapsed_tp;
 	int frames = 0, fps = 0;
@@ -235,64 +238,33 @@ mb_player_render(void *arg)
 	(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
 #endif
 
+	/* get the 1st frame */
+	while (inst->frame_state[inst->video_playback_index] != 1) {
+		pthread_mutex_lock(&inst->renderer_lock);
+		if (inst->renderer_quit) {
+			pthread_mutex_unlock(&inst->renderer_lock);
+			goto video_exit;
+		}
+		if (inst->frame_state[inst->video_playback_index] != 1) {
+			/* fprintf(stderr, "mb_player[ffmpeg]: Waiting for decoder\n"); */
+			pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
+			pthread_mutex_unlock(&inst->renderer_lock);
+			continue;
+		}
+		pthread_mutex_unlock(&inst->renderer_lock);
+		break;
+	}
+
+
 	while (!inst->renderer_quit) {
 
-		if (inst->action != MB_PLAYER_ACTION_NONE) {
-			/* this is where we pause -- not done yet */
-			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
-				fprintf(stderr, "decoder: pausing\n");
-				pthread_mutex_lock(&inst->resume_lock);
-				inst->action &= ~MB_PLAYER_ACTION_PAUSE;
-				inst->status = MB_PLAYER_STATUS_PAUSED;
-				pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
-				inst->status = MB_PLAYER_STATUS_PLAYING;
-				pthread_mutex_unlock(&inst->resume_lock);
-			}
-		}
-
-		/* if there's no frame ready we must wait */
-		if (inst->frame_state[inst->next_read_buf] != 1) {
-			pthread_mutex_lock(&inst->renderer_lock);
-			if (inst->renderer_quit) {
-				pthread_mutex_unlock(&inst->renderer_lock);
-				goto video_exit;
-			}
-			if (inst->frame_state[inst->next_read_buf] != 1) {
-				/* fprintf(stderr, "mb_player[ffmpeg]: Waiting for decoder\n"); */
-				pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
-				pthread_mutex_unlock(&inst->renderer_lock);
-				continue;
-			}
-			pthread_mutex_unlock(&inst->renderer_lock);
-		}
-
-		frame_pts = inst->frame_pts[inst->next_read_buf];
-		buf = inst->frame_data[inst->next_read_buf];
-
-		if  (frame_pts != AV_NOPTS_VALUE) {
-			if (last_pts != AV_NOPTS_VALUE) {
-				int64_t elapsed;
-				/* sleep roughly the right amount of time;
-				 * usleep is in microseconds, just like AV_TIME_BASE. */
-				delay = av_rescale_q(frame_pts - last_pts,
-					inst->frame_time_base[inst->next_read_buf], AV_TIME_BASE_Q);
-				(void) clock_gettime(CLOCK_MONOTONIC, &real_pts);
-				elapsed = real_pts.tv_sec * 1000000000LL + real_pts.tv_nsec - 
-					(last_real_pts.tv_sec * 1000000000LL + last_real_pts.tv_nsec);
-				delay -= elapsed / 1000 + (elapsed % 1000 >= 500);
-				if (delay > 0 && delay < 1000000) {
-					usleep(delay);
-				}
-			}
-			last_pts = frame_pts;
-		}
+		buf = inst->frame_data[inst->video_playback_index];
 
 		/* wait for vsync */
-		unsigned int screen = 0;
 		(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
 
-		/* save the last real pts */
-		(void) clock_gettime(CLOCK_MONOTONIC, &last_real_pts);
+		/* save the real frame time */
+		(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
 
 		if (inst->use_fbdev) {
 			int x, y, pixelsz;
@@ -313,9 +285,8 @@ mb_player_render(void *arg)
 				}
 			}
 		} else  {
-			/* blit the frame */
-			mbv_window_blit_buffer(inst->window, buf,
-				inst->width, inst->height, 0, 0);
+			/* blit the frame through window manager */
+			mbv_window_blit_buffer(inst->window, buf, inst->width, inst->height, 0, 0);
 		}
 
 #ifdef MB_DECODER_PRINT_FPS
@@ -334,12 +305,64 @@ mb_player_render(void *arg)
 
 		/* update buffer state and signal decoder */
 		pthread_mutex_lock(&inst->renderer_lock);
-		inst->frame_state[inst->next_read_buf] = 0;
-		inst->next_read_buf++;
-		inst->next_read_buf %= MB_VIDEO_BUFFER_FRAMES;
+		inst->frame_state[inst->video_playback_index] = 0;
+		inst->video_playback_index++;
+		inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
 		inst->frames_avail--;
 		pthread_cond_signal(&inst->renderer_signal);
 		pthread_mutex_unlock(&inst->renderer_lock);
+
+		/* pause */
+		if (inst->action != MB_PLAYER_ACTION_NONE) {
+			/* this is where we pause -- not done yet */
+			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
+				fprintf(stderr, "decoder: pausing\n");
+				pthread_mutex_lock(&inst->resume_lock);
+				inst->action &= ~MB_PLAYER_ACTION_PAUSE;
+				inst->status = MB_PLAYER_STATUS_PAUSED;
+				pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
+				inst->status = MB_PLAYER_STATUS_PLAYING;
+				pthread_mutex_unlock(&inst->resume_lock);
+			}
+		}
+
+
+		/* if there's no frame ready we must wait */
+		if (inst->frame_state[inst->video_playback_index] != 1) {
+			pthread_mutex_lock(&inst->renderer_lock);
+			if (inst->renderer_quit) {
+				pthread_mutex_unlock(&inst->renderer_lock);
+				goto video_exit;
+			}
+			if (inst->frame_state[inst->video_playback_index] != 1) {
+				/* fprintf(stderr, "mb_player[ffmpeg]: Waiting for decoder\n"); */
+				pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
+				pthread_mutex_unlock(&inst->renderer_lock);
+				continue;
+			}
+			pthread_mutex_unlock(&inst->renderer_lock);
+		}
+
+		frame_pts = inst->frame_pts[inst->video_playback_index];
+
+		if  (frame_pts != AV_NOPTS_VALUE) {
+			if (last_pts != AV_NOPTS_VALUE) {
+				int64_t elapsed;
+				/* sleep roughly the right amount of time;
+				 * usleep is in microseconds, just like AV_TIME_BASE. */
+				delay = av_rescale_q(frame_pts - last_pts,
+					inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
+				delay += inst->frame_repeat[inst->video_playback_index] * (delay >> 1);
+				(void) clock_gettime(CLOCK_MONOTONIC, &timestamp);
+				elapsed = timestamp.tv_sec * 1000000000LL + timestamp.tv_nsec - 
+					(last_timestamp.tv_sec * 1000000000LL + last_timestamp.tv_nsec);
+				delay -= elapsed / 1000 + (elapsed % 1000 >= 500);
+				if (delay > 0 && delay < 1000000) {
+					usleep(delay);
+				}
+			}
+			last_pts = frame_pts;
+		}
 	}
 
 video_exit:
@@ -648,7 +671,7 @@ mb_player_adec_thread(void *arg)
 		2,
 		48000,
 		1,
-		500000)) < 0) {
+		1000000)) < 0) {
 		fprintf(stderr, "mb_player[ffmpeg]: snd_pcm_set_params() failed. ret=%i\n", ret);
 		snd_pcm_close(handle);
 		return NULL;
@@ -866,6 +889,7 @@ mb_player_video_decode(void *arg)
 
 				/* update the buffer index and signal renderer thread */
 				pthread_mutex_lock(&inst->renderer_lock);
+				inst->frame_repeat[inst->decode_frame_index] = video_frame_flt->repeat_pict;
 				inst->frame_state[inst->decode_frame_index] = 1;
 				inst->frame_pts[inst->decode_frame_index] = frame_pts;
 				inst->frame_time_base[inst->decode_frame_index] = 
@@ -967,7 +991,7 @@ mb_player_stream_decode(void *arg)
 	av_dump_format(inst->fmt_ctx, 0, inst->media_file, 0);
 
 	inst->renderer_quit = 0;
-	inst->next_read_buf = 0;
+	inst->video_playback_index = 0;
 	inst->decode_frame_index = 0;
 	inst->frames_avail = 0;
 	inst->video_packet_state = 0;
