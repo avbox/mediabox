@@ -48,10 +48,10 @@
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_BGRA)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_VIDEO_BUFFER_FRAMES  (33)
-#define MB_VIDEO_BUFFER_PACKETS (33)
-#define MB_AUDIO_BUFFER_FRAMES  (100)
-#define MB_AUDIO_BUFFER_PACKETS (100)
+#define MB_VIDEO_BUFFER_FRAMES  (100)
+#define MB_VIDEO_BUFFER_PACKETS (100)
+#define MB_AUDIO_BUFFER_FRAMES  (300)
+#define MB_AUDIO_BUFFER_PACKETS (300)
 
 #define MB_DECODER_PRINT_FPS
 
@@ -101,6 +101,7 @@ struct mbp
 	int audio_frames;
 	int audio_packets;
 	int audio_quit;
+	int audio_paused;
 	pthread_cond_t audio_signal;
 	pthread_mutex_t audio_lock;
 	pthread_t audio_thread;
@@ -132,6 +133,7 @@ struct mbp
 	int video_decoder_quit;
 	int video_packet_read_index;
 	int video_packet_write_index;
+	int video_paused;
 	pthread_cond_t video_decoder_signal;
 	pthread_mutex_t video_decoder_lock;
 	pthread_t video_decoder_thread;
@@ -221,7 +223,7 @@ mb_player_fbdev_render(struct mbp *inst,
 static inline void
 mb_player_printstatus(struct mbp *inst, int fps)
 {
-	fprintf(stdout, "| Fps: %i | Video Packets: %i | Video Frames: %i | Audio Packets: %i | Audio Frames: %i |\r",
+	fprintf(stdout, "| Fps: %03i | Video Packets: %03i | Video Frames: %03i | Audio Packets: %03i | Audio Frames: %03i |\r",
 		fps, inst->video_packets, inst->frames_avail, inst->audio_packets, inst->audio_frames);
 	fflush(stdout);
 
@@ -296,96 +298,8 @@ mb_player_video(void *arg)
 	(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
 #endif
 
-	/* get the 1st frame */
-	while (inst->frame_state[inst->video_playback_index] != 1) {
-		pthread_mutex_lock(&inst->renderer_lock);
-		if (inst->renderer_quit) {
-			pthread_mutex_unlock(&inst->renderer_lock);
-			goto video_exit;
-		}
-		if (inst->frame_state[inst->video_playback_index] != 1) {
-			/* fprintf(stderr, "mb_player: Waiting for decoder\n"); */
-			pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
-			pthread_mutex_unlock(&inst->renderer_lock);
-			continue;
-		}
-		pthread_mutex_unlock(&inst->renderer_lock);
-		break;
-	}
-
 
 	while (!inst->renderer_quit) {
-
-		buf = inst->frame_data[inst->video_playback_index];
-
-		/* wait for vsync */
-		(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
-
-		/* save the real frame time */
-		(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
-
-		if (inst->use_fbdev) {
-			#if 0
-			int x, y, pixelsz;
-			uint8_t *m = (uint8_t*) mbv_dfb_getscreenmask();
-
-			pixelsz = vinfo.bits_per_pixel / CHAR_BIT;
-
-			for (y = 0; y < vinfo.yres; y++) {
-				for (x = 0; x < vinfo.xres; x++) {
-					if (!m[(inst->width * y) + x]) {
-						long location = (x+vinfo.xoffset) * pixelsz + (y+vinfo.yoffset) * finfo.line_length;
-						uint32_t *ppix = (uint32_t*) buf;
-						*((uint32_t*)(fb_mem + location)) = *(ppix + (((inst->width * y) + x)));
-					}
-				}
-			}
-			#else
-			/* TODO: move this to the directfb driver */
-			mb_player_fbdev_render(inst, &vinfo, &finfo, fb_mem, buf);
-			#endif
-		} else  {
-			/* blit the frame through window manager */
-			mbv_window_blit_buffer(inst->window, buf, inst->width, inst->height, 0, 0);
-		}
-
-#ifdef MB_DECODER_PRINT_FPS
-		/* calculate fps */
-		frames++;
-		(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
-		elapsed_tp = timediff(&last_tp, &new_tp);
-		if (elapsed_tp.tv_sec > 0) {
-			(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
-			fps = frames;
-			frames = 0;
-		}
-		mb_player_printstatus(inst, fps);
-#endif
-
-		/* update buffer state and signal decoder */
-		pthread_mutex_lock(&inst->renderer_lock);
-		inst->frame_state[inst->video_playback_index] = 0;
-		inst->video_playback_index++;
-		inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
-		inst->frames_avail--;
-		pthread_cond_signal(&inst->renderer_signal);
-		pthread_mutex_unlock(&inst->renderer_lock);
-
-		/* pause */
-		if (inst->action != MB_PLAYER_ACTION_NONE) {
-			/* this is where we pause -- not done yet */
-			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
-				fprintf(stderr, "decoder: pausing\n");
-				pthread_mutex_lock(&inst->resume_lock);
-				inst->action &= ~MB_PLAYER_ACTION_PAUSE;
-				inst->status = MB_PLAYER_STATUS_PAUSED;
-				pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
-				inst->status = MB_PLAYER_STATUS_PLAYING;
-				pthread_mutex_unlock(&inst->resume_lock);
-			}
-		}
-
-
 		/* if there's no frame ready we must wait */
 		if (inst->frame_state[inst->video_playback_index] != 1) {
 			pthread_mutex_lock(&inst->renderer_lock);
@@ -418,9 +332,68 @@ mb_player_video(void *arg)
 				delay -= elapsed / 1000 + (elapsed % 1000 >= 500);
 				if (delay > 0 && delay < 1000000) {
 					usleep(delay);
+				} else if (delay < 0) {
+					last_pts = frame_pts;
+					(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
+					goto frame_complete;
 				}
 			}
 			last_pts = frame_pts;
+		}
+
+		buf = inst->frame_data[inst->video_playback_index];
+
+		/* wait for vsync */
+		(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
+
+		/* save the real frame time */
+		(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
+
+		if (inst->use_fbdev) {
+			mb_player_fbdev_render(inst, &vinfo, &finfo, fb_mem, buf);
+		} else  {
+			/* blit the frame through window manager */
+			mbv_window_blit_buffer(inst->window, buf, inst->width, inst->height, 0, 0);
+		}
+
+#ifdef MB_DECODER_PRINT_FPS
+		/* calculate fps */
+		frames++;
+		(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
+		elapsed_tp = timediff(&last_tp, &new_tp);
+		if (elapsed_tp.tv_sec > 0) {
+			(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
+			fps = frames;
+			frames = 0;
+		}
+		mb_player_printstatus(inst, fps);
+#endif
+
+frame_complete:
+		/* update buffer state and signal decoder */
+		pthread_mutex_lock(&inst->renderer_lock);
+		inst->frame_state[inst->video_playback_index] = 0;
+		inst->video_playback_index++;
+		inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
+		inst->frames_avail--;
+		pthread_cond_signal(&inst->renderer_signal);
+		pthread_mutex_unlock(&inst->renderer_lock);
+
+		/* pause */
+		if (inst->action != MB_PLAYER_ACTION_NONE) {
+			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
+				/* Since the audio player needs to flush the buffer before
+				 * pausing we need to wait for it to pause first or else we
+				 * get out of sync */
+				if (inst->audio_paused) {
+					fprintf(stderr, "decoder: pausing\n");
+					pthread_mutex_lock(&inst->resume_lock);
+					inst->video_paused = 1;
+					pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
+					inst->video_paused = 0;
+					pthread_mutex_unlock(&inst->resume_lock);
+				}
+			}
 		}
 	}
 
@@ -726,6 +699,7 @@ mb_player_audio(void *arg)
 
 	assert(inst != NULL);
 	assert(inst->audio_quit == 0);
+	assert(inst->audio_paused == 0);
 
 
 	/* initialize alsa device */
@@ -804,6 +778,22 @@ mb_player_audio(void *arg)
 
 		/* if we've filled the buffer send it to alsa and reset the counter */
 		if (inst->alsa_buffer_count == (MB_ALSA_BUFFER_SIZE / 4)) {
+
+			/* pause */
+			if (inst->action != MB_PLAYER_ACTION_NONE) {
+				if (inst->action & MB_PLAYER_ACTION_PAUSE) {
+					fprintf(stderr, "decoder: pausing\n");
+					pthread_mutex_lock(&inst->resume_lock);
+					snd_pcm_drain(handle);
+					inst->audio_paused = 1;
+					pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
+					inst->audio_paused = 0;
+					pthread_mutex_unlock(&inst->resume_lock);
+					snd_pcm_reset(handle);
+					snd_pcm_prepare(handle);
+				}
+			}
+
 
 			/* play the frame */ 
 			frames = snd_pcm_writei(handle, inst->alsa_buffer,
@@ -1234,6 +1224,8 @@ mb_player_stream_decode(void *arg)
 	assert(inst->window != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_PLAYING);
 	assert(inst->fmt_ctx == NULL);
+	assert(inst->audio_paused == 0);
+	assert(inst->video_paused == 0);
 
 
 	/* get the size of the window */
@@ -1502,7 +1494,12 @@ mbp_play(struct mbp *inst, const char * const path)
 		if (inst->status == MB_PLAYER_STATUS_PAUSED) {
 			pthread_mutex_lock(&inst->resume_lock);
 			pthread_cond_signal(&inst->resume_signal);
+			pthread_cond_signal(&inst->resume_signal);
 			pthread_mutex_unlock(&inst->resume_lock);
+			while (inst->audio_paused || inst->video_paused) {
+				usleep(5000);
+			}
+			inst->status = MB_PLAYER_STATUS_PLAYING;
 			return 0;
 		}
 		fprintf(stderr, "mbp_play() failed -- NULL path\n");
@@ -1579,8 +1576,13 @@ mbp_pause(struct mbp* inst)
 	/* request pause and wait for player thread to pause */
 	inst->action |= MB_PLAYER_ACTION_PAUSE;
 
-	/* TODO: Don't spin */
-	while (inst->status != MB_PLAYER_STATUS_PAUSED);
+	/* wait for player to pause */
+	while (inst->audio_paused == 0 || inst->video_paused == 0) {
+		usleep(5000);
+	}
+
+	inst->action &= ~MB_PLAYER_ACTION_PAUSE;
+	inst->status  =  MB_PLAYER_STATUS_PAUSED;
 	return 0;
 }
 
@@ -1737,6 +1739,8 @@ mbp_init(void)
 	inst->bufsz = 0;
 	inst->use_fbdev = 1;
 	inst->video_stream_index = -1;
+	inst->video_paused = 0;
+	inst->audio_paused = 0;
 	inst->action = MB_PLAYER_ACTION_NONE;
 	inst->status = MB_PLAYER_STATUS_READY;
 
