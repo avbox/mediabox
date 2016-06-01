@@ -48,10 +48,10 @@
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_BGRA)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_VIDEO_BUFFER_FRAMES  (100)
-#define MB_VIDEO_BUFFER_PACKETS (100)
-#define MB_AUDIO_BUFFER_FRAMES  (300)
-#define MB_AUDIO_BUFFER_PACKETS (300)
+#define MB_VIDEO_BUFFER_FRAMES  (33)
+#define MB_VIDEO_BUFFER_PACKETS (33)
+#define MB_AUDIO_BUFFER_FRAMES  (100)
+#define MB_AUDIO_BUFFER_PACKETS (100)
 
 #define MB_DECODER_PRINT_FPS
 
