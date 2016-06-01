@@ -218,6 +218,16 @@ mb_player_fbdev_render(struct mbp *inst,
 }
 
 
+static inline void
+mb_player_printstatus(struct mbp *inst, int fps)
+{
+	fprintf(stdout, "| Fps: %i | Video Packets: %i | Video Frames: %i | Audio Packets: %i | Audio Frames: %i |\r",
+		fps, inst->video_packets, inst->frames_avail, inst->audio_packets, inst->audio_frames);
+	fflush(stdout);
+
+}
+
+
 /**
  * mb_player_vrend_thread() -- Video rendering thread.
  */
@@ -246,6 +256,7 @@ mb_player_video(void *arg)
 	MB_DEBUG_SET_THREAD_NAME("video_playback");
 
 	assert(inst != NULL);
+	assert(inst->renderer_quit == 0);
 
 	fprintf(stderr, "mb_player: Video renderer started\n");
 
@@ -348,9 +359,7 @@ mb_player_video(void *arg)
 			fps = frames;
 			frames = 0;
 		}
-		fprintf(stdout, "| Fps: %i | Video Packets: %i | Video Frames: %i | Audio Packets: %i | Audio Frames: %i |\r",
-			fps, inst->video_packets, inst->frames_avail, inst->audio_packets, inst->audio_frames);
-		fflush(stdout);
+		mb_player_printstatus(inst, fps);
 #endif
 
 		/* update buffer state and signal decoder */
@@ -705,7 +714,7 @@ open_codec_context(int *stream_idx,
  * mb_player_adec_thread() -- This is the main decoding loop
  */
 static void*
-mb_player_adec_thread(void *arg)
+mb_player_audio(void *arg)
 {
 	int ret;
 	struct mbp *inst = (struct mbp*) arg;
@@ -773,6 +782,10 @@ mb_player_adec_thread(void *arg)
 		
 		int nb_samples;
 		int nb_wanted_samples;
+
+		/**
+		 * TODO: This double buffering seems to make no difference at all
+		 */
 
 		nb_wanted_samples = (MB_ALSA_BUFFER_SIZE / 4) - inst->alsa_buffer_count;
 		nb_samples = inst->audio_frame[inst->audio_playback_index]->nb_samples;
@@ -916,6 +929,7 @@ mb_player_video_decode(void *arg)
 	pthread_mutex_lock(&inst->video_decoder_lock);
 	pthread_cond_signal(&inst->video_decoder_signal);
 	pthread_mutex_unlock(&inst->video_decoder_lock);
+
 
 	while (!inst->video_decoder_quit) {
 		/* if there's no frame to decode wait */
@@ -1253,7 +1267,7 @@ mb_player_stream_decode(void *arg)
 	inst->decode_frame_index = 0;
 	inst->frames_avail = 0;
 	inst->video_packet_read_index = 0;
-	inst->video_packet_read_index = 0;
+	inst->video_packet_write_index = 0;
 	inst->video_packets = 0;
 
 	/* initialize all packet states */
@@ -1269,18 +1283,6 @@ mb_player_stream_decode(void *arg)
 	pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
 	pthread_mutex_unlock(&inst->video_decoder_lock);
 	fprintf(stderr, "mb_player: Video stream: %i\n", inst->video_stream_index);
-
-
-	/* we're ready to start decoding, but first let us fire
-	 * the rendering thread */
-	pthread_mutex_lock(&inst->renderer_lock);
-	if (pthread_create(&inst->renderer_thread, NULL, mb_player_video, inst) != 0) {
-		fprintf(stderr, "mb_player: Could not start renderer thread\n");
-		pthread_mutex_unlock(&inst->renderer_lock);
-		goto decoder_exit;
-	}
-	pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
-	pthread_mutex_unlock(&inst->renderer_lock);
 
 
 	/* allocate filtered audio frames */
@@ -1304,14 +1306,6 @@ mb_player_stream_decode(void *arg)
 		inst->audio_packet_state[i] = 0;
 	}
 
-	/* start audio thread and wait until it's ready to play */
-	pthread_mutex_lock(&inst->audio_lock);
-	if (pthread_create(&inst->audio_thread, NULL, mb_player_adec_thread, inst) != 0) {
-		abort();
-	}
-	pthread_cond_wait(&inst->audio_signal, &inst->audio_lock);
-	pthread_mutex_unlock(&inst->audio_lock);
-
 	/* start the audio decoder thread and wait until it's ready to decode */
 	pthread_mutex_lock(&inst->audio_decoder_lock);
 	if (pthread_create(&inst->audio_decoder_thread, NULL, mb_player_audio_decode, inst) != 0) {
@@ -1321,6 +1315,9 @@ mb_player_stream_decode(void *arg)
 	pthread_mutex_unlock(&inst->audio_decoder_lock);
 
 	fprintf(stderr, "Stream decoder ready\n");
+	pthread_mutex_lock(&inst->resume_lock);
+	pthread_cond_signal(&inst->resume_signal);
+	pthread_mutex_unlock(&inst->resume_lock);
 
 	/* start decoding */
 	while ((inst->action & MB_PLAYER_ACTION_STOP) == 0 && av_read_frame(inst->fmt_ctx, &packet) >= 0) {
@@ -1522,11 +1519,44 @@ mbp_play(struct mbp *inst, const char * const path)
 	inst->status = MB_PLAYER_STATUS_PLAYING;
 
 	/* start the main decoder thread */
+	pthread_mutex_lock(&inst->resume_lock);
 	if (pthread_create(&inst->thread, NULL, mb_player_stream_decode, inst) != 0) {
 		fprintf(stderr, "pthread_create() failed!\n");
 		inst->status = MB_PLAYER_STATUS_READY;
 		return -1;
 	}
+	pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
+	pthread_mutex_unlock(&inst->resume_lock);
+
+	/* wait for the buffers to fill up */
+	while (inst->audio_frames < MB_AUDIO_BUFFER_FRAMES ||
+		inst->frames_avail < MB_VIDEO_BUFFER_FRAMES) {
+		mb_player_printstatus(inst, 0);
+		usleep(5000);
+	}
+
+	fprintf(stderr, "player: Firing rendering threads\n");
+
+	/* we're ready to start decoding, but first let us fire
+	 * the rendering thread */
+	pthread_mutex_lock(&inst->renderer_lock);
+	pthread_mutex_lock(&inst->audio_lock);
+	if (pthread_create(&inst->renderer_thread, NULL, mb_player_video, inst) != 0) {
+		fprintf(stderr, "mb_player: Could not start renderer thread\n");
+		pthread_mutex_unlock(&inst->audio_lock);
+		pthread_mutex_unlock(&inst->renderer_lock);
+		return -1;
+	}
+	pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
+	if (pthread_create(&inst->audio_thread, NULL, mb_player_audio, inst) != 0) {
+		abort();
+	}
+	pthread_cond_wait(&inst->audio_signal, &inst->audio_lock);
+	pthread_mutex_unlock(&inst->renderer_lock);
+	usleep(500000); /* account for ALSA latency */
+	pthread_mutex_unlock(&inst->audio_lock);
+
+
 
 	/* detach the decoder thread */
 	pthread_detach(inst->thread);
