@@ -29,6 +29,17 @@ mbs_get_active_player(void)
 }
 
 
+static void
+mbs_clearscreen(void)
+{
+	/* show the root window */
+	mbv_window_clear(root_window, 0x00000000);
+	mbv_window_setcolor(root_window, 0x8080ffff);
+	mbv_window_drawline(root_window, 0, mbv_screen_height_get() / 2,
+		mbv_screen_width_get() - 1, mbv_screen_height_get() / 2);
+        mbv_window_show(root_window);
+}
+
 /**
  * mbs_init() -- Initialize the MediaBox shell
  */
@@ -43,7 +54,7 @@ mbs_init(void)
 	}
 
 	/* initialize main media player */
-	player = mbp_init();
+	player = mb_player_new(NULL);
 	if (player == NULL) {
 		fprintf(stderr, "Could not initialize main media player\n");
 		return -1;
@@ -59,12 +70,7 @@ mbs_show_dialog(void)
 	int fd, quit = 0;
 	mbi_event e;
 
-	/* show the root window */
-	mbv_window_clear(root_window, 0x00000000);
-	mbv_window_setcolor(root_window, 0x8080ffff);
-	mbv_window_drawline(root_window, 0, mbv_screen_height_get() / 2,
-		mbv_screen_width_get() - 1, mbv_screen_height_get() / 2);
-        mbv_window_show(root_window);
+	mbs_clearscreen();
 
 	/* grab the input device */
 	if ((fd = mbi_grab_input()) == -1) {
@@ -123,6 +129,8 @@ mbs_show_dialog(void)
 			if (status != MB_PLAYER_STATUS_READY) {
 				if (mbp_stop(player) == -1) {
 					fprintf(stderr, "mbs: mbp_stop() failed\n");
+				} else {
+					mbs_clearscreen();
 				}
 			}
 			break;
@@ -141,6 +149,6 @@ mbs_show_dialog(void)
 void
 mbs_destroy(void)
 {
-	mbp_destroy(player);
+	mb_player_destroy(player);
 }
 

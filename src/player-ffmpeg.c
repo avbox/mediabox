@@ -8,6 +8,7 @@
 #include <pthread.h>
 #include <time.h>
 
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -193,6 +194,14 @@ timediff(struct timespec *start, struct timespec *end)
 }
 #endif
 
+static int64_t
+utimediff(struct timespec *a, struct timespec *b)
+{
+	int64_t aa = ((a->tv_sec * 1000 * 1000 * 1000) + a->tv_nsec) / 1000;
+	int64_t bb = ((b->tv_sec * 1000 * 1000 * 1000) + b->tv_nsec) / 1000;
+	int64_t cc = aa - bb;
+	return cc;
+}
 
 void *
 mbv_dfb_getscreenmask();
@@ -200,13 +209,16 @@ mbv_dfb_getscreenmask();
 
 static inline void
 mb_player_fbdev_render(struct mbp *inst,
-	struct fb_var_screeninfo *vinfo,
+	int fd, struct fb_var_screeninfo *vinfo,
 	struct fb_fix_screeninfo *finfo, void *fb_mem, void *buf)
 {
 	int x, y, pixelsz;
+	unsigned int screen = 0;
 	uint8_t *m = (uint8_t*) mbv_dfb_getscreenmask();
 
 	pixelsz = vinfo->bits_per_pixel / CHAR_BIT;
+	
+	(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
 
 	for (y = 0; y < vinfo->yres; y++) {
 		for (x = 0; x < vinfo->xres; x++) {
@@ -223,12 +235,57 @@ mb_player_fbdev_render(struct mbp *inst,
 static inline void
 mb_player_printstatus(struct mbp *inst, int fps)
 {
-	fprintf(stdout, "| Fps: %03i | Video Packets: %03i | Video Frames: %03i | Audio Packets: %03i | Audio Frames: %03i |\r",
-		fps, inst->video_packets, inst->frames_avail, inst->audio_packets, inst->audio_frames);
-	fflush(stdout);
+	static int i = 0;
+	if ((i++ % 10) == 0) {
+		fprintf(stdout, "| Fps: %03i | Video Packets: %03i | Video Frames: %03i | Audio Packets: %03i | Audio Frames: %03i |\r",
+			fps, inst->video_packets, inst->frames_avail, inst->audio_packets, inst->audio_frames);
+		fflush(stdout);
+	}
+}
+
+
+static int ielapsed = 0;
+static pthread_mutex_t wait_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t wait_cond = PTHREAD_COND_INITIALIZER;
+void
+interval_handler(int signum)
+{
+	struct itimerval itimer;
+	memset(&itimer, 0, sizeof(itimer));
+	setitimer(ITIMER_REAL, &itimer, NULL);
+	ielapsed = 1;
+	pthread_cond_signal(&wait_cond);
 
 }
 
+static int
+mb_player_sleep(int64_t usecs)
+{
+	struct sigaction sa;
+	struct itimerval itimer;
+	memset (&sa, 0, sizeof (sa));
+	sa.sa_handler = &interval_handler;
+	sigaction (SIGALRM, &sa, NULL);
+	itimer.it_interval.tv_sec = 0;
+	itimer.it_interval.tv_usec = usecs;
+	itimer.it_value.tv_sec = 0;
+	itimer.it_value.tv_usec = usecs;
+	ielapsed = 0;
+
+	if (setitimer(ITIMER_REAL, &itimer, NULL) == -1) {
+		fprintf(stderr, "setitimer failed errno=%i\n", errno);
+		return -1;
+	}
+
+	do {
+		pthread_mutex_lock(&wait_lock);
+		pthread_cond_wait(&wait_cond, &wait_lock);
+		pthread_mutex_unlock(&wait_lock);
+	} while (!ielapsed);
+	memset(&itimer, 0, sizeof(itimer));
+	setitimer(ITIMER_REAL, &itimer, NULL);
+	return 0;
+}
 
 /**
  * mb_player_vrend_thread() -- Video rendering thread.
@@ -241,7 +298,6 @@ mb_player_video(void *arg)
 	int64_t last_pts = AV_NOPTS_VALUE, frame_pts, delay;
 	struct timespec last_timestamp, timestamp;
 	struct mbp *inst = (struct mbp*) arg;
-	unsigned int screen = 0;
 	
 #ifdef MB_DECODER_PRINT_FPS
 	struct timespec new_tp, last_tp, elapsed_tp;
@@ -260,7 +316,23 @@ mb_player_video(void *arg)
 	assert(inst != NULL);
 	assert(inst->renderer_quit == 0);
 
-	fprintf(stderr, "mb_player: Video renderer started\n");
+	if (clock_getres(CLOCK_MONOTONIC, &timestamp) == -1) {
+		fprintf(stderr, "player: clock_getres() failed\n");
+	} else {
+		fprintf(stderr, "player: clock resolution: %li secs %li nsecs\n",
+			timestamp.tv_sec, timestamp.tv_nsec);
+		(void) clock_gettime(CLOCK_MONOTONIC, &timestamp);
+
+		mb_player_sleep(20000);
+
+		(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
+		int64_t ii1 = ((timestamp.tv_sec * 1000 * 1000 * 1000) + timestamp.tv_nsec) / 1000;
+		int64_t ii2 = ((last_timestamp.tv_sec * 1000 * 1000 * 1000) + last_timestamp.tv_nsec) / 1000;
+		int64_t ii = ii2 - ii1;
+		fprintf(stderr, "player: slept for %li nsecs\n", ii);
+	}
+
+	fprintf(stderr, "player: Video renderer started\n");
 
 	if (inst->use_fbdev) {
 		if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
@@ -286,7 +358,7 @@ mb_player_video(void *arg)
 		}
 	}
 
-	fprintf(stderr, "mb_player: Video renderer ready\n");
+	fprintf(stderr, "player: Video renderer ready\n");
 
 	/* signal control thread that we're ready */
 	pthread_mutex_lock(&inst->renderer_lock);
@@ -295,7 +367,8 @@ mb_player_video(void *arg)
 
 #ifdef MB_DECODER_PRINT_FPS
 	(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
-	(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
+	new_tp = last_tp;
+	//(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
 #endif
 
 
@@ -321,36 +394,59 @@ mb_player_video(void *arg)
 		if  (frame_pts != AV_NOPTS_VALUE) {
 			if (last_pts != AV_NOPTS_VALUE) {
 				int64_t elapsed;
+				static int x = 0, x2=0;
 				/* sleep roughly the right amount of time;
 				 * usleep is in microseconds, just like AV_TIME_BASE. */
 				delay = av_rescale_q(frame_pts - last_pts,
 					inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
-				delay += inst->frame_repeat[inst->video_playback_index] * (delay >> 1);
+				//delay += inst->frame_repeat[inst->video_playback_index] * (delay * 2);
+				static int y13 = 0;
+				if (y13++ < 10) {
+					fprintf(stderr, "frame_pts: %li\n", delay);
+				}
+
+				if (inst->frame_repeat[inst->video_playback_index]) {
+					fprintf(stderr, "Repeat\n");
+				}
 				(void) clock_gettime(CLOCK_MONOTONIC, &timestamp);
-				elapsed = timestamp.tv_sec * 1000000000LL + timestamp.tv_nsec - 
-					(last_timestamp.tv_sec * 1000000000LL + last_timestamp.tv_nsec);
-				delay -= elapsed / 1000 + (elapsed % 1000 >= 500);
+				elapsed = utimediff(&timestamp, &last_timestamp);
+				delay -= elapsed;
+				if (x == 0) {
+					fprintf(stderr, "player: elapsed: %li | delay: %li | last: %li | current: %li | \n",
+						elapsed, delay, (last_timestamp.tv_sec * 1000000000L) + last_timestamp.tv_nsec,
+						(timestamp.tv_sec * 1000000000L) + timestamp.tv_nsec);
+					if (delay >= 0 && x2++ > 10)
+						x = 1;
+				}
 				if (delay > 0 && delay < 1000000) {
-					usleep(delay);
+					//usleep(delay);
+					mb_player_sleep(delay);
 				} else if (delay < 0) {
+					fprintf(stderr, "player: !!!!!!! delay=%li\n", delay);
 					last_pts = frame_pts;
 					(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
 					goto frame_complete;
+				} else {
+					fprintf(stderr, "player: !!!!!!! delay=%li (too long)\n", delay);
 				}
+			} else {
+				fprintf(stderr, "Skipping...\n");
 			}
 			last_pts = frame_pts;
 		}
 
 		buf = inst->frame_data[inst->video_playback_index];
 
-		/* wait for vsync */
-		(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
-
 		/* save the real frame time */
 		(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
 
+		static int t2 = 0;
+		if (t2++ <= 2) {
+			fprintf(stderr, "gettime: %li\n", (last_timestamp.tv_sec * 1000000000LL) + last_timestamp.tv_nsec);
+		}
+
 		if (inst->use_fbdev) {
-			mb_player_fbdev_render(inst, &vinfo, &finfo, fb_mem, buf);
+			mb_player_fbdev_render(inst, fd, &vinfo, &finfo, fb_mem, buf);
 		} else  {
 			/* blit the frame through window manager */
 			mbv_window_blit_buffer(inst->window, buf, inst->width, inst->height, 0, 0);
@@ -403,7 +499,7 @@ video_exit:
 	/* clear screen */
 	memset(inst->frame_data[0], 0, inst->bufsz);
 	if (inst->use_fbdev) {
-		mb_player_fbdev_render(inst, &vinfo, &finfo, fb_mem, inst->frame_data[0]);
+		mb_player_fbdev_render(inst, fd, &vinfo, &finfo, fb_mem, inst->frame_data[0]);
 	} else {
 		mbv_window_blit_buffer(inst->window, inst->frame_data[0], inst->width, inst->height, 0, 0);
 	}
@@ -1534,8 +1630,7 @@ mbp_play(struct mbp *inst, const char * const path)
 
 	fprintf(stderr, "player: Firing rendering threads\n");
 
-	/* we're ready to start decoding, but first let us fire
-	 * the rendering thread */
+	/* fire the audio and video threads */
 	pthread_mutex_lock(&inst->renderer_lock);
 	pthread_mutex_lock(&inst->audio_lock);
 	if (pthread_create(&inst->renderer_thread, NULL, mb_player_video, inst) != 0) {
@@ -1550,7 +1645,8 @@ mbp_play(struct mbp *inst, const char * const path)
 	}
 	pthread_cond_wait(&inst->audio_signal, &inst->audio_lock);
 	pthread_mutex_unlock(&inst->renderer_lock);
-	usleep(500000); /* account for ALSA latency */
+	usleep(1200000); /* why??????? */
+	
 	pthread_mutex_unlock(&inst->audio_lock);
 
 
@@ -1702,10 +1798,9 @@ end:
  * mb_player_init() -- Create a new player object.
  */
 struct mbp*
-mbp_init(void)
+mb_player_new(struct mbv_window *window)
 {
 	struct mbp* inst;
-	struct mbv_window *window = NULL; /* TODO: This should be an argument */
 	static int initialized = 0;
 
 	/* initialize libav */
@@ -1768,8 +1863,11 @@ mbp_init(void)
 }
 
 
+/**
+ * mb_player_destroy() -- Destroy this player instance
+ */
 void
-mbp_destroy(struct mbp *inst)
+mb_player_destroy(struct mbp *inst)
 {
 	assert(inst != NULL);
 

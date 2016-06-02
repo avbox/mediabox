@@ -1,12 +1,16 @@
 #ifndef __MB_PLAYER__
 #define __MB_PLAYER__
 
+#include "video.h"
 #include "input.h"
 
-/* abstract type to represent a player instance */
+
 struct mbp;
 
 
+/**
+ * Media player status enum.
+ */
 enum mb_player_status
 {
         MB_PLAYER_STATUS_READY,
@@ -15,6 +19,9 @@ enum mb_player_status
 };
 
 
+/**
+ * Get the current status of a media player instance.
+ */
 enum mb_player_status
 mb_player_getstatus(struct mbp* inst);
 
@@ -35,12 +42,18 @@ int
 mbp_stop(struct mbp* inst);
 
 
+/**
+ * Create a new media player instance.
+ */
 struct mbp*
-mbp_init(void);
+mb_player_new(struct mbv_window *window);
 
 
+/**
+ * Destroy media player instance.
+ */
 void
-mbp_destroy(struct mbp *inst);
+mb_player_destroy(struct mbp *inst);
 
 #endif
 
