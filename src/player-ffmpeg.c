@@ -203,6 +203,20 @@ utimediff(struct timespec *a, struct timespec *b)
 	return cc;
 }
 
+static void
+utimeadd(struct timespec *t, unsigned int usecs)
+{
+	uint64_t nsecs;
+
+	nsecs = t->tv_nsec + (usecs * 1000);
+	while (nsecs > (1000 * 1000 * 1000)) {
+		nsecs -= 1000 * 1000 * 1000;
+		t->tv_sec++;
+	}
+	t->tv_nsec = nsecs;
+}
+
+
 void *
 mbv_dfb_getscreenmask();
 
@@ -263,6 +277,11 @@ mb_player_sleep(int64_t usecs)
 {
 	struct sigaction sa;
 	struct itimerval itimer;
+	struct timespec t1, t2;
+
+	(void) clock_gettime(CLOCK_MONOTONIC, &t1);
+
+
 	memset (&sa, 0, sizeof (sa));
 	sa.sa_handler = &interval_handler;
 	sigaction (SIGALRM, &sa, NULL);
@@ -284,7 +303,10 @@ mb_player_sleep(int64_t usecs)
 	} while (!ielapsed);
 	memset(&itimer, 0, sizeof(itimer));
 	setitimer(ITIMER_REAL, &itimer, NULL);
-	return 0;
+
+	(void) clock_gettime(CLOCK_MONOTONIC, &t2);
+
+	return utimediff(&t1, &t2);
 }
 
 /**
@@ -316,6 +338,7 @@ mb_player_video(void *arg)
 	assert(inst != NULL);
 	assert(inst->renderer_quit == 0);
 
+	#if 0
 	if (clock_getres(CLOCK_MONOTONIC, &timestamp) == -1) {
 		fprintf(stderr, "player: clock_getres() failed\n");
 	} else {
@@ -331,6 +354,7 @@ mb_player_video(void *arg)
 		int64_t ii = ii2 - ii1;
 		fprintf(stderr, "player: slept for %li nsecs\n", ii);
 	}
+	#endif
 
 	fprintf(stderr, "player: Video renderer started\n");
 
@@ -365,11 +389,15 @@ mb_player_video(void *arg)
 	pthread_cond_signal(&inst->renderer_signal);
 	pthread_mutex_unlock(&inst->renderer_lock);
 
+
 #ifdef MB_DECODER_PRINT_FPS
 	(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
 	new_tp = last_tp;
-	//(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
 #endif
+
+
+	/* save the real frame time */
+	(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
 
 
 	while (!inst->renderer_quit) {
@@ -394,56 +422,47 @@ mb_player_video(void *arg)
 		if  (frame_pts != AV_NOPTS_VALUE) {
 			if (last_pts != AV_NOPTS_VALUE) {
 				int64_t elapsed;
-				static int x = 0, x2=0;
+				static int x = 0;
 				/* sleep roughly the right amount of time;
 				 * usleep is in microseconds, just like AV_TIME_BASE. */
 				delay = av_rescale_q(frame_pts - last_pts,
 					inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
-				//delay += inst->frame_repeat[inst->video_playback_index] * (delay * 2);
-				static int y13 = 0;
-				if (y13++ < 10) {
-					fprintf(stderr, "frame_pts: %li\n", delay);
-				}
+				delay += inst->frame_repeat[inst->video_playback_index] * delay;
 
-				if (inst->frame_repeat[inst->video_playback_index]) {
-					fprintf(stderr, "Repeat\n");
-				}
 				(void) clock_gettime(CLOCK_MONOTONIC, &timestamp);
 				elapsed = utimediff(&timestamp, &last_timestamp);
+				utimeadd(&last_timestamp, delay);
 				delay -= elapsed;
-				if (x == 0) {
+
+				if (x++ < 15) {
 					fprintf(stderr, "player: elapsed: %li | delay: %li | last: %li | current: %li | \n",
 						elapsed, delay, (last_timestamp.tv_sec * 1000000000L) + last_timestamp.tv_nsec,
 						(timestamp.tv_sec * 1000000000L) + timestamp.tv_nsec);
-					if (delay >= 0 && x2++ > 10)
-						x = 1;
 				}
+
 				if (delay > 0 && delay < 1000000) {
-					//usleep(delay);
 					mb_player_sleep(delay);
+
 				} else if (delay < 0) {
-					fprintf(stderr, "player: !!!!!!! delay=%li\n", delay);
-					last_pts = frame_pts;
-					(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
-					goto frame_complete;
+					if (inst->frames_avail <= 2 || inst->audio_frames <= 2) {
+						/* the decoder is starved out */
+						fprintf(stderr, "player: Stream stalled. Resetting clock. (delay=%li)\n", delay);
+						(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
+					} else {
+						fprintf(stderr, "player: Skipping frame (delay=%li)\n", delay);
+						last_pts = frame_pts;
+						goto frame_complete;
+					}
+
 				} else {
 					fprintf(stderr, "player: !!!!!!! delay=%li (too long)\n", delay);
+					abort();
 				}
-			} else {
-				fprintf(stderr, "Skipping...\n");
 			}
 			last_pts = frame_pts;
 		}
 
 		buf = inst->frame_data[inst->video_playback_index];
-
-		/* save the real frame time */
-		(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
-
-		static int t2 = 0;
-		if (t2++ <= 2) {
-			fprintf(stderr, "gettime: %li\n", (last_timestamp.tv_sec * 1000000000LL) + last_timestamp.tv_nsec);
-		}
 
 		if (inst->use_fbdev) {
 			mb_player_fbdev_render(inst, fd, &vinfo, &finfo, fb_mem, buf);
@@ -487,6 +506,7 @@ frame_complete:
 					inst->video_paused = 1;
 					pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
 					inst->video_paused = 0;
+					(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
 					pthread_mutex_unlock(&inst->resume_lock);
 				}
 			}
@@ -788,8 +808,13 @@ mb_player_audio(void *arg)
 	int ret;
 	struct mbp *inst = (struct mbp*) arg;
 	const char *device = "default";
+	unsigned int framerate = 48000;
+	int dir;
 	snd_pcm_t *handle = NULL;
+	snd_pcm_hw_params_t *params;
+	snd_pcm_sw_params_t *swparams;
 	snd_pcm_sframes_t frames;
+	snd_pcm_uframes_t period_frames = 32;
 
 	MB_DEBUG_SET_THREAD_NAME("audio_playback");
 
@@ -797,6 +822,8 @@ mb_player_audio(void *arg)
 	assert(inst->audio_quit == 0);
 	assert(inst->audio_paused == 0);
 
+	snd_pcm_hw_params_alloca(&params);
+	snd_pcm_sw_params_alloca(&swparams);
 
 	/* initialize alsa device */
 	if ((ret = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
@@ -804,6 +831,60 @@ mb_player_audio(void *arg)
 			ret);
 		return NULL;
 	}
+
+	if ((ret = snd_pcm_hw_params_any(handle, params)) < 0) {
+		fprintf(stderr, "player: Broken ALSA configuration: none available. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_hw_params_set_access(handle, params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
+		fprintf(stderr, "player: INTERLEAVED RW access not available. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_hw_params_set_format(handle, params, SND_PCM_FORMAT_S16_LE)) < 0) {
+		fprintf(stderr, "player: Format S16_LE not supported. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_hw_params_set_channels(handle, params, 2)) < 0) {
+		fprintf(stderr, "player: 2 Channels not available. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_hw_params_set_rate_near(handle, params, &framerate, &dir)) < 0) {
+		fprintf(stderr, "player: 48000Hz not available. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_hw_params_set_period_size_near(handle, params, &period_frames, &dir)) < 0) {
+		fprintf(stderr, "player: Cannot set period. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_hw_params(handle, params)) < 0) {
+		fprintf(stderr, "player: Could not set ALSA params: %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+
+	if ((ret = snd_pcm_sw_params_current(handle, swparams)) < 0) {
+		fprintf(stderr, "player: Could not determine SW params. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_sw_params_set_tstamp_type(handle, swparams, SND_PCM_TSTAMP_TYPE_MONOTONIC)) < 0) {
+		fprintf(stderr, "player: Could not set ALSA clock to CLOCK_MONOTONIC. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_sw_params(handle, swparams)) < 0) {
+		fprintf(stderr, "player: Could not set ALSA SW paramms. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+
+	#if 0
 	if ((ret = snd_pcm_set_params(handle,
 		SND_PCM_FORMAT_S16,
 		SND_PCM_ACCESS_RW_INTERLEAVED,
@@ -815,6 +896,7 @@ mb_player_audio(void *arg)
 		snd_pcm_close(handle);
 		return NULL;
 	}
+	#endif
 
 	/* signal video thread that we're ready to start */
 	pthread_mutex_lock(&inst->audio_lock);
@@ -1645,7 +1727,7 @@ mbp_play(struct mbp *inst, const char * const path)
 	}
 	pthread_cond_wait(&inst->audio_signal, &inst->audio_lock);
 	pthread_mutex_unlock(&inst->renderer_lock);
-	usleep(1200000); /* why??????? */
+	usleep(1400000); /* why??????? */
 	
 	pthread_mutex_unlock(&inst->audio_lock);
 
