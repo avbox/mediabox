@@ -14,6 +14,10 @@ int
 mbv_window_getsize(struct mbv_window *window, int *width, int *height);
 
 
+void
+mbv_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int h);
+
+
 int
 mbv_isfbdev(void);
 

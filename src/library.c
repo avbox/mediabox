@@ -253,6 +253,8 @@ mb_library_showdialog(void)
 				break;
 			}
 
+			mbv_window_hide(window);
+
 			mbp_play(player, selected);
 			break;
 		}

@@ -262,6 +262,32 @@ mbv_dfb_autofliproot(void *arg)
 }
 
 
+#if 0
+void
+mbv_dfb_window_resize(struct mbv_window* window, int w, int h)
+{
+	window->rect.w = w;
+	window->rect.h = h;
+
+	mbv_dfb_regeneratemask();
+
+	if (parent == NULL) {
+
+		assert(window->dfb_window != NULL);
+
+		DFBCHECK(window->dfb_window->ResizeSurface(window->dfb_window, w, h));
+	}
+}
+#endif
+
+void
+mbv_dfb_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int h)
+{
+	if (w && h) {
+		DFBCHECK(window->content->FillRectangle(window->content, x, y, w, h));
+	}
+}
+
 /**
  * mbv_dfb_window_new() -- Creates a new window
  */

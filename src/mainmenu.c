@@ -83,7 +83,7 @@ mb_mainmenu_showdialog(void)
 			mb_library_init();
 			mbv_window_hide(window);
 			mb_library_showdialog();
-			mbv_window_show(window);
+			//mbv_window_show(window);
 			mb_library_destroy();
 		} else {
 			fprintf(stderr, "mb_mainmenu: Selected %s\n",

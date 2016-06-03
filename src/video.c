@@ -19,6 +19,13 @@ mbv_getscreensize(int *width, int *height)
 }
 
 
+void
+mbv_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int h)
+{
+	mbv_dfb_window_fillrectangle(window, x, y, w, h);
+}
+
+
 int
 mbv_getdefaultfontheight(void)
 {

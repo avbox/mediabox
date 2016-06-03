@@ -1660,6 +1660,8 @@ mb_player_update(struct mbp *inst)
 int 
 mbp_play(struct mbp *inst, const char * const path)
 {
+	struct mbv_window *progress;
+
 	assert(inst != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_READY ||
 		inst->status == MB_PLAYER_STATUS_PLAYING ||
@@ -1693,6 +1695,22 @@ mbp_play(struct mbp *inst, const char * const path)
 	inst->media_file = path;
 	inst->status = MB_PLAYER_STATUS_PLAYING;
 
+	/* clear the screen */
+	mbv_window_clear(inst->window, 0x00000000);
+
+	int sw, sh, pw, ph, px, py;
+	mbv_window_getsize(inst->window, &sw, &sh);
+	pw = (sw * 70) / 100;
+	ph = 30;
+	px = (sw / 2) - (pw / 2);
+	py = (sh / 2) - (ph / 2);
+
+
+	progress = mbv_window_new(NULL, px, py, pw, ph);
+	assert(progress != NULL);
+
+	mbv_window_show(progress);
+
 	/* start the main decoder thread */
 	pthread_mutex_lock(&inst->resume_lock);
 	if (pthread_create(&inst->thread, NULL, mb_player_stream_decode, inst) != 0) {
@@ -1703,12 +1721,26 @@ mbp_play(struct mbp *inst, const char * const path)
 	pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
 	pthread_mutex_unlock(&inst->resume_lock);
 
+
 	/* wait for the buffers to fill up */
 	while (inst->audio_frames < MB_AUDIO_BUFFER_FRAMES ||
 		inst->frames_avail < MB_VIDEO_BUFFER_FRAMES) {
+
+		/* update progressbar */
+		int avail = inst->frames_avail + inst->audio_frames;
+		const int wanted = MB_AUDIO_BUFFER_FRAMES + MB_VIDEO_BUFFER_FRAMES;
+		int pcent = (((avail * 100) / wanted) * 100) / 100;
+		int donewidth = (pw * pcent) / 100;
+
+		mbv_window_clear(progress, 0x3349ffFF);
+		mbv_window_fillrectangle(progress, 0, 0, donewidth, ph);
+		mbv_window_update(progress);
+
 		mb_player_printstatus(inst, 0);
 		usleep(5000);
 	}
+
+	mbv_window_destroy(progress);
 
 	fprintf(stderr, "player: Firing rendering threads\n");
 

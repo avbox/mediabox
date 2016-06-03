@@ -18,6 +18,10 @@ mbv_dfb_isfbdev(void);
 
 
 void
+mbv_dfb_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int h);
+
+
+void
 mbv_dfb_getscreensize(int *width, int *height);
 
 
