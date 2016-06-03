@@ -2,7 +2,6 @@ package com.mediabox.mediaboxremote;
 
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.View;
 
 import java.io.BufferedWriter;
@@ -15,24 +14,41 @@ import java.net.UnknownHostException;
 
 public class RemoteActivity extends AppCompatActivity
 {
-    private Socket socket;
-    private static final int SERVERPORT = 2047 + 1;
-    private static final String SERVER_IP = "10.10.0.10";
-    @Override
-    protected void onCreate(Bundle savedInstanceState)
+    private Socket socket = null;
+    private static final int SERVER_PORT = 2048;
+    private static final String SERVER_IP = "10.10.0.14";
+
+    private void closeSocket()
     {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_remote);
+        if (this.socket != null)
+        {
+            try
+            {
+                this.socket.close();
+                this.socket = null;
+            }
+            catch (java.io.IOException e)
+            {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void openSocket()
+    {
+        closeSocket();
         new Thread(new ClientThread()).start();
     }
 
     private void sendMessage(String msg)
     {
         try {
-            PrintWriter out = new PrintWriter(new BufferedWriter(
-                    new OutputStreamWriter(socket.getOutputStream())),
-                    true);
-            out.println(msg);
+            if (this.socket != null)
+            {
+                PrintWriter out = new PrintWriter(new BufferedWriter(
+                        new OutputStreamWriter(socket.getOutputStream())), true);
+                out.println(msg);
+            }
         } catch (UnknownHostException e) {
             e.printStackTrace();
         } catch (IOException e) {
@@ -40,13 +56,33 @@ public class RemoteActivity extends AppCompatActivity
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
 
 
+    @Override
+    protected void onCreate(Bundle savedInstanceState)
+    {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_remote);
+    }
+
+    @Override
+    protected void onStart()
+    {
+        super.onStart();
+        this.openSocket();
+    }
+
+    @Override
+    protected void onStop()
+    {
+        super.onStop();
+        this.closeSocket();
     }
 
     public void onConnect(View view)
     {
-
+        this.openSocket();
     }
 
     public void onButtonPressed(View view) {
@@ -94,7 +130,7 @@ public class RemoteActivity extends AppCompatActivity
         public void run() {
             try {
                 InetAddress serverAddr = InetAddress.getByName(SERVER_IP);
-                socket = new Socket(serverAddr, SERVERPORT);
+                socket = new Socket(serverAddr, SERVER_PORT);
             } catch (UnknownHostException e1) {
                 e1.printStackTrace();
             } catch (IOException e1) {

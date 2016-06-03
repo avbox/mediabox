@@ -17,7 +17,7 @@
         android:text="MENU"
         android:id="@+id/btnMenu"
         android:layout_marginTop="64dp"
-        android:layout_below="@+id/button11"
+        android:layout_below="@+id/btnConnect"
         android:layout_centerHorizontal="true"
         android:onClick="onButtonPressed"/>
 
@@ -117,7 +117,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="CONNECT"
-        android:id="@+id/button11"
+        android:id="@+id/btnConnect"
         android:layout_alignParentTop="true"
-        android:layout_centerHorizontal="true"/>
+        android:layout_centerHorizontal="true"
+        android:onClick="onConnect"/>
 </RelativeLayout>
