@@ -92,11 +92,7 @@ struct mbp
 	AVFormatContext *fmt_ctx;
 
 	AVFrame *audio_frame[MB_AUDIO_BUFFER_FRAMES];
-	uint8_t alsa_buffer[MB_ALSA_BUFFER_SIZE];
-	unsigned int alsa_buffer_count;
 	char audio_frame_state[MB_AUDIO_BUFFER_FRAMES];
-	char audio_nb_samples;  /* this is a copy of the nb_samples field for the next frame to play
-					so we can modify the frame and then restore it  before freeing */
 	int audio_playback_index;
 	int audio_decode_index;
 	int audio_frames;
@@ -358,6 +354,7 @@ mb_player_video(void *arg)
 
 	fprintf(stderr, "player: Video renderer started\n");
 
+	/* initialize framebuffer for direct rendering */
 	if (inst->use_fbdev) {
 		if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
 			if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
@@ -927,89 +924,46 @@ mb_player_audio(void *arg)
 			}
 		}
 
-		/* if this is the first iteration of this frame save its orignal nb_samples */
-		if (inst->audio_nb_samples == -1) {
-			inst->audio_nb_samples = inst->audio_frame[inst->audio_playback_index]->nb_samples;
-		}
-		
-		int nb_samples;
-		int nb_wanted_samples;
-
-		/**
-		 * TODO: This double buffering seems to make no difference at all
-		 */
-
-		nb_wanted_samples = (MB_ALSA_BUFFER_SIZE / 4) - inst->alsa_buffer_count;
-		nb_samples = inst->audio_frame[inst->audio_playback_index]->nb_samples;
-
-		if (nb_samples > nb_wanted_samples) {
-			nb_samples = nb_wanted_samples;
-		}
-		
-		memcpy(&(inst->alsa_buffer[inst->alsa_buffer_count * 4]),
-			inst->audio_frame[inst->audio_playback_index]->data[0],
-			nb_samples * 4);
-
-		inst->alsa_buffer_count += nb_samples;
-		inst->audio_frame[inst->audio_playback_index]->nb_samples -= nb_samples;
-		inst->audio_frame[inst->audio_playback_index]->data[0] += (nb_samples * 4);
-
-		/* if we've filled the buffer send it to alsa and reset the counter */
-		if (inst->alsa_buffer_count == (MB_ALSA_BUFFER_SIZE / 4)) {
-
-			/* pause */
-			if (inst->action != MB_PLAYER_ACTION_NONE) {
-				if (inst->action & MB_PLAYER_ACTION_PAUSE) {
-					fprintf(stderr, "decoder: pausing\n");
-					pthread_mutex_lock(&inst->resume_lock);
-					snd_pcm_drain(handle);
-					inst->audio_paused = 1;
-					pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
-					inst->audio_paused = 0;
-					pthread_mutex_unlock(&inst->resume_lock);
-					snd_pcm_reset(handle);
-					snd_pcm_prepare(handle);
-				}
+		/* pause */
+		if (inst->action != MB_PLAYER_ACTION_NONE) {
+			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
+				fprintf(stderr, "decoder: pausing\n");
+				pthread_mutex_lock(&inst->resume_lock);
+				snd_pcm_drain(handle);
+				inst->audio_paused = 1;
+				pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
+				inst->audio_paused = 0;
+				pthread_mutex_unlock(&inst->resume_lock);
+				snd_pcm_reset(handle);
+				snd_pcm_prepare(handle);
 			}
-
-
-			/* play the frame */ 
-			frames = snd_pcm_writei(handle, inst->alsa_buffer,
-				MB_ALSA_BUFFER_SIZE / 4);
-			if (frames < 0) {
-				frames = snd_pcm_recover(handle, frames, 0);
-			}
-			if (frames < 0) {
-				fprintf(stderr, "mb_player: snd_pcm_writei() failed: %s\n",
-					snd_strerror(frames));
-				av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
-				goto audio_exit;
-			}
-
-			inst->alsa_buffer_count = 0;
 		}
 
-		/* if we're done with this frame free it and continue to the next one */
-		if (inst->audio_frame[inst->audio_playback_index]->nb_samples == 0) {
 
-			/* restore frame to it's former glory and free it */
-			inst->audio_frame[inst->audio_playback_index]->nb_samples = inst->audio_nb_samples;
-			inst->audio_frame[inst->audio_playback_index]->data[0] += (inst->audio_nb_samples * 4);
+		/* play the frame */ 
+		frames = snd_pcm_writei(handle, inst->audio_frame[inst->audio_playback_index]->data[0],
+			inst->audio_frame[inst->audio_playback_index]->nb_samples);
+		if (frames < 0) {
+			frames = snd_pcm_recover(handle, frames, 0);
+		}
+		if (frames < 0) {
+			fprintf(stderr, "mb_player: snd_pcm_writei() failed: %s\n",
+				snd_strerror(frames));
 			av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
-			inst->audio_nb_samples = -1;
-
-
-			/* update buffer state and signal decoder */
-			pthread_mutex_lock(&inst->audio_lock);
-			inst->audio_frame_state[inst->audio_playback_index] = 0;
-			inst->audio_playback_index++;
-			inst->audio_playback_index %= MB_AUDIO_BUFFER_FRAMES;
-			inst->audio_frames--;
-			pthread_cond_signal(&inst->audio_signal);
-			pthread_mutex_unlock(&inst->audio_lock);
+			goto audio_exit;
 		}
 
+		/* free frame */
+		av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
 
+		/* update buffer state and signal decoder */
+		pthread_mutex_lock(&inst->audio_lock);
+		inst->audio_frame_state[inst->audio_playback_index] = 0;
+		inst->audio_playback_index++;
+		inst->audio_playback_index %= MB_AUDIO_BUFFER_FRAMES;
+		inst->audio_frames--;
+		pthread_cond_signal(&inst->audio_signal);
+		pthread_mutex_unlock(&inst->audio_lock);
 	}
 
 audio_exit:
@@ -1465,7 +1419,6 @@ mb_player_stream_decode(void *arg)
 	inst->audio_stream_index = -1;
 	inst->audio_packet_write_index = 0;
 	inst->audio_packet_read_index = 0;
-	inst->alsa_buffer_count = 0;
 
 	for (i = 0; i < MB_AUDIO_BUFFER_FRAMES; i++) {
 		inst->audio_frame[i] = av_frame_alloc();
@@ -1723,7 +1676,7 @@ mbp_play(struct mbp *inst, const char * const path)
 
 
 	/* wait for the buffers to fill up */
-	while (inst->audio_frames < MB_AUDIO_BUFFER_FRAMES ||
+	while (inst->audio_frames < MB_AUDIO_BUFFER_FRAMES &&
 		inst->frames_avail < MB_VIDEO_BUFFER_FRAMES) {
 
 		/* update progressbar */
@@ -1772,6 +1725,9 @@ mbp_play(struct mbp *inst, const char * const path)
 }
 
 
+/**
+ * mb_player_pause() -- Pause the stream.
+ */
 int
 mbp_pause(struct mbp* inst)
 {
@@ -1820,6 +1776,10 @@ mbp_stop(struct mbp* inst)
 }
 
 
+/**
+ * mb_player_checkfbdev() -- Checks if there's a framebuffer device suitable
+ * for direct rendering
+ */
 static void
 mb_player_checkfbdev(struct mbp *inst)
 {
