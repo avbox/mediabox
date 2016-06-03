@@ -419,23 +419,25 @@ mb_player_video(void *arg)
 		if  (frame_pts != AV_NOPTS_VALUE) {
 			if (last_pts != AV_NOPTS_VALUE) {
 				int64_t elapsed;
-				static int x = 0;
-				/* sleep roughly the right amount of time;
-				 * usleep is in microseconds, just like AV_TIME_BASE. */
+
 				delay = av_rescale_q(frame_pts - last_pts,
 					inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
 				delay += inst->frame_repeat[inst->video_playback_index] * delay;
 
 				(void) clock_gettime(CLOCK_MONOTONIC, &timestamp);
+
 				elapsed = utimediff(&timestamp, &last_timestamp);
 				utimeadd(&last_timestamp, delay);
 				delay -= elapsed;
 
+				#if 0
+				static int x = 0;
 				if (x++ < 15) {
 					fprintf(stderr, "player: elapsed: %li | delay: %li | last: %li | current: %li | \n",
 						elapsed, delay, (last_timestamp.tv_sec * 1000000000L) + last_timestamp.tv_nsec,
 						(timestamp.tv_sec * 1000000000L) + timestamp.tv_nsec);
 				}
+				#endif
 
 				if (delay > 0 && delay < 1000000) {
 					mb_player_sleep(delay);
@@ -446,7 +448,9 @@ mb_player_video(void *arg)
 						fprintf(stderr, "player: Stream stalled. Resetting clock. (delay=%li)\n", delay);
 						(void) clock_gettime(CLOCK_MONOTONIC, &last_timestamp);
 					} else {
+						#if 0
 						fprintf(stderr, "player: Skipping frame (delay=%li)\n", delay);
+						#endif
 						last_pts = frame_pts;
 						goto frame_complete;
 					}
