@@ -12,10 +12,8 @@
 # permission from the author.
 # 
 
-#CC=../tools/bin/i386-hydrax-gcc
-#AS=../tools/bin/i386-hydrax-as
-#LD=../tools/bin/i386-hydrax-ld
 ECHOFLAGS=-e
+PREFIX=/usr/local
 
 ifneq ($(shell echo -e "Hello"),Hello)
 	ECHOFLAGS=
@@ -34,20 +32,20 @@ SOURCES=main.o \
 	input-directfb.o \
 	input-tcp.o \
 	pipe_util.o \
-	player-ffmpeg.o \
+	player.o \
 	shell.o \
 	ui-menu.o \
 	mainmenu.o \
 	library.o
 
-all: kernel
+all: mediabox
 
 clean: 
 	rm -f *.o 
 	rm -f mediabox
 
-kernel: $(SOURCES)
-	@echo $(ECHOFLAGS) "  LINK\t\tmediabox"
+mediabox: $(SOURCES)
+	@echo $(ECHOFLAGS) "  LD\t\tmediabox"
 	@$(CC) $(LDFLAGS) -o mediabox $(SOURCES)
 
 .s.o:
@@ -57,4 +55,10 @@ kernel: $(SOURCES)
 .c.o:
 	@echo $(ECHOFLAGS) "  CC\t\t"$<
 	@$(CC) $(CFLAGS) -c $< -o $@
+
+install:
+	mkdir -p $(PREFIX)/bin
+	mkdir -p $(PREFIX)/share/mediabox
+	cp mediatomb $(PREFIX)/bin/mediatomb
+	cp res/mediatomb/mediatomb-config.xml $(PREFIX)/share/mediabox/mediatomb-config.xml
 
