@@ -29,7 +29,7 @@ mb_mainmenu_init(void)
 	/* set height according to font size */
 	mbv_getscreensize(&xres, &yres);
 	font_height = mbv_getdefaultfontheight();
-	window_height = 30 + font_height + ((font_height + 10) * 4);
+	window_height = 30 + font_height + ((font_height + 10) * 6);
 
 	/* set width according to screen size */
 	switch (xres) {
@@ -59,9 +59,11 @@ mb_mainmenu_init(void)
 
 	/* populate the menu */
 	mb_ui_menu_additem(menu, "MEDIA LIBRARY", "LIB");
-	mb_ui_menu_additem(menu, "DVD PLAYER", "DVD");
-	mb_ui_menu_additem(menu, "DIGITAL VIDEO RECORDER", "DVR");
-	mb_ui_menu_additem(menu, "PIRATE BOX", "PIR");
+	mb_ui_menu_additem(menu, "OPTICAL DISK", "DVD");
+	mb_ui_menu_additem(menu, "TV TUNNER", "DVR");
+	mb_ui_menu_additem(menu, "DOWNLOADS", "DOWN");
+	mb_ui_menu_additem(menu, "MEDIA SEARCH", "PIR");
+	mb_ui_menu_additem(menu, "ABOUT MEDIABOX", "ABOUT");
 
 	return 0;
 }
