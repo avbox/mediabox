@@ -10,6 +10,8 @@
 #include "input.h"
 #include "ui-menu.h"
 #include "library.h"
+#include "su.h"
+#include "shell.h"
 
 
 static struct mbv_window *window = NULL;
@@ -25,6 +27,11 @@ mb_mainmenu_init(void)
 	int xres, yres;
 	int font_height;
 	int window_height, window_width;
+	int n_entries = 6;
+
+	if (mb_su_canroot()) {
+		n_entries++;
+	}
 
 	/* set height according to font size */
 	mbv_getscreensize(&xres, &yres);
@@ -65,6 +72,10 @@ mb_mainmenu_init(void)
 	mb_ui_menu_additem(menu, "MEDIA SEARCH", "PIR");
 	mb_ui_menu_additem(menu, "ABOUT MEDIABOX", "ABOUT");
 
+	if (mb_su_canroot()) {
+		mb_ui_menu_additem(menu, "REBOOT", "REBOOT");
+	}
+
 	return 0;
 }
 
@@ -85,8 +96,12 @@ mb_mainmenu_showdialog(void)
 			mb_library_init();
 			mbv_window_hide(window);
 			mb_library_showdialog();
-			//mbv_window_show(window);
 			mb_library_destroy();
+
+		} else if (!memcmp("REBOOT", selected, 6)) {
+			mbv_window_hide(window);
+			mbs_reboot();
+			
 		} else {
 			fprintf(stderr, "mb_mainmenu: Selected %s\n",
 				selected);

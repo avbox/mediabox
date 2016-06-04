@@ -21,6 +21,10 @@ mbs_show_dialog(void);
 
 
 void
+mbs_reboot(void);
+
+
+void
 mbs_destroy(void);
 
 #endif

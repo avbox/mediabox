@@ -9,7 +9,7 @@
 #include "input.h"
 #include "mainmenu.h"
 #include "player.h"
-
+#include "su.h"
 
 
 #define MEDIA_FILE "/mov.mp4"
@@ -17,6 +17,7 @@
 
 static struct mbv_window *root_window = NULL;
 static struct mbp *player = NULL;
+static int input_fd = -1;
 
 
 /**
@@ -39,6 +40,7 @@ mbs_clearscreen(void)
 		mbv_screen_width_get() - 1, mbv_screen_height_get() / 2);
         mbv_window_show(root_window);
 }
+
 
 /**
  * mbs_init() -- Initialize the MediaBox shell
@@ -67,24 +69,24 @@ mbs_init(void)
 int
 mbs_show_dialog(void)
 {
-	int fd, quit = 0;
+	int quit = 0;
 	mbi_event e;
 
 	mbs_clearscreen();
 
 	/* grab the input device */
-	if ((fd = mbi_grab_input()) == -1) {
+	if ((input_fd = mbi_grab_input()) == -1) {
 		fprintf(stderr, "mbs_show() -- mbi_grab_input failed\n");
 		return -1;
 	}
 
 	/* run the message loop */
-	while (!quit && read_or_eof(fd, &e, sizeof(mbi_event)) != 0) {
+	while (!quit && read_or_eof(input_fd, &e, sizeof(mbi_event)) != 0) {
 		switch (e) {
 		case MBI_EVENT_QUIT:
 		{
 #ifndef NDEBUG
-			close(fd);
+			close(input_fd);
 			quit = 1;
 #endif
 			break;
@@ -143,6 +145,17 @@ mbs_show_dialog(void)
 
 	fprintf(stderr, "mbs: Exiting\n");
 	return 0;
+}
+
+
+void
+mbs_reboot(void)
+{
+	if (mb_su_gainroot() == 0) {
+		close(input_fd);
+		system("systemctl stop avmount");
+		system("systemctl reboot");
+	}
 }
 
 

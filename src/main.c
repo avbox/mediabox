@@ -9,23 +9,7 @@
 #include "input.h"
 #include "player.h"
 #include "shell.h"
-
-static void
-get_mediabox_user(uid_t *uid, gid_t *gid)
-{
-	struct passwd *pw;
-	errno = 0;
-	pw = getpwnam("mediabox");
-	if (pw == NULL) {
-		fprintf(stderr, "mb: mediabox user not found. errno=%i\n",
-			errno);
-		*uid = *gid = 0;
-		return;
-	}
-	*uid = pw->pw_uid;
-	*gid = pw->pw_gid;
-}
-
+#include "su.h"
 
 int
 main (int argc, char **argv)
@@ -40,26 +24,7 @@ main (int argc, char **argv)
 	}
 
 	/* drop root prividges after initializing framebuffer */
-	if (0 && getuid() == 0) {
-		uid_t mb_uid;
-		gid_t mb_gid;
-
-		get_mediabox_user(&mb_uid, &mb_gid);
-		if (mb_uid && mb_gid) {
-			fprintf(stderr, "mb: Droping root priviledge\n");
-			if (setegid(mb_gid) == -1) {
-				fprintf(stderr, "mb: WARNING!! "
-					"setgid() failed. Runing as group root.\n");
-			}
-			if (seteuid(mb_uid) == -1) {
-				fprintf(stderr, "mb: WARNING!! "
-					"setuid() failed. Running as root.\n");
-			}
-		} else {
-			fprintf(stderr, "mb: WARNING!! "
-				"mediabox user not found! Running as root.\n");
-		}
-	}
+	mb_su_droproot();
 
 	/* initialize the shell */
 	if (mbs_init() != 0) {

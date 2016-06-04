@@ -34,6 +34,7 @@ SOURCES=main.o \
 	pipe_util.o \
 	player.o \
 	shell.o \
+	su.o \
 	ui-menu.o \
 	mainmenu.o \
 	library.o

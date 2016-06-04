@@ -35,6 +35,7 @@
 #include "video.h"
 #include "player.h"
 #include "debug.h"
+#include "su.h"
 
 
 /*
@@ -356,6 +357,7 @@ mb_player_video(void *arg)
 
 	/* initialize framebuffer for direct rendering */
 	if (inst->use_fbdev) {
+		mb_su_gainroot();
 		if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
 			if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
 				ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1) {
@@ -377,6 +379,7 @@ mb_player_video(void *arg)
 		} else {
 			inst->use_fbdev = 0;
 		}
+		mb_su_droproot();
 	}
 
 	fprintf(stderr, "player: Video renderer ready\n");
@@ -1654,6 +1657,7 @@ mbp_play(struct mbp *inst, const char * const path)
 
 	/* clear the screen */
 	mbv_window_clear(inst->window, 0x00000000);
+	mbv_window_update(inst->window);
 
 	int sw, sh, pw, ph, px, py;
 	mbv_window_getsize(inst->window, &sw, &sh);
@@ -1787,9 +1791,7 @@ mbp_stop(struct mbp* inst)
 static void
 mb_player_checkfbdev(struct mbp *inst)
 {
-	gid_t gid;
-	uid_t uid;
-	int root_gained = 0, fd;
+	int fd;
 
 	assert(inst != NULL);
 	assert(inst->window != NULL);
@@ -1803,15 +1805,8 @@ mb_player_checkfbdev(struct mbp *inst)
 	fprintf(stderr, "mb_player: Initializing /dev/fb0\n");
 
 	/* try to gain root */
-	if (geteuid() != 0 && getuid() == 0) {
-		fprintf(stderr, "mb_player: Gaining root rights\n");
-		gid = getegid();
-		uid = geteuid();
-		if (seteuid(0) == -1 || setegid(0) == -1) {
-			fprintf(stderr, "mb_player: Could not get root rights\n");
-		} else {
-			root_gained = 1;
-		}
+	if (mb_su_gainroot() == -1) {
+		fprintf(stderr, "player: Cannot gain root rights!\n");
 	}
 
 	if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
@@ -1864,11 +1859,7 @@ mb_player_checkfbdev(struct mbp *inst)
 		inst->use_fbdev = 0;
 	}
 end:
-	if (root_gained) {
-		if (seteuid(uid) == -1 || setegid(gid) == -1) {
-			fprintf(stderr, "mb_player: WARNING!!: Could not drop root rights!\n");
-		}
-	}
+	mb_su_droproot();
 }
 
 
