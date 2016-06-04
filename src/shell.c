@@ -153,8 +153,8 @@ mbs_reboot(void)
 {
 	if (mb_su_gainroot() == 0) {
 		close(input_fd);
-		system("systemctl stop avmount");
-		system("systemctl reboot");
+		(void) system("systemctl stop avmount");
+		(void) system("systemctl reboot");
 	}
 }
 

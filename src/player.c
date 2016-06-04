@@ -829,6 +829,8 @@ mb_player_audio(void *arg)
 	snd_pcm_hw_params_alloca(&params);
 	snd_pcm_sw_params_alloca(&swparams);
 
+	(void) mb_su_gainroot();
+
 	/* initialize alsa device */
 	if ((ret = snd_pcm_open(&handle, device, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
 		fprintf(stderr, "mb_player: snd_pcm_open() failed, ret=%i\n",
@@ -901,6 +903,8 @@ mb_player_audio(void *arg)
 		return NULL;
 	}
 	#endif
+
+	(void) mb_su_droproot();
 
 	/* signal video thread that we're ready to start */
 	pthread_mutex_lock(&inst->audio_lock);
