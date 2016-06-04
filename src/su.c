@@ -28,7 +28,7 @@ get_mediabox_user(uid_t *uid, gid_t *gid)
 int
 mb_su_canroot(void)
 {
-	return 1; //(getuid() == 0);
+	return (getuid() == 0);
 }
 
 
@@ -45,7 +45,7 @@ mb_su_gainroot(void)
 		return -1;
 
 	}
-	setegid(0);
+	(void) setegid(0);
 	return 0;
 }
 

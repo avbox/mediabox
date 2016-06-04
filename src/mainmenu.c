@@ -36,7 +36,7 @@ mb_mainmenu_init(void)
 	/* set height according to font size */
 	mbv_getscreensize(&xres, &yres);
 	font_height = mbv_getdefaultfontheight();
-	window_height = 30 + font_height + ((font_height + 10) * 6);
+	window_height = 30 + font_height + ((font_height + 10) * n_entries);
 
 	/* set width according to screen size */
 	switch (xres) {
