@@ -53,6 +53,8 @@ mb_su_gainroot(void)
 void
 mb_su_droproot(void)
 {
+	return;
+	#if 0
 	if (getuid() != 0 && geteuid() != 0) {
 		return; /* program running as regular user */
 	}
@@ -82,5 +84,6 @@ mb_su_droproot(void)
 	fprintf(stderr, "mediabox: Could not drop root rights. Aborting.\n");
 
 	abort();
+	#endif
 }
 
