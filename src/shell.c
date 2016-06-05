@@ -30,6 +30,10 @@ mbs_get_active_player(void)
 }
 
 
+/**
+ * mbs_clearscreen() -- Clears the screen and displas a blue line
+ * accross it. In the future we'll do something nicer.
+ */
 static void
 mbs_clearscreen(void)
 {
@@ -39,6 +43,25 @@ mbs_clearscreen(void)
 	mbv_window_drawline(root_window, 0, mbv_screen_height_get() / 2,
 		mbv_screen_width_get() - 1, mbv_screen_height_get() / 2);
         mbv_window_show(root_window);
+}
+
+
+/**
+ * mbs_playerstatuschanged() -- Handle player state change events
+ */
+static void
+mbs_playerstatuschanged(struct mbp *inst, enum mb_player_status status)
+{
+	if (inst == player) {
+		switch (status) {
+		case MB_PLAYER_STATUS_READY:
+			mbs_clearscreen();
+			break;
+		case MB_PLAYER_STATUS_PLAYING:
+		case MB_PLAYER_STATUS_PAUSED:
+			break;
+		}
+	}
 }
 
 
@@ -61,6 +84,9 @@ mbs_init(void)
 		fprintf(stderr, "Could not initialize main media player\n");
 		return -1;
 	}
+
+	/* register for status updates */
+	mb_player_add_status_callback(player, mbs_playerstatuschanged);
 
 	return 0;
 }
@@ -106,6 +132,18 @@ mbs_show_dialog(void)
 		}
 		case MBI_EVENT_PLAY:
 		{
+			switch (mb_player_getstatus(player)) {
+			case MB_PLAYER_STATUS_READY:
+				mbp_play(player, MEDIA_FILE);
+				break;
+			case MB_PLAYER_STATUS_PLAYING:
+				mbp_pause(player);
+				break;
+			case MB_PLAYER_STATUS_PAUSED:
+				mbp_play(player, NULL);
+				break;
+			}
+			#if 0
 			enum mb_player_status status;
 			status = mb_player_getstatus(player);
 			if (status == MB_PLAYER_STATUS_PAUSED) {
@@ -120,20 +158,13 @@ mbs_show_dialog(void)
 			} else {
 				fprintf(stderr, "Status %i\n", status);
 			}
+			#endif
 			break;
 		}
 		case MBI_EVENT_STOP:
 		{
-			fprintf(stderr, "shell: STOP event received\n");
-
-			enum mb_player_status status;
-			status = mb_player_getstatus(player);
-			if (status != MB_PLAYER_STATUS_READY) {
-				if (mbp_stop(player) == -1) {
-					fprintf(stderr, "mbs: mbp_stop() failed\n");
-				} else {
-					mbs_clearscreen();
-				}
+			if (mb_player_getstatus(player) != MB_PLAYER_STATUS_READY) {
+				(void) mbp_stop(player);
 			}
 			break;
 		}

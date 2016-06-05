@@ -86,10 +86,12 @@ struct mbp
 	int height;
 	int last_err;
 	int have_audio;
+	int have_video;
 	uint8_t *buf;
 	int bufsz;
 	uint8_t *render_mask;
 	int use_fbdev;
+	mb_player_status_callback status_callback;
 
 	AVFormatContext *fmt_ctx;
 
@@ -145,6 +147,22 @@ struct mbp
 	pthread_mutex_t resume_lock;
 	pthread_t thread;
 };
+
+
+/**
+ * mb_player_updatestatus() -- Updates the player status and
+ * calls any registered callbacks
+ */
+static void
+mb_player_updatestatus(struct mbp *inst, enum mb_player_status status)
+{
+	assert(inst != NULL);
+
+	inst->status = status;
+	if (inst->status_callback != NULL) {
+		inst->status_callback(inst, status);
+	}
+}
 
 
 #if (MB_VIDEO_BUFFER_FRAMES == 1)
@@ -309,6 +327,9 @@ mb_player_sleep(int64_t usecs)
 }
 
 
+/**
+ * mb_player_waitforaudio() -- Waits for the audio stream to start playing
+ */
 static void
 mb_player_waitforaudio(struct mbp* inst)
 {
@@ -322,12 +343,16 @@ mb_player_waitforaudio(struct mbp* inst)
 		if ((ret = snd_pcm_status(inst->audio_pcm_handle, status)) < 0) {
 			fprintf(stderr, "player: Could not get ALSA status\n");
 		}
-		usleep(5000);
+		usleep(1); /* do not raise this value */
 	}
 	while (snd_pcm_status_get_state(status) != SND_PCM_STATE_RUNNING);
 }
 
 
+/**
+ * mb_player_getaudiotimestamp() -- Gets the system time when the audio
+ * stream last started playing.
+ */
 static void
 mb_player_getaudiotimestamp(struct mbp* inst, struct timespec *timestamp)
 {
@@ -1668,8 +1693,10 @@ decoder_exit:
 	}
 
 	inst->video_stream_index = -1;
+	inst->audio_stream_index = -1;
 	inst->action = MB_PLAYER_ACTION_NONE;
-	inst->status = MB_PLAYER_STATUS_READY;
+
+	mb_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 
 	return NULL;
 }
@@ -1690,6 +1717,18 @@ void
 mb_player_update(struct mbp *inst)
 {
 	assert(inst != NULL);
+}
+
+
+int
+mb_player_add_status_callback(struct mbp *inst, mb_player_status_callback callback)
+{
+	if (inst->status_callback != NULL) {
+		abort(); /* only one callback supported for now */
+	}
+
+	inst->status_callback = callback;
+	return 0;
 }
 
 
@@ -1721,7 +1760,7 @@ mbp_play(struct mbp *inst, const char * const path)
 			while (inst->audio_paused || inst->video_paused) {
 				usleep(5000);
 			}
-			inst->status = MB_PLAYER_STATUS_PLAYING;
+			mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
 			return 0;
 		}
 		fprintf(stderr, "mbp_play() failed -- NULL path\n");
@@ -1735,7 +1774,9 @@ mbp_play(struct mbp *inst, const char * const path)
 
 	/* initialize player object */
 	inst->media_file = path;
-	inst->status = MB_PLAYER_STATUS_PLAYING;
+
+	/* update status */
+	mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
 
 	/* clear the screen */
 	mbv_window_clear(inst->window, 0x00000000);
@@ -1758,7 +1799,7 @@ mbp_play(struct mbp *inst, const char * const path)
 	pthread_mutex_lock(&inst->resume_lock);
 	if (pthread_create(&inst->thread, NULL, mb_player_stream_decode, inst) != 0) {
 		fprintf(stderr, "pthread_create() failed!\n");
-		inst->status = MB_PLAYER_STATUS_READY;
+		mb_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 		return -1;
 	}
 	pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
@@ -1790,7 +1831,7 @@ mbp_play(struct mbp *inst, const char * const path)
 	/* fire the video threads */
 	pthread_mutex_lock(&inst->renderer_lock);
 	if (pthread_create(&inst->renderer_thread, NULL, mb_player_video, inst) != 0) {
-		fprintf(stderr, "mb_player: Could not start renderer thread\n");
+		fprintf(stderr, "player: Could not start renderer thread\n");
 		pthread_mutex_unlock(&inst->audio_lock);
 		pthread_mutex_unlock(&inst->renderer_lock);
 		return -1;
@@ -1839,7 +1880,8 @@ mbp_pause(struct mbp* inst)
 	}
 
 	inst->action &= ~MB_PLAYER_ACTION_PAUSE;
-	inst->status  =  MB_PLAYER_STATUS_PAUSED;
+
+	mb_player_updatestatus(inst, MB_PLAYER_STATUS_PAUSED);
 	return 0;
 }
 
@@ -1988,6 +2030,7 @@ mb_player_new(struct mbv_window *window)
 	inst->video_stream_index = -1;
 	inst->video_paused = 0;
 	inst->audio_paused = 0;
+	inst->status_callback = NULL;
 	inst->action = MB_PLAYER_ACTION_NONE;
 	inst->status = MB_PLAYER_STATUS_READY;
 

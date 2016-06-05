@@ -19,11 +19,19 @@ enum mb_player_status
 };
 
 
+/* status changed callback function */
+typedef void (*mb_player_status_callback)(struct mbp *inst, enum mb_player_status status);
+
+
 /**
  * Get the current status of a media player instance.
  */
 enum mb_player_status
 mb_player_getstatus(struct mbp* inst);
+
+
+int
+mb_player_add_status_callback(struct mbp *inst, mb_player_status_callback callback);
 
 
 void
