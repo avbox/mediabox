@@ -66,7 +66,7 @@ mb_mainmenu_init(void)
 
 	/* populate the menu */
 	mb_ui_menu_additem(menu, "MEDIA LIBRARY", "LIB");
-	mb_ui_menu_additem(menu, "OPTICAL DISK", "DVD");
+	mb_ui_menu_additem(menu, "OPTICAL DISC", "DVD");
 	mb_ui_menu_additem(menu, "TV TUNNER", "DVR");
 	mb_ui_menu_additem(menu, "DOWNLOADS", "DOWN");
 	mb_ui_menu_additem(menu, "MEDIA SEARCH", "PIR");
