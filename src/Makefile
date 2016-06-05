@@ -37,6 +37,7 @@ SOURCES=main.o \
 	su.o \
 	ui-menu.o \
 	mainmenu.o \
+	about.o \
 	library.o
 
 all: mediabox

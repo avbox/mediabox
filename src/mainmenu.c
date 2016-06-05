@@ -12,6 +12,7 @@
 #include "library.h"
 #include "su.h"
 #include "shell.h"
+#include "about.h"
 
 
 static struct mbv_window *window = NULL;
@@ -101,6 +102,12 @@ mb_mainmenu_showdialog(void)
 		} else if (!memcmp("REBOOT", selected, 6)) {
 			mbv_window_hide(window);
 			mbs_reboot();
+
+		} else if (!memcmp("ABOUT", selected, 5)) {
+			mb_about_init();
+			mbv_window_hide(window);
+			mb_about_showdialog();
+			mb_about_destroy();
 			
 		} else {
 			fprintf(stderr, "mb_mainmenu: Selected %s\n",
