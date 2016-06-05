@@ -7,6 +7,7 @@
 #include "video.h"
 #include "input.h"
 #include "linkedlist.h"
+#include "ui-menu.h"
 
 
 /* Listable type for storing menuitem objects */
@@ -91,6 +92,21 @@ mb_ui_menu_setselected(struct mb_ui_menu *inst, mb_ui_menuitem *item)
 	return 0;
 }
 
+
+void
+mb_ui_menu_enumitems(struct mb_ui_menu *inst, mb_ui_enumitems_callback callback)
+{
+	mb_ui_menuitem *item;
+
+	assert(inst != NULL);
+	assert(callback != NULL);
+
+	LIST_FOREACH_SAFE(mb_ui_menuitem*, item, &inst->items, {
+		if (callback(item->data)) {
+			break;
+		}
+	});
+}
 
 void *
 mb_ui_menu_getselected(struct mb_ui_menu *inst)

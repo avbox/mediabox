@@ -152,8 +152,6 @@ mb_library_loadlist(const char *path)
 
 		if (S_ISDIR(st.st_mode)) {
 			strcat(filepath, "/");
-			/* This needs to be destroyed when it's no longer needed. The
-			 * ref to it is on the menu widget's item list */
 			filepathrel = strdup(filepath + sizeof(LIBRARY_ROOT) - 1);
 		} else {
 			filepathrel = strdup(filepath);
@@ -173,6 +171,18 @@ mb_library_loadlist(const char *path)
 		free(title);
 	}
 	closedir(dir);
+	return 0;
+}
+
+
+/**
+ * mb_library_freeitems() -- Called back by mb_ui_menu_enumitems(). Used to free
+ * item list entries
+ */
+static int
+mb_library_freeitems(void *item)
+{
+	free(item);
 	return 0;
 }
 
@@ -235,7 +245,8 @@ mb_library_showdialog(void)
 				abort(); /* for now */
 			}
 
-			/* TODO: free strings first */
+			/* clear the list and load the next page */
+			mb_ui_menu_enumitems(menu, mb_library_freeitems);
 			mb_ui_menu_clearitems(menu);
 			mb_library_loadlist(selected_copy);
 			mbv_window_update(window);
@@ -272,6 +283,7 @@ mb_library_destroy(void)
 {
 	fprintf(stderr, "mb_library: Destroying instance\n");
 
+	mb_ui_menu_enumitems(menu, mb_library_freeitems);
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);
 }

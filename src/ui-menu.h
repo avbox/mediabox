@@ -5,6 +5,13 @@
 struct mb_ui_menu;
 
 
+typedef int (*mb_ui_enumitems_callback)(void *item);
+
+
+void
+mb_ui_menu_enumitems(struct mb_ui_menu *inst, mb_ui_enumitems_callback callback);
+
+
 void *
 mb_ui_menu_getselected(struct mb_ui_menu *inst);
 
