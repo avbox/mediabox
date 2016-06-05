@@ -17,6 +17,14 @@ int
 mbv_dfb_isfbdev(void);
 
 
+struct mbv_font *
+mbv_dfb_font_new(char *file, int height);
+
+
+void
+mbv_dfb_font_destroy(struct mbv_font *inst);
+
+
 void
 mbv_dfb_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int h);
 

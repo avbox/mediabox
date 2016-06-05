@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 struct mbv_window;
+struct mbv_font;
 
 
 void
@@ -24,6 +25,14 @@ mbv_isfbdev(void);
 
 int
 mbv_getdefaultfontheight(void);
+
+
+struct mbv_font *
+mbv_font_new(char *file, int height);
+
+
+void
+mbv_font_destroy(struct mbv_font *inst);
 
 
 int

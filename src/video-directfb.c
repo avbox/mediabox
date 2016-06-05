@@ -29,6 +29,13 @@ struct mbv_window
 };
 
 
+struct mbv_font
+{
+	IDirectFBFont *font;
+	int height;
+};
+
+
 static DFBRectangle* rects[10];
 static uint8_t *screen_mask = NULL;
 
@@ -287,6 +294,50 @@ mbv_dfb_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int
 		DFBCHECK(window->content->FillRectangle(window->content, x, y, w, h));
 	}
 }
+
+
+/**
+ * mbv_dfb_font_new() -- Create a new font object.
+ */
+struct mbv_font *
+mbv_dfb_font_new(char *file, int height)
+{
+	struct mbv_font *inst;
+	DFBFontDescription font_dsc = { .flags = DFDESC_HEIGHT, .height = height };
+
+	if ((inst = malloc(sizeof(struct mbv_font))) == NULL) {
+		fprintf(stderr, "mbv: Out of memory\n");
+		return NULL;
+	}
+
+	inst->height = height;
+
+	if (dfb->CreateFont(dfb, file, &font_dsc, &inst->font) != DFB_OK) {
+		fprintf(stderr, "mbv: Could not create font '%s'\n", file);
+		free(inst);
+		return NULL;
+	}
+	return inst;
+}
+
+
+/**
+ * mbv_dfb_font_destroy() -- Destroys a font object.
+ */
+void
+mbv_dfb_font_destroy(struct mbv_font *inst)
+{
+	inst->font->Release(inst->font);
+	free(inst);
+}
+
+
+int
+mbv_dfb_window_set_font(struct mbv_window *inst, struct mbv_font *font)
+{
+	abort(); /* not implemented */
+}
+
 
 /**
  * mbv_dfb_window_new() -- Creates a new window

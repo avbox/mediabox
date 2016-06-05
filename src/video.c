@@ -19,6 +19,20 @@ mbv_getscreensize(int *width, int *height)
 }
 
 
+struct mbv_font *
+mbv_font_new(char *file, int height)
+{
+	return mbv_dfb_font_new(file, height);
+}
+
+
+void
+mbv_font_destroy(struct mbv_font *inst)
+{
+	mbv_dfb_font_destroy(inst);
+}
+
+
 void
 mbv_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int h)
 {
