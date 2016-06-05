@@ -13,16 +13,18 @@
 # 
 
 ECHOFLAGS=-e
-PREFIX=/usr/local
+PREFIX=@prefix@
 
 ifneq ($(shell echo -e "Hello"),Hello)
 	ECHOFLAGS=
 endif
 
-CFLAGS=-ggdb -std=gnu99 -fno-stack-protector -I/usr/include/directfb -Wunused-variable -Wall \
-	-D_GNU_SOURCE
+CC=@CC@
+CFLAGS=@CFLAGS@
+LDFLAGS=@LDFLAGS@
+CFLAGS+=-std=gnu99 -fno-stack-protector -Wunused-variable -Wall -D_GNU_SOURCE
 ASFLAGS=-ggdb
-LDFLAGS=-ldirectfb -pthread -lavutil -lavformat -lavcodec -lswscale -lavfilter -lz -lm -lasound
+LDFLAGS+=-lz -lm
 
 
 SOURCES=main.o \
@@ -43,20 +45,17 @@ SOURCES=main.o \
 all: mediabox
 
 clean: 
-	rm -f *.o 
-	rm -f mediabox
+	$(RM) *.o 
+	$(RM) mediabox
 
 mediabox: $(SOURCES)
-	@echo $(ECHOFLAGS) "  LD\t\tmediabox"
-	@$(CC) $(LDFLAGS) -o mediabox $(SOURCES)
+	$(CC) $(LDFLAGS) -o mediabox $(SOURCES)
 
 .s.o:
-	@echo $(ECHOFLAGS) "  AS\t\t"$<
-	@$(AS) $(ASFLAGS) -c $< -o $@
+	$(AS) $(ASFLAGS) -c $< -o $@
 
 .c.o:
-	@echo $(ECHOFLAGS) "  CC\t\t"$<
-	@$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 install:
 	mkdir -p $(PREFIX)/bin
