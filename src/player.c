@@ -234,6 +234,216 @@ utimeadd(struct timespec *t, unsigned int usecs)
 }
 
 
+/**
+ * mb_player_adec_thread() -- This is the main decoding loop
+ */
+static void*
+mb_player_audio(void *arg)
+{
+	int ret;
+	struct mbp *inst = (struct mbp*) arg;
+	const char *device = "default";
+	unsigned int framerate = 48000;
+	unsigned int period_usecs = 10;
+	int dir;
+	snd_pcm_hw_params_t *params;
+	snd_pcm_sw_params_t *swparams;
+	snd_pcm_sframes_t frames;
+	//snd_pcm_uframes_t period_frames = 32;
+
+
+	MB_DEBUG_SET_THREAD_NAME("audio_playback");
+
+	assert(inst != NULL);
+	assert(inst->audio_pcm_handle == NULL);
+	assert(inst->audio_quit == 0);
+	assert(inst->audio_paused == 0);
+
+	snd_pcm_hw_params_alloca(&params);
+	snd_pcm_sw_params_alloca(&swparams);
+
+	(void) mb_su_gainroot();
+
+	/* initialize alsa device */
+	if ((ret = snd_pcm_open(&inst->audio_pcm_handle, device, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
+		fprintf(stderr, "mb_player: snd_pcm_open() failed, ret=%i\n",
+			ret);
+		goto audio_exit;
+	}
+
+	if ((ret = snd_pcm_hw_params_any(inst->audio_pcm_handle, params)) < 0) {
+		fprintf(stderr, "player: Broken ALSA configuration: none available. %s\n",
+			snd_strerror(ret));
+		goto audio_exit;
+	}
+	if ((ret = snd_pcm_hw_params_set_access(inst->audio_pcm_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
+		fprintf(stderr, "player: INTERLEAVED RW access not available. %s\n",
+			snd_strerror(ret));
+		goto audio_exit;
+	}
+	if ((ret = snd_pcm_hw_params_set_format(inst->audio_pcm_handle, params, SND_PCM_FORMAT_S16_LE)) < 0) {
+		fprintf(stderr, "player: Format S16_LE not supported. %s\n",
+			snd_strerror(ret));
+		goto audio_exit;
+	}
+	if ((ret = snd_pcm_hw_params_set_channels(inst->audio_pcm_handle, params, 2)) < 0) {
+		fprintf(stderr, "player: 2 Channels not available. %s\n",
+			snd_strerror(ret));
+		goto audio_exit;
+	}
+	if ((ret = snd_pcm_hw_params_set_rate_near(inst->audio_pcm_handle, params, &framerate, &dir)) < 0) {
+		fprintf(stderr, "player: 48000Hz not available. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	#if 0
+	if ((ret = snd_pcm_hw_params_set_period_size_near(inst->audio_pcm_handle, params, &period_frames, &dir)) < 0) {
+		fprintf(stderr, "player: Cannot set period. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	#endif
+	if ((ret = snd_pcm_hw_params_set_period_time_near(inst->audio_pcm_handle, params, &period_usecs, &dir)) < 0) {
+		fprintf(stderr, "player: Could not set ALSA period time. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_hw_params(inst->audio_pcm_handle, params)) < 0) {
+		fprintf(stderr, "player: Could not set ALSA params: %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+
+	if ((ret = snd_pcm_sw_params_current(inst->audio_pcm_handle, swparams)) < 0) {
+		fprintf(stderr, "player: Could not determine SW params. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_sw_params_set_tstamp_type(inst->audio_pcm_handle, swparams, SND_PCM_TSTAMP_TYPE_MONOTONIC)) < 0) {
+		fprintf(stderr, "player: Could not set ALSA clock to CLOCK_MONOTONIC. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+	if ((ret = snd_pcm_sw_params(inst->audio_pcm_handle, swparams)) < 0) {
+		fprintf(stderr, "player: Could not set ALSA SW paramms. %s\n",
+			snd_strerror(ret));
+		return NULL;
+	}
+
+	if ((ret = snd_pcm_hw_params_get_period_time(params, &period_usecs, &dir)) < 0) {
+		fprintf(stderr, "player: Could not get ALSA period time. %s\n",
+			snd_strerror(ret));
+	}
+	if ((ret = snd_pcm_hw_params_get_rate(params, &framerate, &dir)) < 0) {
+		fprintf(stderr, "player: Could not get ALSA framerate. %s\n",
+			snd_strerror(ret));
+	}
+
+
+	fprintf(stderr, "player: ALSA period time: %u\n", period_usecs);
+	fprintf(stderr, "player: ALSA framerate: %u\n", framerate);
+
+	#if 0
+	if ((ret = snd_pcm_set_params(inst->audio_pcm_handle,
+		SND_PCM_FORMAT_S16,
+		SND_PCM_ACCESS_RW_INTERLEAVED,
+		2,
+		48000,
+		1,
+		MB_ALSA_LATENCY)) < 0) {
+		fprintf(stderr, "mb_player: snd_pcm_set_params() failed. ret=%i\n", ret);
+		snd_pcm_close(inst->audio_pcm_handle);
+		return NULL;
+	}
+	#endif
+
+	(void) mb_su_droproot();
+
+	/* signal video thread that we're ready to start */
+	pthread_mutex_lock(&inst->audio_lock);
+	pthread_cond_signal(&inst->audio_signal);
+	pthread_cond_signal(&inst->audio_signal); /* in case decoder is also waiting */
+	pthread_mutex_unlock(&inst->audio_lock);
+
+	fprintf(stderr, "player: Audio thread ready\n");
+
+	/* start decoding */
+	while (inst->audio_quit == 0) {
+
+		/* if there's no frame ready we must wait */
+		if (inst->audio_frame_state[inst->audio_playback_index] != 1) {
+			pthread_mutex_lock(&inst->audio_lock);
+			if (inst->audio_quit) {
+				pthread_mutex_unlock(&inst->audio_lock);
+				continue;
+			}
+			if (inst->audio_frame_state[inst->audio_playback_index] != 1) {
+				/* fprintf(stderr, "Audio thread waiting\n"); */
+				pthread_cond_wait(&inst->audio_signal, &inst->audio_lock);
+				pthread_mutex_unlock(&inst->audio_lock);
+				continue;
+			}
+			pthread_mutex_unlock(&inst->audio_lock);
+			if (inst->audio_quit) {
+				continue;
+			}
+		}
+
+		/* pause */
+		if (inst->action != MB_PLAYER_ACTION_NONE) {
+			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
+				fprintf(stderr, "decoder: pausing\n");
+				pthread_mutex_lock(&inst->resume_lock);
+				snd_pcm_drain(inst->audio_pcm_handle);
+				inst->audio_paused = 1;
+				pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
+				inst->audio_paused = 0;
+				pthread_mutex_unlock(&inst->resume_lock);
+				snd_pcm_reset(inst->audio_pcm_handle);
+				snd_pcm_prepare(inst->audio_pcm_handle);
+			}
+		}
+
+
+		/* play the frame */
+		frames = snd_pcm_writei(inst->audio_pcm_handle, inst->audio_frame[inst->audio_playback_index]->data[0],
+			inst->audio_frame[inst->audio_playback_index]->nb_samples);
+		if (frames < 0) {
+			frames = snd_pcm_recover(inst->audio_pcm_handle, frames, 0);
+		}
+		if (frames < 0) {
+			fprintf(stderr, "mb_player: snd_pcm_writei() failed: %s\n",
+				snd_strerror(frames));
+			av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
+			goto audio_exit;
+		}
+
+		/* free frame */
+		av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
+
+		/* update buffer state and signal decoder */
+		pthread_mutex_lock(&inst->audio_lock);
+		inst->audio_frame_state[inst->audio_playback_index] = 0;
+		inst->audio_playback_index++;
+		inst->audio_playback_index %= MB_AUDIO_BUFFER_FRAMES;
+		inst->audio_frames--;
+		pthread_cond_signal(&inst->audio_signal);
+		pthread_mutex_unlock(&inst->audio_lock);
+	}
+
+audio_exit:
+	fprintf(stderr, "player: Audio thread exiting\n");
+
+	/* cleanup */
+	if (inst->audio_pcm_handle == NULL) {
+		snd_pcm_close(inst->audio_pcm_handle);
+		inst->audio_pcm_handle = NULL;
+	}
+
+	return NULL;
+}
+
+
 void *
 mbv_dfb_getscreenmask();
 
@@ -451,6 +661,7 @@ mb_player_video(void *arg)
 	/* signal control thread that we're ready */
 	pthread_mutex_lock(&inst->renderer_lock);
 	pthread_cond_signal(&inst->renderer_signal);
+	pthread_cond_signal(&inst->renderer_signal); /* in case decoder is also waiting */
 	pthread_mutex_unlock(&inst->renderer_lock);
 
 
@@ -574,7 +785,7 @@ frame_complete:
 				 * pausing we need to wait for it to pause first or else we
 				 * get out of sync */
 				if (inst->audio_paused) {
-					fprintf(stderr, "decoder: pausing\n");
+					fprintf(stderr, "player: Video pausing\n");
 					pthread_mutex_lock(&inst->resume_lock);
 					inst->video_paused = 1;
 					pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
@@ -874,215 +1085,6 @@ open_codec_context(int *stream_idx,
 
 
 /**
- * mb_player_adec_thread() -- This is the main decoding loop
- */
-static void*
-mb_player_audio(void *arg)
-{
-	int ret;
-	struct mbp *inst = (struct mbp*) arg;
-	const char *device = "default";
-	unsigned int framerate = 48000;
-	unsigned int period_usecs = 10;
-	int dir;
-	snd_pcm_hw_params_t *params;
-	snd_pcm_sw_params_t *swparams;
-	snd_pcm_sframes_t frames;
-	//snd_pcm_uframes_t period_frames = 32;
-
-
-	MB_DEBUG_SET_THREAD_NAME("audio_playback");
-
-	assert(inst != NULL);
-	assert(inst->audio_pcm_handle == NULL);
-	assert(inst->audio_quit == 0);
-	assert(inst->audio_paused == 0);
-
-	snd_pcm_hw_params_alloca(&params);
-	snd_pcm_sw_params_alloca(&swparams);
-
-	(void) mb_su_gainroot();
-
-	/* initialize alsa device */
-	if ((ret = snd_pcm_open(&inst->audio_pcm_handle, device, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
-		fprintf(stderr, "mb_player: snd_pcm_open() failed, ret=%i\n",
-			ret);
-		goto audio_exit;
-	}
-
-	if ((ret = snd_pcm_hw_params_any(inst->audio_pcm_handle, params)) < 0) {
-		fprintf(stderr, "player: Broken ALSA configuration: none available. %s\n",
-			snd_strerror(ret));
-		goto audio_exit;
-	}
-	if ((ret = snd_pcm_hw_params_set_access(inst->audio_pcm_handle, params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0) {
-		fprintf(stderr, "player: INTERLEAVED RW access not available. %s\n",
-			snd_strerror(ret));
-		goto audio_exit;
-	}
-	if ((ret = snd_pcm_hw_params_set_format(inst->audio_pcm_handle, params, SND_PCM_FORMAT_S16_LE)) < 0) {
-		fprintf(stderr, "player: Format S16_LE not supported. %s\n",
-			snd_strerror(ret));
-		goto audio_exit;
-	}
-	if ((ret = snd_pcm_hw_params_set_channels(inst->audio_pcm_handle, params, 2)) < 0) {
-		fprintf(stderr, "player: 2 Channels not available. %s\n",
-			snd_strerror(ret));
-		goto audio_exit;
-	}
-	if ((ret = snd_pcm_hw_params_set_rate_near(inst->audio_pcm_handle, params, &framerate, &dir)) < 0) {
-		fprintf(stderr, "player: 48000Hz not available. %s\n",
-			snd_strerror(ret));
-		return NULL;
-	}
-	#if 0
-	if ((ret = snd_pcm_hw_params_set_period_size_near(inst->audio_pcm_handle, params, &period_frames, &dir)) < 0) {
-		fprintf(stderr, "player: Cannot set period. %s\n",
-			snd_strerror(ret));
-		return NULL;
-	}
-	#endif
-	if ((ret = snd_pcm_hw_params_set_period_time_near(inst->audio_pcm_handle, params, &period_usecs, &dir)) < 0) {
-		fprintf(stderr, "player: Could not set ALSA period time. %s\n",
-			snd_strerror(ret));
-		return NULL;
-	}
-	if ((ret = snd_pcm_hw_params(inst->audio_pcm_handle, params)) < 0) {
-		fprintf(stderr, "player: Could not set ALSA params: %s\n",
-			snd_strerror(ret));
-		return NULL;
-	}
-
-	if ((ret = snd_pcm_sw_params_current(inst->audio_pcm_handle, swparams)) < 0) {
-		fprintf(stderr, "player: Could not determine SW params. %s\n",
-			snd_strerror(ret));
-		return NULL;
-	}
-	if ((ret = snd_pcm_sw_params_set_tstamp_type(inst->audio_pcm_handle, swparams, SND_PCM_TSTAMP_TYPE_MONOTONIC)) < 0) {
-		fprintf(stderr, "player: Could not set ALSA clock to CLOCK_MONOTONIC. %s\n",
-			snd_strerror(ret));
-		return NULL;
-	}
-	if ((ret = snd_pcm_sw_params(inst->audio_pcm_handle, swparams)) < 0) {
-		fprintf(stderr, "player: Could not set ALSA SW paramms. %s\n",
-			snd_strerror(ret));
-		return NULL;
-	}
-
-	if ((ret = snd_pcm_hw_params_get_period_time(params, &period_usecs, &dir)) < 0) {
-		fprintf(stderr, "player: Could not get ALSA period time. %s\n",
-			snd_strerror(ret));
-	}
-	if ((ret = snd_pcm_hw_params_get_rate(params, &framerate, &dir)) < 0) {
-		fprintf(stderr, "player: Could not get ALSA framerate. %s\n",
-			snd_strerror(ret));
-	}
-
-
-	fprintf(stderr, "player: ALSA period time: %u\n", period_usecs);
-	fprintf(stderr, "player: ALSA framerate: %u\n", framerate);
-
-	#if 0
-	if ((ret = snd_pcm_set_params(inst->audio_pcm_handle,
-		SND_PCM_FORMAT_S16,
-		SND_PCM_ACCESS_RW_INTERLEAVED,
-		2,
-		48000,
-		1,
-		MB_ALSA_LATENCY)) < 0) {
-		fprintf(stderr, "mb_player: snd_pcm_set_params() failed. ret=%i\n", ret);
-		snd_pcm_close(inst->audio_pcm_handle);
-		return NULL;
-	}
-	#endif
-
-	(void) mb_su_droproot();
-
-	/* signal video thread that we're ready to start */
-	pthread_mutex_lock(&inst->audio_lock);
-	pthread_cond_signal(&inst->audio_signal);
-	pthread_mutex_unlock(&inst->audio_lock);
-
-	fprintf(stderr, "player: Audio thread ready\n");
-
-	/* start decoding */
-	while (inst->audio_quit == 0) {
-
-		/* if there's no frame ready we must wait */
-		if (inst->audio_frame_state[inst->audio_playback_index] != 1) {
-			pthread_mutex_lock(&inst->audio_lock);
-			if (inst->audio_quit) {
-				pthread_mutex_unlock(&inst->audio_lock);
-				continue;
-			}
-			if (inst->audio_frame_state[inst->audio_playback_index] != 1) {
-				/* fprintf(stderr, "Audio thread waiting\n"); */
-				pthread_cond_wait(&inst->audio_signal, &inst->audio_lock);
-				pthread_mutex_unlock(&inst->audio_lock);
-				continue;
-			}
-			pthread_mutex_unlock(&inst->audio_lock);
-			if (inst->audio_quit) {
-				continue;
-			}
-		}
-
-		/* pause */
-		if (inst->action != MB_PLAYER_ACTION_NONE) {
-			if (inst->action & MB_PLAYER_ACTION_PAUSE) {
-				fprintf(stderr, "decoder: pausing\n");
-				pthread_mutex_lock(&inst->resume_lock);
-				snd_pcm_drain(inst->audio_pcm_handle);
-				inst->audio_paused = 1;
-				pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
-				inst->audio_paused = 0;
-				pthread_mutex_unlock(&inst->resume_lock);
-				snd_pcm_reset(inst->audio_pcm_handle);
-				snd_pcm_prepare(inst->audio_pcm_handle);
-			}
-		}
-
-
-		/* play the frame */ 
-		frames = snd_pcm_writei(inst->audio_pcm_handle, inst->audio_frame[inst->audio_playback_index]->data[0],
-			inst->audio_frame[inst->audio_playback_index]->nb_samples);
-		if (frames < 0) {
-			frames = snd_pcm_recover(inst->audio_pcm_handle, frames, 0);
-		}
-		if (frames < 0) {
-			fprintf(stderr, "mb_player: snd_pcm_writei() failed: %s\n",
-				snd_strerror(frames));
-			av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
-			goto audio_exit;
-		}
-
-		/* free frame */
-		av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
-
-		/* update buffer state and signal decoder */
-		pthread_mutex_lock(&inst->audio_lock);
-		inst->audio_frame_state[inst->audio_playback_index] = 0;
-		inst->audio_playback_index++;
-		inst->audio_playback_index %= MB_AUDIO_BUFFER_FRAMES;
-		inst->audio_frames--;
-		pthread_cond_signal(&inst->audio_signal);
-		pthread_mutex_unlock(&inst->audio_lock);
-	}
-
-audio_exit:
-	fprintf(stderr, "player: Audio thread exiting\n");
-
-	/* cleanup */
-	if (inst->audio_pcm_handle == NULL) {
-		snd_pcm_close(inst->audio_pcm_handle);
-		inst->audio_pcm_handle = NULL;
-	}
-
-	return NULL;
-}
-
-
-/**
  * mb_player_video_decode() -- Decodes video frames in the background.
  */
 static void *
@@ -1304,6 +1306,7 @@ mb_player_audio_decode(void * arg)
 	assert(inst->fmt_ctx != NULL);
 	assert(inst->audio_stream_index == -1);
 
+	fprintf(stderr, "player: Audio decoder starting\n");
 
 	/* open the audio codec */
 	if (open_codec_context(&inst->audio_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
@@ -1466,6 +1469,7 @@ mb_player_stream_decode(void *arg)
 	assert(inst->video_paused == 0);
 
 	inst->have_audio = 0;
+	inst->have_video = 0;
 
 	/* get the size of the window */
 	if (mbv_window_getsize(inst->window, &inst->width, &inst->height) == -1) {
@@ -1516,6 +1520,8 @@ mb_player_stream_decode(void *arg)
 	fprintf(stderr, "mb_player: Video stream: %i\n", inst->video_stream_index);
 
 	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0) >= 0) {
+
+		fprintf(stderr, "player: audio found\n");
 
 		/* allocate filtered audio frames */
 		inst->audio_pcm_handle = NULL;
@@ -1832,7 +1838,6 @@ mbp_play(struct mbp *inst, const char * const path)
 	pthread_mutex_lock(&inst->renderer_lock);
 	if (pthread_create(&inst->renderer_thread, NULL, mb_player_video, inst) != 0) {
 		fprintf(stderr, "player: Could not start renderer thread\n");
-		pthread_mutex_unlock(&inst->audio_lock);
 		pthread_mutex_unlock(&inst->renderer_lock);
 		return -1;
 	}
