@@ -1,3 +1,7 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
@@ -66,7 +70,7 @@ mb_about_showdialog(void)
 	int fd;
 	mbi_event e;
 
-	mbv_window_drawstring(window, "MEDIABOX", window_width / 2, 10);
+	mbv_window_drawstring(window, "MEDIABOX " PACKAGE_VERSION, window_width / 2, 10);
 	mbv_window_drawstring(window, "Copyright (c) 2016 - Fernando Rodriguez", window_width / 2, 60);
 	mbv_window_drawstring(window, "All rights reserved", window_width / 2, 80);
 

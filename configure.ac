@@ -1,6 +1,8 @@
 AC_PREREQ([2.69])
 AC_INIT([mediabox], [0.01], [https://github.com/mediabox/])
-#AC_CONFIG_HEADERS(config.h)
+
+AC_CONFIG_HEADERS(src/config.h)
+
 AM_INIT_AUTOMAKE([1.9 -Wall std-options gnu])
 
 
@@ -16,10 +18,10 @@ AC_ARG_ENABLE([debug], [extra debugging code])
 AM_CONDITIONAL(ENABLE_DEBUG, test x"$enable_debug" = xyes)
 if test x"$enable_debug" = xyes; then
 	AC_DEFINE([DEBUG],1,[Define to 1 to compile debug code])
-	CFLAGS="-ggdb -O1 -DDEBUG"
+	CFLAGS="-ggdb -O1 -DDEBUG -DHAVE_CONFIG_H"
 else
 	AC_DEFINE([NDEBUG],1,[Define to 1  to disable debug code])
-	CFLAGS="-O2 -DNDEBUG"
+	CFLAGS="-O2 -DNDEBUG -DHAVE_CONFIG_H"
 fi
 
 #AC_SUBST(DAEMON_ARGS)
