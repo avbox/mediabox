@@ -10,6 +10,8 @@
 #include "player.h"
 #include "shell.h"
 #include "su.h"
+#include "downloads-backend.h"
+
 
 int
 main (int argc, char **argv)
@@ -32,10 +34,16 @@ main (int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
+	if (mb_downloadmanager_init() == -1) {
+		fprintf(stderr, "Could not initialize download manager\n");
+		exit(EXIT_FAILURE);
+	}
+
 	/* show the shell */
 	mbs_show_dialog();
 
 	/* cleanup */
+	mb_downloadmanager_destroy();
 	mbs_destroy();
 	mbi_destroy();
 	mbv_destroy();

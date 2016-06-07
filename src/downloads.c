@@ -200,9 +200,9 @@ mb_downloads_populatelist(void)
 		execv(DELUGE_BIN, (char * const[]) {
 			strdup("deluge-console"),
 			strdup("connect"),
-			strdup("10.10.0.130"),
-			strdup("fernan"),
-			strdup("test;"),
+			strdup("127.0.0.1"),
+			strdup("mediabox"),
+			strdup("mediabox;"),
 			strdup("info"), NULL });
 		exit(EXIT_FAILURE);
 	}

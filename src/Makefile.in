@@ -40,6 +40,7 @@ SOURCES=main.o \
 	ui-menu.o \
 	mainmenu.o \
 	downloads.o \
+	downloads-backend.o \
 	about.o \
 	library.o
 
@@ -61,6 +62,8 @@ mediabox: $(SOURCES)
 install:
 	mkdir -p $(PREFIX)/bin
 	mkdir -p $(PREFIX)/share/mediabox
-	cp mediatomb $(PREFIX)/bin/mediatomb
-	cp res/mediatomb/mediatomb-config.xml $(PREFIX)/share/mediabox/mediatomb-config.xml
+	cp mediabox $(PREFIX)/bin/mediabox
+	cp res/mediatomb/config.xml $(PREFIX)/share/mediabox/mediatomb-config.xml
+	cp res/deluge/core.conf $(PREFIX)/share/mediabox/deluge-core.conf
+	cp res/deluge/auth $(PREFIX)/share/mediabox/deluge-auth
 

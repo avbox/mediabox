@@ -71,14 +71,7 @@ LDFLAGS="$LDFLAGS $LIBAVFILTER_LIBS"
 
 
 
-
-
-
-
-
-
-
-
+AC_SUBST(PREFIX)
 
 AC_OUTPUT(Makefile \
 	src/Makefile)
