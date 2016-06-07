@@ -180,8 +180,9 @@ mb_library_loadlist(const char *path)
  * item list entries
  */
 static int
-mb_library_freeitems(void *item)
+mb_library_freeitems(void *item, void *data)
 {
+	(void) data;
 	free(item);
 	return 0;
 }
@@ -246,7 +247,7 @@ mb_library_showdialog(void)
 			}
 
 			/* clear the list and load the next page */
-			mb_ui_menu_enumitems(menu, mb_library_freeitems);
+			mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
 			mb_ui_menu_clearitems(menu);
 			mb_library_loadlist(selected_copy);
 			mbv_window_update(window);
@@ -283,7 +284,7 @@ mb_library_destroy(void)
 {
 	fprintf(stderr, "mb_library: Destroying instance\n");
 
-	mb_ui_menu_enumitems(menu, mb_library_freeitems);
+	mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);
 }

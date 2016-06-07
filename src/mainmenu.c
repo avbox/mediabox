@@ -13,6 +13,7 @@
 #include "su.h"
 #include "shell.h"
 #include "about.h"
+#include "downloads.h"
 
 
 static struct mbv_window *window = NULL;
@@ -108,6 +109,12 @@ mb_mainmenu_showdialog(void)
 			mbv_window_hide(window);
 			mb_about_showdialog();
 			mb_about_destroy();
+
+		} else if (!memcmp("DOWN", selected, 4)) {
+			mb_downloads_init();
+			mbv_window_hide(window);
+			mb_downloads_showdialog();
+			mb_downloads_destroy();
 			
 		} else {
 			fprintf(stderr, "mb_mainmenu: Selected %s\n",

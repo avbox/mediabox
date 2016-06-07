@@ -93,8 +93,35 @@ mb_ui_menu_setselected(struct mb_ui_menu *inst, mb_ui_menuitem *item)
 }
 
 
+int
+mb_ui_menu_setitemtext(struct mb_ui_menu *inst, void *item, char *text)
+{
+	mb_ui_menuitem *menuitem;
+
+	assert(inst != NULL);
+	assert(item != NULL);
+	assert(text != NULL);
+
+	LIST_FOREACH(mb_ui_menuitem*, menuitem, &inst->items) {
+		if (menuitem->data == item) {
+			assert(menuitem->name != NULL);
+			free(menuitem->name);
+			menuitem->name = strdup(text);
+			if (menuitem->name == NULL) {
+				fprintf(stderr, "downloads: Out of memory\n");
+				return -1;
+			}
+			mb_ui_menuitem_update(inst, menuitem);
+			return 0;
+		}
+		
+	}
+	return -1;
+}
+
+
 void
-mb_ui_menu_enumitems(struct mb_ui_menu *inst, mb_ui_enumitems_callback callback)
+mb_ui_menu_enumitems(struct mb_ui_menu *inst, mb_ui_enumitems_callback callback, void *callback_data)
 {
 	mb_ui_menuitem *item;
 
@@ -102,7 +129,7 @@ mb_ui_menu_enumitems(struct mb_ui_menu *inst, mb_ui_enumitems_callback callback)
 	assert(callback != NULL);
 
 	LIST_FOREACH_SAFE(mb_ui_menuitem*, item, &inst->items, {
-		if (callback(item->data)) {
+		if (callback(item->data, callback_data)) {
 			break;
 		}
 	});

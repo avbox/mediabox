@@ -39,6 +39,7 @@ SOURCES=main.o \
 	su.o \
 	ui-menu.o \
 	mainmenu.o \
+	downloads.o \
 	about.o \
 	library.o
 
