@@ -25,12 +25,12 @@ cp(const char *src, const char *dst)
 	struct stat st;
 
 	if (stat(src, &st) == 0) {
-		if ((fdr = open(src, O_RDONLY)) != -1) {
-			if ((fdw = open(dst, O_WRONLY, O_CREAT)) != -1) {
+		if ((fdr = open(src, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) != -1) {
+			if ((fdw = open(dst, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) != -1) {
 				if (sendfile(fdw, fdr, 0, st.st_size) != -1) {
 					ret = 0;
 				} else {
-					fprintf(stderr, "download-manager: Could not save core config\n");
+					fprintf(stderr, "download-manager: sendfile() failed. errno=%i\n", errno);
 				}
 				close(fdw);
 			} else {
@@ -38,7 +38,7 @@ cp(const char *src, const char *dst)
 			}
 			close(fdr);
 		} else {
-			fprintf(stderr, "download-manager: Could not open %s\n", src);
+			fprintf(stderr, "download-manager: Could not open %s (errno=%i)\n", src, errno);
 		}
 	}
 	return ret;
@@ -86,8 +86,9 @@ mb_downloadmanager_deluged(void *data)
 int
 mb_downloadmanager_init(void)
 {
-	mkdir("/var/lib/mediabox", 777);
-	mkdir("/var/lib/mediabox/deluge", 777);
+	umask(000);
+	mkdir("/var/lib/mediabox", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	mkdir("/var/lib/mediabox/deluge", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 	cp("/usr/local/share/mediabox/deluge-core.conf", "/var/lib/mediabox/deluge/core.conf");
 	cp("/usr/local/share/mediabox/deluge-auth", "/var/lib/mediabox/deluge/auth");
 	unlink("/var/lib/mediabox/deluge/deluged.pid");
