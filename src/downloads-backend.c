@@ -26,15 +26,19 @@ cp(const char *src, const char *dst)
 
 	if (stat(src, &st) == 0) {
 		if ((fdr = open(src, O_RDONLY)) != -1) {
-			if ((fdw = open(dst, O_WRONLY)) != -1) {
+			if ((fdw = open(dst, O_WRONLY, O_CREAT)) != -1) {
 				if (sendfile(fdw, fdr, 0, st.st_size) != -1) {
 					ret = 0;
 				} else {
 					fprintf(stderr, "download-manager: Could not save core config\n");
 				}
 				close(fdw);
+			} else {
+				fprintf(stderr, "download-manager: Could not open %s\n", dst);
 			}
 			close(fdr);
+		} else {
+			fprintf(stderr, "download-manager: Could not open %s\n", src);
 		}
 	}
 	return ret;
