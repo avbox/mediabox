@@ -45,7 +45,9 @@ mb_su_gainroot(void)
 		return -1;
 
 	}
-	(void) setegid(0);
+	if (setegid(0) != 0) {
+		fprintf(stderr, "su: setegid() failed\n");
+	}
 	return 0;
 }
 
@@ -53,6 +55,8 @@ mb_su_gainroot(void)
 void
 mb_su_droproot(void)
 {
+	get_mediabox_user(&mb_uid, &mb_gid);
+
 	return;
 	#if 0
 	if (getuid() != 0 && geteuid() != 0) {
