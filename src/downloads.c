@@ -12,10 +12,17 @@
 #include "video.h"
 #include "input.h"
 #include "ui-menu.h"
+#include "linkedlist.h"
 
 
 #define DELUGE_BIN "/usr/bin/deluge-console"
 
+
+LISTABLE_TYPE(mb_download,
+	char *id;
+	char *name;
+	int updated;
+);
 
 struct finditemdata
 {
@@ -29,36 +36,57 @@ static struct mbv_window *window = NULL;
 static struct mb_ui_menu *menu = NULL;
 static int mb_updater_quit = 0;
 
+LIST_DECLARE_STATIC(downloads);
+
 
 static int
-mb_downloads_finditem(void *item, void *data)
-{
-	struct finditemdata *itemdata = (struct finditemdata*) data;
-	if (!strcmp((char*) item, itemdata->id)) {
-		itemdata->found = 1;
-		itemdata->item = item;
-		return -1;
-	}
-	return 0;
-}
-
-
-static void
 mb_downloads_updateentry(char *id, char *name)
 {
-	struct finditemdata itemdata;
-	itemdata.found = 0;
-	itemdata.item = NULL;
-	itemdata.id = id;
-
-	mb_ui_menu_enumitems(menu, mb_downloads_finditem, &itemdata);
-
-	if (itemdata.found) {
-		fprintf(stderr, "downloads: item found\n");
-		mb_ui_menu_setitemtext(menu, itemdata.item, name);
-	} else {
-		mb_ui_menu_additem(menu, name, id);
+	int found = 0;
+	mb_download *dl;
+	LIST_FOREACH(mb_download*, dl, &downloads) {
+		if (!strcmp(dl->id, id)) {
+			found = 1;
+			break;
+		}
 	}
+
+	if (found) {
+		assert(dl->name != NULL);
+		free(dl->name);
+		if ((dl->name = strdup(name)) == NULL) {
+			fprintf(stderr, "downloads: Out of memory\n");
+		}
+
+		dl->updated = 1;
+
+		mb_ui_menu_setitemtext(menu, dl->id, name);
+
+	} else {
+		if ((dl = malloc(sizeof(mb_download))) == NULL) {
+			fprintf(stderr, "downloads: Out of memory\n");
+			return -1;
+		}
+		if ((dl->id = strdup(id)) == NULL) {
+			fprintf(stderr, "downloads: Out of memory\n");
+			free(dl);
+			return -1;
+		}
+		if ((dl->name = strdup(name)) == NULL) {
+			fprintf(stderr, "downloads: Out of memory\n");
+			free(dl->id);
+			free(dl);
+			return -1;
+		}
+
+		dl->updated = 1;
+
+		mb_ui_menu_additem(menu, dl->name, dl->id);
+
+		LIST_ADD(&downloads, dl);
+
+	}
+	return 0;
 }
 
 
@@ -80,8 +108,6 @@ mb_downloads_populatelist(void)
 	pid_t pid;
 	int pipefd[2];
 
-	fprintf(stderr, "downloads: Populating list\n");
-
 	if (pipe(pipefd) == -1) {
 		fprintf(stderr, "downloads: pipe() failed\n");
 		return -1;
@@ -99,7 +125,7 @@ mb_downloads_populatelist(void)
 		char buf[512];
 
 		close(pipefd[1]);
-		fprintf(stderr, "downloads: waiting for deluge-console...\n");
+		/* fprintf(stderr, "downloads: waiting for deluge-console...\n"); */
 
 		f = fdopen(pipefd[0], "r");
 		if (f == NULL) {
@@ -113,7 +139,7 @@ mb_downloads_populatelist(void)
 						if (name == NULL) {
 							fprintf(stderr, "downloads: Out of memory\n");
 						}
-						fprintf(stderr, "Name: %s\n", name);
+						/* fprintf(stderr, "Name: %s\n", name); */
 
 					} else if (!memcmp("ID: ", str, 4)) {
 						if (name != NULL) {
@@ -124,7 +150,7 @@ mb_downloads_populatelist(void)
 								free(name);
 								name = NULL;
 							} else {
-								fprintf(stderr, "ID: %s\n", id);
+								/* fprintf(stderr, "ID: %s\n", id); */
 							}
 						}
 
@@ -154,9 +180,6 @@ mb_downloads_populatelist(void)
 								id = NULL;
 								name = NULL;
 							} else {
-								fprintf(stderr, "Progress: '%s'\n", progress);
-								fprintf(stderr, "Progressbar: '%s'\n", progressbar);
-
 								snprintf(buf, 512, "%s (%s)",
 									name, progress);
 
@@ -177,6 +200,22 @@ mb_downloads_populatelist(void)
 				}
 			}
 			fclose(f);
+
+			mb_download *dl;
+			LIST_FOREACH_SAFE(mb_download*, dl, &downloads, {
+				if (!dl->updated) {
+					mb_ui_menu_removeitem(menu, dl->id);
+					mbv_window_update(window);
+					LIST_REMOVE(dl);
+					free(dl->id);
+					free(dl->name);
+					free(dl);
+				} else {
+					dl->updated = 0;
+				}
+			});
+
+
 		}
 
 		while (waitpid(pid, &ret, 0) == -1) {
@@ -185,8 +224,9 @@ mb_downloads_populatelist(void)
 			}
 		}
 
-		fprintf(stderr, "downloads: deluge-console info returned %i\n", ret);
+		/* fprintf(stderr, "downloads: deluge-console info returned %i\n", ret); */
 		close(pipefd[0]);
+
 		mbv_window_update(window);
 		return 0;
 
@@ -214,6 +254,7 @@ static void *
 mb_downloads_listupdater(void * arg)
 {
 	(void) arg;
+	fprintf(stderr, "downloads: Worker thread running\n");
 	while (!mb_updater_quit) {
 		mb_downloads_populatelist();
 	}
@@ -231,6 +272,8 @@ mb_downloads_init(void)
 	int window_height, window_width;
 	int n_entries = 10;
 
+	LIST_INIT(&downloads);
+	mb_updater_quit = 0;
 
 	/* set height according to font size */
 	mbv_getscreensize(&xres, &yres);

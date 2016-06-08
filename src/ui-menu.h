@@ -8,6 +8,10 @@ struct mb_ui_menu;
 typedef int (*mb_ui_enumitems_callback)(void *item, void *data);
 
 
+void
+mb_ui_menu_removeitem(struct mb_ui_menu *inst, void *item);
+
+
 int
 mb_ui_menu_setitemtext(struct mb_ui_menu *inst, void *item, char *text);
 

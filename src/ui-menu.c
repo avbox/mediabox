@@ -239,6 +239,37 @@ mb_ui_menu_additem(struct mb_ui_menu *inst, char *name, void *data)
 
 
 void
+mb_ui_menu_removeitem(struct mb_ui_menu *inst, void *item)
+{
+	int next = 0;
+	mb_ui_menuitem *menuitem, *prev = NULL;
+	LIST_FOREACH_SAFE(mb_ui_menuitem*, menuitem, &inst->items, {
+		if (menuitem->data == item) {
+			LIST_REMOVE(menuitem);
+			if (menuitem->window != NULL) {
+				mbv_window_clear(menuitem->window, 0x3349ffff);
+			}
+			free(menuitem->name);
+			free(menuitem);
+			inst->count--;
+			if (inst->selected == item) {
+				if (prev != NULL) {
+					inst->selected = prev->data;
+				} else {
+					inst->selected = NULL;
+					next = 1;
+				}
+			}
+		} else if (next) {
+			inst->selected = menuitem->data;
+			break;
+		}
+		prev = menuitem;
+	});
+}
+
+
+void
 mb_ui_menu_clearitems(struct mb_ui_menu *inst)
 {
 	mb_ui_menuitem* item;
