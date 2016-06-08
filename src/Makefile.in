@@ -41,6 +41,7 @@ SOURCES=main.o \
 	mainmenu.o \
 	downloads.o \
 	downloads-backend.o \
+	mediasearch.o \
 	about.o \
 	library.o
 

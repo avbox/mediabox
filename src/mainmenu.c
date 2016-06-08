@@ -14,6 +14,7 @@
 #include "shell.h"
 #include "about.h"
 #include "downloads.h"
+#include "mediasearch.h"
 
 
 static struct mbv_window *window = NULL;
@@ -71,7 +72,7 @@ mb_mainmenu_init(void)
 	mb_ui_menu_additem(menu, "OPTICAL DISC", "DVD");
 	mb_ui_menu_additem(menu, "TV TUNNER", "DVR");
 	mb_ui_menu_additem(menu, "DOWNLOADS", "DOWN");
-	mb_ui_menu_additem(menu, "MEDIA SEARCH", "PIR");
+	mb_ui_menu_additem(menu, "MEDIA SEARCH", "MEDIASEARCH");
 	mb_ui_menu_additem(menu, "ABOUT MEDIABOX", "ABOUT");
 
 	if (mb_su_canroot()) {
@@ -115,6 +116,12 @@ mb_mainmenu_showdialog(void)
 			mbv_window_hide(window);
 			mb_downloads_showdialog();
 			mb_downloads_destroy();
+
+		} else if (!memcmp("MEDIASEARCH", selected, 11)) {
+			mb_mediasearch_init();
+			mbv_window_hide(window);
+			mb_mediasearch_showdialog();
+			mb_mediasearch_destroy();
 			
 		} else {
 			fprintf(stderr, "mb_mainmenu: Selected %s\n",
