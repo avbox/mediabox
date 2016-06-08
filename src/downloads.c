@@ -282,9 +282,9 @@ mb_downloads_init(void)
 
 	/* set width according to screen size */
 	switch (xres) {
-	case 1024: window_width = 600; break;
-	case 1280: window_width = 700; break;
-	case 1920: window_width = 800; break;
+	case 1024: window_width = 800; break;
+	case 1280: window_width = 1000; break;
+	case 1920: window_width = 1200; break;
 	case 640:
 	default:   window_width = 600; break;
 	}
