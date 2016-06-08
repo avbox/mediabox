@@ -69,6 +69,13 @@ AC_MSG_ERROR('Unable to find libavfilter. Please make sure library and header fi
 CFLAGS="$CFLAGS $LIBAVFILTER_CFLAGS"
 LDFLAGS="$LDFLAGS $LIBAVFILTER_LIBS"
 
+#
+# libcurl
+#
+AX_LIB_CURL([7.45.0],,
+	[AC_MSG_ERROR([Your system lacks libcurl >= 7.45.0])])
+LDFLAGS="$LDFLAGS -lcurl"
+AC_DEFINE([USE_CURL], 1, [Define to 1 to use libcurl])
 
 
 AC_SUBST(PREFIX)
