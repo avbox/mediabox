@@ -7,6 +7,7 @@
  * malloc() allocated buffer
  */
 int
-mb_url_fetch_to_mem(char *url, void **dest, size_t *size)
+mb_url_fetch2mem(char *url, void **dest, size_t *size);
+
 
 #endif

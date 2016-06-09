@@ -35,7 +35,7 @@ WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
 
 
 int
-mb_url_fetch_to_mem(char *url, void **dest, size_t *size)
+mb_url_fetch2mem(char *url, void **dest, size_t *size)
 {
 	CURL *curl_handle;
 	CURLcode res;
@@ -60,7 +60,9 @@ mb_url_fetch_to_mem(char *url, void **dest, size_t *size)
 	curl_easy_setopt(curl_handle, CURLOPT_URL, url);
 	curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 	curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
+	curl_easy_setopt(curl_handle, CURLOPT_ACCEPT_ENCODING, "");
 	curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "mediabox/" PACKAGE_VERSION);
+	//curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "Mozilla/5.0 (X11; Linux x86_64; rv:46.0) Gecko/20100101 Firefox/46.0");
 
 	/* get it! */
 	res = curl_easy_perform(curl_handle);

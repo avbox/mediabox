@@ -3,6 +3,10 @@
 
 
 int
+mb_downloadmanager_addurl(char *url);
+
+
+int
 mb_downloadmanager_init(void);
 
 

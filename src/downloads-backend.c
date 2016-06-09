@@ -10,8 +10,10 @@
 #include <sys/stat.h>
 #include <sys/sendfile.h>
 
+#define DELUGE_BIN "/usr/bin/deluge-console"
 #define DELUGED_BIN "/usr/bin/deluged"
 #define PREFIX "/usr/local"
+
 
 static int deluge_quit = 0;
 static pthread_t deluge_monitor;
@@ -80,6 +82,42 @@ mb_downloadmanager_deluged(void *data)
 		}
 	}
 	return NULL;
+}
+
+
+int
+mb_downloadmanager_addurl(char *url)
+{
+	pid_t pid;
+
+	if ((pid = fork()) == -1) {
+		fprintf(stderr, "downloads-backend: fork() failed\n");
+		return -1;
+
+	} else if (pid == 0) { /* child */
+		execv(DELUGE_BIN, (char * const[]) {
+			strdup("deluge-console"),
+			strdup("connect"),
+			strdup("127.0.0.1"),
+			strdup("mediabox"),
+			strdup("mediabox;"),
+			strdup("add"),
+			strdup(url),
+			NULL });
+		exit(EXIT_FAILURE);
+
+	} else { /* parent */
+		int ret;
+		while (waitpid(pid, &ret, 0) == -1) {
+			if (errno == EINTR) {
+				continue;
+			} else {
+				fprintf(stderr, "downloads-backend: waitpid() failed\n");
+				break;
+			}
+		}
+		return ret;
+	}
 }
 
 
