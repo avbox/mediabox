@@ -14,10 +14,16 @@
 #include "debug.h"
 
 
+#define STRINGIZE2(x) #x
+#define STRINGIZE(x) STRINGIZE2(x)
+
+
+
 static int sockfd = -1;
 static int newsockfd = -1;
 static int server_quit = 0;
 static pthread_t thread;
+
 
 static void *
 mbi_tcp_server(void *arg)
@@ -136,6 +142,44 @@ mbi_tcp_server(void *arg)
 					mbi_event_send(MBI_EVENT_PLAY);
 				} else if (!memcmp("STOP", buffer, 4)) {
 					mbi_event_send(MBI_EVENT_STOP);
+				} else if (!memcmp("CLEAR", buffer, 5)) {
+					mbi_event_send(MBI_EVENT_CLEAR);
+				} else if (!memcmp("KEY:", buffer, 4)) {
+#define ELIF_KEY(x) \
+	else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \
+		mbi_event_send(MBI_EVENT_KBD_ ##x ); \
+	}
+
+					if (1 == 0) {
+						/* math broken */
+					}
+					ELIF_KEY(A)
+					ELIF_KEY(B)
+					ELIF_KEY(C)
+					ELIF_KEY(D)
+					ELIF_KEY(E)
+					ELIF_KEY(F)
+					ELIF_KEY(G)
+					ELIF_KEY(H)
+					ELIF_KEY(I)
+					ELIF_KEY(J)
+					ELIF_KEY(K)
+					ELIF_KEY(L)
+					ELIF_KEY(M)
+					ELIF_KEY(N)
+					ELIF_KEY(O)
+					ELIF_KEY(P)
+					ELIF_KEY(Q)
+					ELIF_KEY(R)
+					ELIF_KEY(S)
+					ELIF_KEY(T)
+					ELIF_KEY(U)
+					ELIF_KEY(V)
+					ELIF_KEY(W)
+					ELIF_KEY(X)
+					ELIF_KEY(Y)
+					ELIF_KEY(Z)
+#undef ELIF_KEY
 				}
 			}
 

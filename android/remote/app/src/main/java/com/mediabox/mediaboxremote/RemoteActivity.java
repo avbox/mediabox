@@ -1,8 +1,11 @@
 package com.mediabox.mediaboxremote;
 
+import android.content.Context;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.view.KeyEvent;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -64,6 +67,27 @@ public class RemoteActivity extends AppCompatActivity
     {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_remote);
+
+        this.findViewById(R.id.btnKeyboard).setOnKeyListener(new View.OnKeyListener()
+        {
+            @Override
+            public boolean onKey(View v, int keyCode, KeyEvent event)
+            {
+                if (event.getAction() == KeyEvent.ACTION_UP)
+                {
+                    if (keyCode == KeyEvent.KEYCODE_DEL)
+                    {
+                        sendMessage("CLEAR");
+                    }
+                    else
+                    {
+                        sendMessage(String.format("KEY:%c",
+                                Character.toUpperCase((char) event.getUnicodeChar())));
+                    }
+                }
+                return true;
+            }
+        });
     }
 
     @Override
@@ -78,6 +102,13 @@ public class RemoteActivity extends AppCompatActivity
     {
         super.onStop();
         this.closeSocket();
+        ((InputMethodManager) this.getSystemService(Context.INPUT_METHOD_SERVICE))
+                .hideSoftInputFromWindow(findViewById(R.id.btnKeyboard).getWindowToken(), 0);
+    }
+
+    public void onKeyboard(View view) {
+        InputMethodManager im = (InputMethodManager) view.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        im.showSoftInput(view, InputMethodManager.SHOW_FORCED);
     }
 
     public void onConnect(View view)
@@ -85,9 +116,8 @@ public class RemoteActivity extends AppCompatActivity
         this.openSocket();
     }
 
-    public void onButtonPressed(View view) {
-
-
+    public void onButtonPressed(View view)
+    {
         if (view == this.findViewById(R.id.btnMenu))
         {
             sendMessage("MENU");
