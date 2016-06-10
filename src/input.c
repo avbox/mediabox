@@ -20,20 +20,63 @@ static int writefd;
 static pthread_t input_loop_thread;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t sinks_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t dispatch_lock = PTHREAD_MUTEX_INITIALIZER;
+
 
 LIST_DECLARE_STATIC(sinks);
+LIST_DECLARE_STATIC(nonblock_sinks);
+
+
+int
+mbi_dispatchevent(mbi_event e)
+{
+	int ret;
+	int dispatched = 1;
+	mbi_sink *sink;
+
+	pthread_mutex_lock(&dispatch_lock);
+
+	/* first send the message to all nonblocking sinks */
+	LIST_FOREACH_SAFE(mbi_sink*, sink, &nonblock_sinks, {
+		if (write_or_epipe(sink->writefd, &e, sizeof(mbi_event)) == -1) {
+			pthread_mutex_lock(&sinks_lock);
+			LIST_REMOVE(sink);
+			pthread_mutex_unlock(&sinks_lock);
+			free(sink);
+		}
+	});
+
+	sink = LIST_TAIL(mbi_sink*, &sinks);
+	if (sink == NULL) {
+		fprintf(stderr, "mbi: input event dropped\n");
+
+	} else if ((ret = write_or_epipe(sink->writefd, &e, sizeof(mbi_event))) == 0) {
+		pthread_mutex_lock(&sinks_lock);
+		LIST_REMOVE(sink);
+		pthread_mutex_unlock(&sinks_lock);
+
+		close(sink->writefd);
+		free(sink);
+		dispatched = 0;
+
+	} else {
+		//fprintf(stderr, "write_or_epipe() returned %i\n", ret);
+	}
+
+	pthread_mutex_unlock(&dispatch_lock);
+
+	return dispatched;
+}
+
 
 static void*
 mbi_loop(void *arg)
 {
 	mbi_event e;
-	mbi_sink *sink;
-	int runloop = 1, dispatched;
 
 	(void) arg;
 
-	while (runloop) {
-		dispatched = 0;
+	while (1) {
 
 		/* read the next event */
 		read_or_die(readfd, &e, sizeof(mbi_event));
@@ -43,31 +86,12 @@ mbi_loop(void *arg)
 			break;
 		}
 
-		do {
-			int ret;
-			sink = LIST_TAIL(mbi_sink*, &sinks);
-			if (sink == NULL) {
-				fprintf(stderr, "mbi: input event dropped\n");
-				dispatched = 1;
-
-			} else if ((ret = write_or_epipe(sink->writefd, &e, sizeof(mbi_event))) == 0) {
-				pthread_mutex_lock(&sinks_lock);
-				LIST_REMOVE(sink);
-				pthread_mutex_unlock(&sinks_lock);
-
-				close(sink->writefd);
-				free(sink);
-
-			} else {
-				//fprintf(stderr, "write_or_epipe() returned %i\n", ret);
-				dispatched = 1;
-			}
-		}
-		while (!dispatched);
+		while (!mbi_dispatchevent(e));
 	}
 	fprintf(stderr, "mbi: Input loop exiting\n");
 	return 0;
 }
+
 
 /**
  * mbi_grab_input() -- Returns a file descriptor to a pipe where
@@ -75,8 +99,8 @@ mbi_loop(void *arg)
  * in which case the prior descriptor is closed or until mbi_grab_input()
  * is called again
  */
-int
-mbi_grab_input(void)
+static int
+mbi_grab_input_internal(int block)
 {
 	int inputfd[2];
 	mbi_sink *input_sink;
@@ -98,12 +122,34 @@ mbi_grab_input(void)
 	input_sink->writefd = inputfd[1];
 
 	/* add sink to stack */
-	pthread_mutex_lock(&sinks_lock);
-	LIST_APPEND(&sinks, input_sink);
-	pthread_mutex_unlock(&sinks_lock);
+	if (block) {
+		pthread_mutex_lock(&sinks_lock);
+		LIST_APPEND(&sinks, input_sink);
+		pthread_mutex_unlock(&sinks_lock);
+	} else {
+		pthread_mutex_lock(&sinks_lock);
+		LIST_APPEND(&nonblock_sinks, input_sink);
+		pthread_mutex_unlock(&sinks_lock);
+
+	}
 
 	return input_sink->readfd;
 }
+
+
+int
+mbi_grab_input(void)
+{
+	return mbi_grab_input_internal(1);
+}
+
+
+int
+mbi_grab_input_nonblock(void)
+{
+	return mbi_grab_input_internal(0);
+}
+
 
 void
 mbi_event_send(mbi_event e)
@@ -137,6 +183,7 @@ mbi_init(void)
 
 	/* initialize sinks stack */
 	LIST_INIT(&sinks);
+	LIST_INIT(&nonblock_sinks);
 
 	/* initialize directfb input provider */
 	if (mbi_directfb_init() == -1) {

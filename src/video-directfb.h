@@ -17,6 +17,10 @@ int
 mbv_dfb_isfbdev(void);
 
 
+int
+mbv_dfb_window_settitle(struct mbv_window *window, char *title);
+
+
 struct mbv_font *
 mbv_dfb_font_new(char *file, int height);
 

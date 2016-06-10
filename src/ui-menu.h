@@ -6,6 +6,12 @@ struct mb_ui_menu;
 
 
 typedef int (*mb_ui_enumitems_callback)(void *item, void *data);
+typedef int (*mb_eol_callback)(struct mb_ui_menu *inst);
+
+
+
+int
+mb_ui_menu_seteolcallback(struct mb_ui_menu *inst, mb_eol_callback callback);
 
 
 void

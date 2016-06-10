@@ -20,6 +20,10 @@ mbv_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int h);
 
 
 int
+mbv_window_settitle(struct mbv_window *window, char *title);
+
+
+int
 mbv_isfbdev(void);
 
 

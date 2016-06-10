@@ -11,6 +11,12 @@ mbv_window_getsize(struct mbv_window *window, int *width, int *height)
 	return mbv_dfb_window_getsize(window, width, height);
 }
 
+int
+mbv_window_settitle(struct mbv_window *window, char *title)
+{
+	return mbv_dfb_window_settitle(window, title);
+}
+
 
 void
 mbv_getscreensize(int *width, int *height)

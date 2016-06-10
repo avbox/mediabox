@@ -11,6 +11,14 @@ static IDirectFBEventBuffer *events = NULL;
 static pthread_t event_loop_thread;
 static int quit = 0;
 
+#define CASE_KEYBOARD(x) \
+	case DIKS_SMALL_ ## x: \
+	case DIKS_CAPITAL_ ## x: \
+		mbi_event_send(MBI_EVENT_KBD_ ## x); \
+		break;
+
+
+
 /**
  * mbi_directfb_event_loop() -- Runs the directfb input driver event loop
  */
@@ -40,12 +48,35 @@ mbi_directfb_event_loop(void *arg)
 				case DIKS_CURSOR_DOWN:  mbi_event_send(MBI_EVENT_ARROW_DOWN); break;
 				case DIKS_CURSOR_LEFT:  mbi_event_send(MBI_EVENT_ARROW_LEFT); break;
 				case DIKS_CURSOR_RIGHT: mbi_event_send(MBI_EVENT_ARROW_RIGHT); break;
-				case DIKS_CAPITAL_Q:    mbi_event_send(MBI_EVENT_QUIT); break;
-				case DIKS_SMALL_Q:      mbi_event_send(MBI_EVENT_QUIT); break;
-				case DIKS_CAPITAL_P:    mbi_event_send(MBI_EVENT_PLAY); break;
-				case DIKS_SMALL_P:      mbi_event_send(MBI_EVENT_PLAY); break;
-				case DIKS_CAPITAL_S:    mbi_event_send(MBI_EVENT_STOP); break;
-				case DIKS_SMALL_S:      mbi_event_send(MBI_EVENT_STOP); break;
+				case DIKS_BACKSPACE:    mbi_event_send(MBI_EVENT_CLEAR); break;
+
+				CASE_KEYBOARD(A)
+				CASE_KEYBOARD(B)
+				CASE_KEYBOARD(C)
+				CASE_KEYBOARD(D)
+				CASE_KEYBOARD(E)
+				CASE_KEYBOARD(F)
+				CASE_KEYBOARD(G)
+				CASE_KEYBOARD(H)
+				CASE_KEYBOARD(I)
+				CASE_KEYBOARD(J)
+				CASE_KEYBOARD(K)
+				CASE_KEYBOARD(L)
+				CASE_KEYBOARD(M)
+				CASE_KEYBOARD(N)
+				CASE_KEYBOARD(O)
+				CASE_KEYBOARD(P)
+				CASE_KEYBOARD(Q)
+				CASE_KEYBOARD(R)
+				CASE_KEYBOARD(S)
+				CASE_KEYBOARD(T)
+				CASE_KEYBOARD(U)
+				CASE_KEYBOARD(V)
+				CASE_KEYBOARD(W)
+				CASE_KEYBOARD(X)
+				CASE_KEYBOARD(Y)
+				CASE_KEYBOARD(Z)
+
 				default: break;
 				}
 				break;

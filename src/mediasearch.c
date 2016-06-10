@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <string.h>
 #include <assert.h>
+#include <time.h>
 #include <unistd.h>
 
 
@@ -11,6 +12,9 @@
 #include "ui-menu.h"
 #include "url_util.h"
 #include "linkedlist.h"
+#include "downloads-backend.h"
+#include "time_util.h"
+#include "debug.h"
 
 
 LISTABLE_TYPE(mb_searchresult,
@@ -21,6 +25,19 @@ LISTABLE_TYPE(mb_searchresult,
 
 static struct mbv_window *window = NULL;
 static struct mb_ui_menu *menu = NULL;
+static int items_count = 0;
+static int input_quit = 0;
+static int updater_quit = 0;
+static int updater_clearitems = 0;
+static char *terms = NULL;
+static size_t terms_sz = 0;
+static pthread_mutex_t menu_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static pthread_t updater;
+static pthread_mutex_t updater_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t updater_signal = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t terms_lock = PTHREAD_MUTEX_INITIALIZER;
+
 
 static int
 html_decode(char *dst, char *src)
@@ -45,93 +62,332 @@ html_decode(char *dst, char *src)
 	return 0;
 }
 
+
 static int
-mb_mediasearch_search(void *provider, char *terms)
+mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
 {
+	#define ITEMS_PER_PAGE (25)
 	char *content = NULL;
 	size_t content_length = 0;
 	char *strptr, *end;
+	char url[255];
+	unsigned int page = 0, skipped = 0;
 
-	(void) provider;
+	static struct timespec tv = { 0, 0 };
+
 	(void) terms;
 
-	if (mb_url_fetch2mem("https://kat.cr/movies/", (void**) &content, &content_length) == -1) {
-		fprintf(stderr, "mediasearch: mb_url_fetch2mem() failed\n");
-		return -1;
+
+	if (skip) {
+		page = skip / ITEMS_PER_PAGE;
+		skipped = page * ITEMS_PER_PAGE;
 	}
 
-	if ((strptr = strstr(content, "<tr class=\"firstr\">")) != NULL) {
-		end = strstr(strptr, "</table>");
-		*end = '\0';
+	/* fprintf(stderr, "skip=%i, count=%i, page=%i, skipped=%i\n",
+		skip, count, page, skipped); */
 
-		while ((strptr = strstr(strptr + 1, "<tr")) != NULL) {
-			size_t sz;
-			char *buf, *data_start, *end, *name, *magnet;
-			
-			if ((data_start = strstr(strptr, "data-sc-params=\"")) != NULL) {
-				data_start += 16;
-				if ((name = strstr(data_start, "'name': '")) != NULL) {
-					name += 9;
-					if ((end = strstr(name, "'")) != NULL) {
-						sz = end - name;
-						if ((buf = malloc(sz + 1)) != NULL) {
-							memcpy(buf, name, sz);
-							buf[sz] = '\0';
-							html_decode(buf, NULL);
-							if ((name = strdup(buf)) == NULL) {
-								fprintf(stderr, "mediasearch: Out of memory\n");
-							}
-							free(buf);
-						} else {
-							fprintf(stderr, "mediaseach: Out of memory\n");
-							name = NULL;
-						}
-					} else {
-						fprintf(stderr, "mediasearch: Invalid input\n");
-						name = NULL;
-					}
-				}
+	while (count) {
 
-				if ((magnet = strstr(data_start, "'magnet': '")) != NULL) {
-					magnet += 11;
-					if ((end = strstr(magnet, "'")) != NULL) {
-						sz = end - magnet;
-						if ((buf = malloc(sz + 1)) != NULL) {
-							memcpy(buf, magnet, sz);
-							buf[sz] = '\0';
-							if ((magnet = strdup(buf)) == NULL) {
-								fprintf(stderr, "mediasearch: Out of memory\n");
-							}
-							free(buf);
-						} else {
-							fprintf(stderr, "mediasearch: Out of memory\n");
-							magnet = NULL;
-						}
-					} else {
-						fprintf(stderr, "mediasearch: Invalid input\n");
-						magnet = NULL;
-					}
-				}
-				if (name != NULL && magnet != NULL) {
-					mb_ui_menu_additem(menu, name, magnet);
-					free(name);
-					/* free(magnet) -- later */
+		page++;
 
-				}
+		if (terms != NULL && strcmp(terms, "")) {
+			snprintf(url, 255-1, "https://kat.cr/usearch/%s category:movies/%i/",
+				terms, page);
+
+		} else {
+			snprintf(url, 255-1, "https://kat.cr/movies/%i/", page);
+		}
+
+		fprintf(stderr, "mediasearch: Fetching page %s...\n", url);
+
+		if (tv.tv_sec || tv.tv_nsec) {
+			struct timespec nt;
+			(void) clock_gettime(CLOCK_MONOTONIC, &nt);
+			if (utimediff(&nt, &tv) < 1000L * 1000 * 1000 * 5) {
+				sleep(5);
 			}
 		}
-	} else {
-		fprintf(stderr, "Invalid input\n");
-	}
+
+		if (mb_url_fetch2mem(url, (void**) &content, &content_length) == -1) {
+			fprintf(stderr, "mediasearch: mb_url_fetch2mem() failed\n");
+			return -1;
+		}
+	
+		(void) clock_gettime(CLOCK_MONOTONIC, &tv);
 
 
-	if (content != NULL) {
+		if (strstr(content, "Nothing found!") != NULL) {
+			free(content);
+			return 0;
+		}
+
+		if ((strptr = strstr(content, "<tr class=\"firstr\">")) != NULL) {
+			end = strstr(strptr, "</table>");
+			*end = '\0';
+
+			while (count > 0 && (strptr = strstr(strptr + 1, "<tr")) != NULL) {
+				size_t sz;
+				char *buf, *data_start, *end, *name, *magnet;
+
+				if (skipped < skip) {
+					skipped++;
+					continue;
+				}
+				
+				if ((data_start = strstr(strptr, "data-sc-params=\"")) != NULL) {
+					data_start += 16;
+					if ((name = strstr(data_start, "'name': '")) != NULL) {
+						name += 9;
+						if ((end = strstr(name, "'")) != NULL) {
+							sz = end - name;
+							if ((buf = malloc(sz + 1)) != NULL) {
+								memcpy(buf, name, sz);
+								buf[sz] = '\0';
+								html_decode(buf, NULL);
+								if ((name = strdup(buf)) == NULL) {
+									fprintf(stderr, "mediasearch: Out of memory\n");
+								}
+								free(buf);
+							} else {
+								fprintf(stderr, "mediaseach: Out of memory\n");
+								name = NULL;
+							}
+						} else {
+							fprintf(stderr, "mediasearch: Invalid input\n");
+							name = NULL;
+						}
+					}
+
+					if ((magnet = strstr(data_start, "'magnet': '")) != NULL) {
+						magnet += 11;
+						if ((end = strstr(magnet, "'")) != NULL) {
+							sz = end - magnet;
+							if ((buf = malloc(sz + 1)) != NULL) {
+								memcpy(buf, magnet, sz);
+								buf[sz] = '\0';
+								if ((magnet = strdup(buf)) == NULL) {
+									fprintf(stderr, "mediasearch: Out of memory\n");
+								}
+								free(buf);
+							} else {
+								fprintf(stderr, "mediasearch: Out of memory\n");
+								magnet = NULL;
+							}
+						} else {
+							fprintf(stderr, "mediasearch: Invalid input\n");
+							magnet = NULL;
+						}
+					}
+					if (name != NULL && magnet != NULL) {
+						mb_ui_menu_additem(menu, name, magnet);
+						/* fprintf(stderr, "Added %s\n", name); */
+						free(name);
+						count--;
+						items_count++;
+						/* free(magnet) -- later */
+
+					}
+				}
+			}
+		} else {
+			fprintf(stderr, "Invalid input\n");
+			fprintf(stderr, "Content %s\n", content);
+			return -1;
+		}
 		free(content);
 	}
 
 	mbv_window_update(window);
 
 	return 0;
+}
+
+
+#define STRINGIZE2(x) #x
+#define STRINGIZE(x) STRINGIZE2(x)
+
+static void *
+mb_mediasearch_resultsupdater(void *arg)
+{
+	char *last_terms = NULL, *tmp;
+
+	MB_DEBUG_SET_THREAD_NAME("mediasearch_resultsupdater");
+
+	assert(terms != NULL);
+
+	while (!updater_quit) {
+
+		pthread_mutex_lock(&updater_lock);
+		if (last_terms != NULL && !strcmp(last_terms, terms)) {
+			pthread_cond_wait(&updater_signal, &updater_lock);
+		}
+		pthread_mutex_unlock(&updater_lock);
+
+		pthread_mutex_lock(&terms_lock);
+		if ((tmp = strdup(terms)) == NULL) {
+			pthread_mutex_unlock(&terms_lock);
+			continue;
+		}
+		pthread_mutex_unlock(&terms_lock);
+
+		pthread_mutex_lock(&menu_lock);
+
+		if (updater_clearitems) {
+			mb_ui_menu_clearitems(menu);
+		}
+		items_count = 0;
+		if (mb_mediasearch_search(tmp, items_count, 25) == 0) {
+			mbv_window_update(window);
+		} else {
+			fprintf(stderr, "mediasearch: search() failed\n");
+		}
+
+
+		pthread_mutex_unlock(&menu_lock);
+
+		if (last_terms != NULL) {
+			free(last_terms);
+		}
+		last_terms = strdup(tmp);
+
+	}
+	fprintf(stderr, "updater exiting\n");
+	return NULL;
+}
+
+static int
+mb_mediasearch_appendtoterms(char *c)
+{
+	int ret = 0;
+
+	assert(terms != NULL || terms_sz == 0);
+
+	pthread_mutex_lock(&terms_lock);
+
+	if (*c == '\b' && strlen(terms) > 0) {
+		terms[strlen(terms) - 1] = '\0';
+		goto end;
+	}
+
+	if (terms == NULL || terms_sz <= strlen(terms) + 2) {
+		terms_sz += 25;
+		char *newterms;
+		if ((newterms = realloc(terms, terms_sz)) == NULL) {
+			fprintf(stderr, "mediasearch: Out of memory\n");
+			terms_sz -= 25;
+			ret = -1;
+			goto end;
+		} else {
+			terms = newterms;
+		}	
+	}
+	strcat(terms, c);
+end:
+	pthread_mutex_unlock(&terms_lock);
+	return ret;
+}
+
+
+static void *
+mb_mediasearch_inputthread(void *arg)
+{	int fd;
+	mbi_event e;
+
+#define CASE_KBD(x) \
+	case MBI_EVENT_KBD_ ## x: \
+		mb_mediasearch_appendtoterms(STRINGIZE(x)); \
+		istext = 1; \
+		break;
+
+	(void) arg;
+
+	/* grab the input device */
+	if ((fd = mbi_grab_input_nonblock()) == -1) {
+		fprintf(stderr, "mbs_show() -- mbi_grab_input failed\n");
+		return NULL;
+	}
+
+	while (input_quit == 0 && read_or_eof(fd, &e, sizeof(mbi_event)) > 0) {
+		int istext = 0;
+		switch (e) {
+		case MBI_EVENT_CLEAR:
+			mb_mediasearch_appendtoterms("\b");
+			istext = 1;
+			break;
+
+		CASE_KBD(A)
+		CASE_KBD(B)
+		CASE_KBD(C)
+		CASE_KBD(D)
+		CASE_KBD(E)
+		CASE_KBD(F)
+		CASE_KBD(G)
+		CASE_KBD(H)
+		CASE_KBD(I)
+		CASE_KBD(J)
+		CASE_KBD(K)
+		CASE_KBD(L)
+		CASE_KBD(M)
+		CASE_KBD(N)
+		CASE_KBD(O)
+		CASE_KBD(P)
+		CASE_KBD(Q)
+		CASE_KBD(R)
+		CASE_KBD(S)
+		CASE_KBD(T)
+		CASE_KBD(U)
+		CASE_KBD(V)
+		CASE_KBD(W)
+		CASE_KBD(X)
+		CASE_KBD(Y)
+		CASE_KBD(Z)
+		default:
+			break;
+		}
+
+		if (istext) {
+			char *title;
+
+			if ((title = malloc(strlen(terms) + 14 + 1)) != NULL) {
+				snprintf(title, strlen(terms) + 14 + 1, "MEDIA SEARCH: %s",
+					terms);
+				mbv_window_settitle(window, title);
+				mbv_window_update(window);
+
+				pthread_mutex_lock(&updater_lock);
+				updater_clearitems = 1;
+				pthread_cond_signal(&updater_signal);
+				pthread_mutex_unlock(&updater_lock);
+				free(title);
+			}
+		}
+	}
+
+	close(fd);
+
+	return NULL;
+
+#undef CASE_KBD
+}
+
+
+/**
+ * mb_mediasearch_endoflist() -- Called by the menu widget when it reaches the end of the list.
+ */
+int
+mb_mediasearch_endoflist(struct mb_ui_menu *inst)
+{
+	(void) inst;
+	pthread_mutex_lock(&menu_lock);
+	if (mb_mediasearch_search(terms, items_count, 25) == 0) {
+		mbv_window_update(window);
+		pthread_mutex_unlock(&menu_lock);
+		return 0;
+	} else {
+		fprintf(stderr, "mediasearch: search() failed\n");
+	}
+	pthread_mutex_unlock(&menu_lock);
+	return -1;
 }
 
 
@@ -145,6 +401,9 @@ mb_mediasearch_init(void)
 	int font_height;
 	int window_height, window_width;
 	int n_entries = 10;
+
+	terms = malloc(1);
+	strcpy(terms, "");
 
 	/* set height according to font size */
 	mbv_getscreensize(&xres, &yres);
@@ -177,6 +436,9 @@ mb_mediasearch_init(void)
 		return -1;
 	}
 
+	/* set the end of list callback function */
+	mb_ui_menu_seteolcallback(menu, mb_mediasearch_endoflist);
+
 	return 0;
 }
 
@@ -184,10 +446,30 @@ mb_mediasearch_init(void)
 int
 mb_mediasearch_showdialog(void)
 {
+	pthread_t input_thread;
+
 	/* show the menu window */
         mbv_window_show(window);
 
-	mb_mediasearch_search(NULL, NULL);
+	input_quit = 0;
+	if (pthread_create(&input_thread, NULL, mb_mediasearch_inputthread, NULL) != 0) {
+		fprintf(stderr, "mediasearch: Could not start input thread;\n");
+		return -1;
+	}
+
+	updater_quit = 0;
+	if (pthread_create(&updater, NULL, mb_mediasearch_resultsupdater, NULL) != 0) {
+		fprintf(stderr, "mediasearch: Could not start updater thread\n");
+		input_quit = 1;
+		mbi_dispatchevent(MBI_EVENT_NONE);
+		pthread_join(input_thread, NULL);
+		return -1;
+	}
+
+	pthread_mutex_lock(&updater_lock);
+	updater_clearitems = 1;
+	pthread_cond_signal(&updater_signal);
+	pthread_mutex_unlock(&updater_lock);
 
 	/* show the menu widget and run it's input loop */
 	if (mb_ui_menu_showdialog(menu) == 0) {
@@ -202,6 +484,10 @@ mb_mediasearch_showdialog(void)
 		fprintf(stderr, "mediasearch: Selected %s\n",
 			selected);
 	}
+
+	input_quit = 1;
+	mbi_dispatchevent(MBI_EVENT_NONE);
+	pthread_join(input_thread, NULL);
 
 	return 0;
 }

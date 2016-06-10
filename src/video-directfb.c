@@ -20,6 +20,7 @@ struct mbv_window
 	struct mbv_window *parent;
 	IDirectFBWindow *dfb_window;
 	IDirectFBSurface *surface;
+	IDirectFBSurface *title_surface;
 	IDirectFBSurface *content;
 	DFBRectangle rect;
 	char *title;
@@ -431,15 +432,21 @@ mbv_dfb_window_new(
 	/* draw the window title */
 	if (win->title != NULL) {
 		int offset = win->font_height + 10;
+		DFBRectangle title_rect = { 0, 0, width, offset + 5 };
 		DFBRectangle rect = { 0, offset + 5, width, (height - (offset + 5)) };
-		DFBCHECK(win->surface->SetColor(win->surface, DFBCOLOR(DEFAULT_FOREGROUND)));
-		DFBCHECK(win->surface->DrawString(win->surface, win->title, -1,
+
+		DFBCHECK(win->surface->GetSubSurface(win->surface, &title_rect, &win->title_surface));
+		DFBCHECK(win->title_surface->SetFont(win->title_surface, font));
+		DFBCHECK(win->title_surface->SetColor(win->title_surface, DFBCOLOR(DEFAULT_FOREGROUND)));
+		DFBCHECK(win->title_surface->DrawString(win->title_surface, win->title, -1,
 			width / 2, 5, DSTF_TOPCENTER));
-		DFBCHECK(win->surface->DrawLine(win->surface, 5, offset,
+		DFBCHECK(win->surface->DrawLine(win->title_surface, 5, offset,
 			width - 10, offset));
+
 		DFBCHECK(win->surface->GetSubSurface(win->surface, &rect, &win->content));
 		DFBCHECK(win->content->SetColor(win->content, DFBCOLOR(DEFAULT_FOREGROUND)));
 	} else {
+		win->title_surface = NULL;
 		DFBCHECK(win->surface->GetSubSurface(win->surface, NULL, &win->content));
 		DFBCHECK(win->content->SetColor(win->content, DFBCOLOR(DEFAULT_FOREGROUND)));
 	}
@@ -459,6 +466,37 @@ mbv_dfb_window_new(
 	}
 
 	return win;
+}
+
+
+int
+mbv_dfb_window_settitle(struct mbv_window *window, char *title)
+{
+	char *old_title;
+	int width, height;
+
+	assert(window != NULL);
+
+	old_title = window->title;
+	if ((window->title = strdup(title)) == NULL) {
+		window->title = old_title;
+		return -1;
+	}
+	if (old_title != NULL) {
+		free(old_title);
+	}
+
+	if (window->title_surface) {
+		DFBCHECK(window->title_surface->GetSize(window->title_surface, &width, &height));
+		DFBCHECK(window->title_surface->Clear(window->title_surface, DFBCOLOR(0x3349ffFF)));
+		DFBCHECK(window->surface->SetColor(window->title_surface, DFBCOLOR(DEFAULT_FOREGROUND)));
+		DFBCHECK(window->surface->DrawString(window->title_surface, window->title, -1,
+			width / 2, 5, DSTF_TOPCENTER));
+		DFBCHECK(window->surface->DrawLine(window->title_surface, 5, height - 5,
+			width - 10, height - 5));
+	}
+
+	return 0;
 }
 
 
@@ -511,6 +549,7 @@ mbv_dfb_window_getchildwindow(struct mbv_window *window,
 	inst->parent = window;
 	inst->dfb_window = window->dfb_window;
 	inst->title = NULL;
+	inst->title_surface = NULL;
 	inst->visible = 0;
 	inst->font_height = window->font_height;
 
@@ -630,6 +669,10 @@ mbv_dfb_window_destroy(struct mbv_window *window)
 	 * window object as well */
 	if (window->parent == NULL) {
 		window->dfb_window->Release(window->dfb_window);
+	}
+
+	if (window->title_surface != NULL) {
+		window->title_surface->Release(window->title_surface);
 	}
 
 	for (i = 0; i < 10; i++) {

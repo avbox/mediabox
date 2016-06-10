@@ -109,6 +109,7 @@ mbs_show_dialog(void)
 	/* run the message loop */
 	while (!quit && read_or_eof(input_fd, &e, sizeof(mbi_event)) != 0) {
 		switch (e) {
+		case MBI_EVENT_KBD_Q:
 		case MBI_EVENT_QUIT:
 		{
 #ifndef NDEBUG
@@ -119,7 +120,6 @@ mbs_show_dialog(void)
 		}
 		case MBI_EVENT_MENU:
 		{
-			fprintf(stderr, "Menu pressed\n");
 			if (mb_mainmenu_init() == -1) {
 				fprintf(stderr, "Could not initialize main menu\n");
 				break;
@@ -130,6 +130,7 @@ mbs_show_dialog(void)
 			mb_mainmenu_destroy();
 			break;
 		}
+		case MBI_EVENT_KBD_P:
 		case MBI_EVENT_PLAY:
 		{
 			switch (mb_player_getstatus(player)) {
@@ -161,6 +162,7 @@ mbs_show_dialog(void)
 			#endif
 			break;
 		}
+		case MBI_EVENT_KBD_S:
 		case MBI_EVENT_STOP:
 		{
 			if (mb_player_getstatus(player) != MB_PLAYER_STATUS_READY) {

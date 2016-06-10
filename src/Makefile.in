@@ -43,6 +43,7 @@ SOURCES=main.o \
 	downloads-backend.o \
 	mediasearch.o \
 	url_util.o \
+	time_util.o \
 	about.o \
 	library.o
 

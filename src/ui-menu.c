@@ -30,6 +30,7 @@ struct mb_ui_menu
 	int visible_window_offset;
 	int count;
 	void *selection_changed_callback;
+	mb_eol_callback end_of_list_callback;
 	LIST_DECLARE(items);
 };
 
@@ -343,8 +344,11 @@ mb_ui_menu_showdialog(struct mb_ui_menu *inst)
 		}
 		case MBI_EVENT_ARROW_DOWN:
 		{
-			mb_ui_menuitem *item, *selected = NULL;
-			int select_next = 0;
+			mb_ui_menuitem *item, *selected;
+			int select_next;
+start:
+			selected = NULL;
+			select_next = 0;
 			LIST_FOREACH(mb_ui_menuitem*, item, &inst->items) {
 				if (select_next) {
 					selected = item;
@@ -361,11 +365,18 @@ mb_ui_menu_showdialog(struct mb_ui_menu *inst)
 				}
 				mb_ui_menu_setselected(inst, selected);
 				mbv_window_update(inst->window);
+			} else {
+				if (inst->end_of_list_callback) {
+					if (inst->end_of_list_callback(inst) == 0) {
+						goto start;
+					}
+				}
 			}
 			break;
 		}
 		default:
-			fprintf(stderr, "mb_ui_menu: Received event %i\n", (int) e);
+			/* fprintf(stderr, "mb_ui_menu: Received event %i\n", (int) e);*/
+			break;
 		}
 	}
 	return ret;
@@ -394,6 +405,7 @@ mb_ui_menu_new(struct mbv_window *window)
 	inst->visible_window_offset = 0;
 	inst->selected = NULL;
 	inst->selection_changed_callback = NULL;
+	inst->end_of_list_callback = NULL;
 	inst->count = 0;
 
 	/* calculate item height */
@@ -432,6 +444,19 @@ mb_ui_menu_new(struct mbv_window *window)
 	}
 
 	return inst;
+}
+
+
+int
+mb_ui_menu_seteolcallback(struct mb_ui_menu *inst, mb_eol_callback callback)
+{
+	assert(inst != NULL);
+	if (inst->end_of_list_callback != NULL) {
+		fprintf(stderr, "ui-menu: Callback list not implemented yet\n");
+		return -1;
+	}
+	inst->end_of_list_callback = callback;
+	return 0;
 }
 
 
