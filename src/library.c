@@ -19,6 +19,7 @@
 
 static struct mbv_window *window = NULL;
 static struct mb_ui_menu *menu = NULL;
+static char *dotdot = NULL;
 
 #define LIBRARY_ROOT "/media/UPnP"
 
@@ -95,6 +96,11 @@ mb_library_loadlist(const char *path)
 		return -1;
 	}
 
+	if (dotdot != NULL) {
+		free(dotdot);
+		dotdot = NULL;
+	}
+
 	while ((ent = readdir(dir)) != NULL) {
 		char *filepath, *filepathrel, *title, *ext;
 		struct stat st;
@@ -164,8 +170,12 @@ mb_library_loadlist(const char *path)
 			return -1;
 		}
 
-		/* add item to menu */
-		mb_ui_menu_additem(menu, title, filepathrel);
+		if (!strcmp(ent->d_name, "..")) {
+			dotdot = filepathrel;
+		} else {
+			/* add item to menu */
+			mb_ui_menu_additem(menu, title, filepathrel);
+		}
 
 		free(filepath);
 		free(title);
@@ -237,47 +247,59 @@ mb_library_showdialog(void)
         mbv_window_show(window);
 
 	/* show the menu widget and run it's input loop */
-	while (mb_ui_menu_showdialog(menu) == 0) {
-		char *selected = mb_ui_menu_getselected(menu);
+	while (1) {
+		while (mb_ui_menu_showdialog(menu) == 0) {
+			char *selected = mb_ui_menu_getselected(menu);
 
-		assert(selected != NULL);
+			assert(selected != NULL);
 
-		if (selected[strlen(selected) - 1] == '/') {
-			char *selected_copy = strdup(selected);
-			if (selected_copy == NULL) {
-				abort(); /* for now */
+			if (selected[strlen(selected) - 1] == '/') {
+				char *selected_copy = strdup(selected);
+				if (selected_copy == NULL) {
+					abort(); /* for now */
+				}
+
+				/* clear the list and load the next page */
+				mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
+				mb_ui_menu_clearitems(menu);
+				mb_library_loadlist(selected_copy);
+				mbv_window_update(window);
+				free(selected_copy);
+
+			} else {
+				struct mbp* player;
+
+				fprintf(stderr, "mb_library: Selected %s\n",
+					selected);
+
+				/* get the active player instance */
+				player = mbs_get_active_player();
+				if (player == NULL) {
+					fprintf(stderr, "mb_library: Could not get active player\n");
+					break;
+				}
+
+				mbv_window_hide(window);
+
+				if (mbp_play(player, selected) == 0) {
+					ret = 0;
+					break;
+				} else {
+					mbv_window_show(window);
+
+					fprintf(stderr, "library: play() failed\n");
+					/* TODO: Display an error message */
+				}
 			}
-
-			/* clear the list and load the next page */
+		}
+		if (dotdot != NULL) {
+			/* clear the list and load the parent directory */
 			mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
 			mb_ui_menu_clearitems(menu);
-			mb_library_loadlist(selected_copy);
+			mb_library_loadlist(dotdot);
 			mbv_window_update(window);
-	
 		} else {
-			struct mbp* player;
-
-			fprintf(stderr, "mb_library: Selected %s\n",
-				selected);
-
-			/* get the active player instance */
-			player = mbs_get_active_player();
-			if (player == NULL) {
-				fprintf(stderr, "mb_library: Could not get active player\n");
-				break;
-			}
-
-			mbv_window_hide(window);
-
-			if (mbp_play(player, selected) == 0) {
-				ret = 0;
-				break;
-			} else {
-				mbv_window_show(window);
-
-				fprintf(stderr, "library: play() failed\n");
-				/* TODO: Display an error message */
-			}
+			break;
 		}
 	}
 
@@ -292,6 +314,10 @@ void
 mb_library_destroy(void)
 {
 	fprintf(stderr, "mb_library: Destroying instance\n");
+	if (dotdot != NULL) {
+		free(dotdot);
+		dotdot = NULL;
+	}
 
 	mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
 	mb_ui_menu_destroy(menu);
