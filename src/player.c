@@ -198,7 +198,7 @@ mb_player_audio(void *arg)
 
 	/* initialize alsa device */
 	if ((ret = snd_pcm_open(&inst->audio_pcm_handle, device, SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
-		fprintf(stderr, "mb_player: snd_pcm_open() failed, ret=%i\n",
+		fprintf(stderr, "player: snd_pcm_open() failed, ret=%i\n",
 			ret);
 		goto audio_exit;
 	}
@@ -283,7 +283,7 @@ mb_player_audio(void *arg)
 		48000,
 		1,
 		MB_ALSA_LATENCY)) < 0) {
-		fprintf(stderr, "mb_player: snd_pcm_set_params() failed. ret=%i\n", ret);
+		fprintf(stderr, "player: snd_pcm_set_params() failed. ret=%i\n", ret);
 		snd_pcm_close(inst->audio_pcm_handle);
 		return NULL;
 	}
@@ -344,7 +344,7 @@ mb_player_audio(void *arg)
 			frames = snd_pcm_recover(inst->audio_pcm_handle, frames, 0);
 		}
 		if (frames < 0) {
-			fprintf(stderr, "mb_player: snd_pcm_writei() failed: %s\n",
+			fprintf(stderr, "player: snd_pcm_writei() failed: %s\n",
 				snd_strerror(frames));
 			av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
 			goto audio_exit;
@@ -567,7 +567,7 @@ mb_player_video(void *arg)
 		if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
 			if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
 				ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1) {
-				fprintf(stderr, "mb_player: ioctl() failed. "
+				fprintf(stderr, "player: ioctl() failed. "
 					"Direct rendering disabled\n");
 				inst->use_fbdev = 0;
 				close(fd);
@@ -576,7 +576,7 @@ mb_player_video(void *arg)
 				fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
 					MAP_SHARED, fd, (off_t) 0);
 				if (fb_mem == MAP_FAILED) {
-					fprintf(stderr, "mb_player: mmap() failed. "
+					fprintf(stderr, "player: mmap() failed. "
 						"Direct rendering disabled\n");
 					inst->use_fbdev = 0;
 					close(fd);
@@ -621,7 +621,7 @@ mb_player_video(void *arg)
 				goto video_exit;
 			}
 			if (inst->frame_state[inst->video_playback_index] != 1) {
-				/* fprintf(stderr, "mb_player: Waiting for decoder\n"); */
+				/* fprintf(stderr, "player: Waiting for decoder\n"); */
 				pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
 				pthread_mutex_unlock(&inst->renderer_lock);
 				continue;
@@ -1051,12 +1051,12 @@ mb_player_video_decode(void *arg)
 		"scale='if(gt(a,4/3),%i,-1)':'if(gt(a,4/3),-1,%i)',"
 		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
 		inst->width, inst->height, inst->width, inst->height);
-	fprintf(stderr, "mb_player: video_filters: %s\n",
+	fprintf(stderr, "player: video_filters: %s\n",
 		video_filters);
 	if (mb_player_initvideofilters(inst->fmt_ctx, video_codec_ctx,
 		&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
 		video_filters, inst->video_stream_index) < 0) {
-		fprintf(stderr, "mb_player: Could not init filter graph!\n");
+		fprintf(stderr, "player: Could not init filter graph!\n");
 		goto decoder_exit;
 	}
 
@@ -1065,7 +1065,7 @@ mb_player_video_decode(void *arg)
 	inst->bufsz = avpicture_get_size(MB_DECODER_PIX_FMT, inst->width, inst->height);
 	inst->buf = buf = av_malloc(inst->bufsz * sizeof(uint8_t) * MB_VIDEO_BUFFER_FRAMES);
 	if (buf == NULL) {
-		fprintf(stderr, "mb_player: Could not allocate buffer\n");
+		fprintf(stderr, "player: Could not allocate buffer\n");
 		goto decoder_exit;
 	}
 
@@ -1074,18 +1074,18 @@ mb_player_video_decode(void *arg)
 		inst->frame_state[i] = 0;
 	}
 
-	fprintf(stderr, "mb_player: video_codec_ctx: width=%i height=%i pix_fmt=%i\n",
+	fprintf(stderr, "player: video_codec_ctx: width=%i height=%i pix_fmt=%i\n",
 		inst->width, inst->height, video_codec_ctx->pix_fmt);
 
 	/* allocate video frames */
 	video_frame_nat = av_frame_alloc(); /* native */
 	video_frame_flt = av_frame_alloc(); /* filtered */
 	if (video_frame_nat == NULL || video_frame_flt == NULL) {
-		fprintf(stderr, "mb_player: Could not allocate frames\n");
+		fprintf(stderr, "player: Could not allocate frames\n");
 		goto decoder_exit;
 	}
 
-	fprintf(stderr, "mb_player: Video decoder ready\n");
+	fprintf(stderr, "player: Video decoder ready\n");
 
 	/* signal control trhead that we're ready */
 	pthread_mutex_lock(&inst->video_decoder_lock);
@@ -1124,7 +1124,7 @@ mb_player_video_decode(void *arg)
 			/* push the decoded frame into the filtergraph */
 			if (av_buffersrc_add_frame_flags(video_buffersrc_ctx,
 				video_frame_nat, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
-				fprintf(stderr, "mb_player: Error feeding filterchain\n");
+				fprintf(stderr, "player: Error feeding filterchain\n");
 				goto decoder_exit;
 			}
 
@@ -1146,7 +1146,7 @@ mb_player_video_decode(void *arg)
 						goto decoder_exit;
 					}
 					if (inst->frame_state[inst->decode_frame_index] != 0) {
-						/*fprintf(stderr, "mb_player: "
+						/*fprintf(stderr, "player: "
 							"Waiting for renderer\n"); */
 						pthread_cond_wait(&inst->renderer_signal,
 							&inst->renderer_lock);
@@ -1251,17 +1251,17 @@ mb_player_audio_decode(void * arg)
 	/* allocate audio frames */
 	audio_frame_nat = av_frame_alloc(); /* native */
 	if (audio_frame_nat == NULL) {
-		fprintf(stderr, "mb_player: Could not allocate audio frames\n");
+		fprintf(stderr, "player: Could not allocate audio frames\n");
 		goto decoder_exit;
 	}
 
 	/* initialize video filter graph */
-	fprintf(stderr, "mb_player: audio_filters: %s\n",
+	fprintf(stderr, "player: audio_filters: %s\n",
 		audio_filters);
 	if (mb_player_initaudiofilters(inst->fmt_ctx, audio_codec_ctx,
 		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
 		audio_filters, inst->audio_stream_index) < 0) {
-		fprintf(stderr, "mb_player: Could not init filter graph!\n");
+		fprintf(stderr, "player: Could not init filter graph!\n");
 		goto decoder_exit;
 	}
 
@@ -1328,7 +1328,7 @@ mb_player_audio_decode(void * arg)
 							continue;
 						}
 						if (inst->audio_frame_state[inst->audio_decode_index] != 0) {
-							/*fprintf(stderr, "mb_player: "
+							/*fprintf(stderr, "player: "
 								"Decoder waiting for audio thread\n"); */
 							pthread_cond_wait(&inst->audio_signal,
 								&inst->audio_lock);
@@ -1405,23 +1405,23 @@ mb_player_stream_decode(void *arg)
 
 	/* get the size of the window */
 	if (mbv_window_getsize(inst->window, &inst->width, &inst->height) == -1) {
-		fprintf(stderr, "mb_player: Could not get window size\n");
+		fprintf(stderr, "player: Could not get window size\n");
 		goto decoder_exit;
 	}
 
 
-	fprintf(stderr, "mb_player: Attempting to play (%ix%i) '%s'\n",
+	fprintf(stderr, "player: Attempting to play (%ix%i) '%s'\n",
 		inst->width, inst->height, inst->media_file);
 
 	/* open file */
 	if (avformat_open_input(&inst->fmt_ctx, inst->media_file, NULL, NULL) != 0) {
-		fprintf(stderr, "mb_player: Could not open '%s'\n",
+		fprintf(stderr, "player: Could not open '%s'\n",
 			inst->media_file);
 		goto decoder_exit;
 	}
 
 	if (avformat_find_stream_info(inst->fmt_ctx, NULL) < 0) {
-		fprintf(stderr, "mb_player: Could not find stream info\n");
+		fprintf(stderr, "player: Could not find stream info\n");
 		goto decoder_exit;
 	}
 
@@ -1449,7 +1449,7 @@ mb_player_stream_decode(void *arg)
 	}
 	pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
 	pthread_mutex_unlock(&inst->video_decoder_lock);
-	fprintf(stderr, "mb_player: Video stream: %i\n", inst->video_stream_index);
+	fprintf(stderr, "player: Video stream: %i\n", inst->video_stream_index);
 
 	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0) >= 0) {
 
@@ -1551,7 +1551,7 @@ mb_player_stream_decode(void *arg)
 	}
 
 decoder_exit:
-	fprintf(stderr, "mb_player: Stream decoder exiting\n");
+	fprintf(stderr, "player: Stream decoder exiting\n");
 
 	/* signal the renderer thread to exit and join it */
 	pthread_mutex_lock(&inst->renderer_lock);
@@ -1804,7 +1804,7 @@ mbp_pause(struct mbp* inst)
 
 	/* can't pause if we're not playing */
 	if (inst->status != MB_PLAYER_STATUS_PLAYING) {
-		fprintf(stderr, "mb_player: Cannot puase, not playing\n");
+		fprintf(stderr, "player: Cannot puase, not playing\n");
 		return -1;
 	}
 
@@ -1859,12 +1859,12 @@ mb_player_checkfbdev(struct mbp *inst)
 	assert(inst->window != NULL);
 
 	if (!mbv_isfbdev()) {
-		fprintf(stderr, "mb_player: WARNING!!: Direct rendering disabled\n");
+		fprintf(stderr, "player: WARNING!!: Direct rendering disabled\n");
 		inst->use_fbdev = 0;
 		return;
 	}
 
-	fprintf(stderr, "mb_player: Initializing /dev/fb0\n");
+	fprintf(stderr, "player: Initializing /dev/fb0\n");
 
 	/* try to gain root */
 	if (mb_su_gainroot() == -1) {
@@ -1881,20 +1881,20 @@ mb_player_checkfbdev(struct mbp *inst)
 		if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
 			ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1)
 		{
-			fprintf(stderr, "mb_player: ioctl() failed\n");
+			fprintf(stderr, "player: ioctl() failed\n");
 			inst->use_fbdev = 0;
 			goto end;
 		}
 
 		/* dump some screen info */
-		fprintf(stderr, "mb_player: bpp=%i\n", vinfo.bits_per_pixel);
-		fprintf(stderr, "mb_player: type=%i\n", finfo.type);
-		fprintf(stderr, "mb_player: visual=%i\n", finfo.visual);
-		fprintf(stderr, "mb_player: FOURCC (grayscale): '%c%c%c%c'\n",
+		fprintf(stderr, "player: bpp=%i\n", vinfo.bits_per_pixel);
+		fprintf(stderr, "player: type=%i\n", finfo.type);
+		fprintf(stderr, "player: visual=%i\n", finfo.visual);
+		fprintf(stderr, "player: FOURCC (grayscale): '%c%c%c%c'\n",
 			((char*)&vinfo.grayscale)[0], ((char*)&vinfo.grayscale)[1],
 			((char*)&vinfo.grayscale)[2], ((char*)&vinfo.grayscale)[3]);
-		fprintf(stderr, "mb_player: xoffset=%i yoffset=%i r=%i g=%i b=%i\n"
-			"mb_player: r=%i g=%i b=%i\n",
+		fprintf(stderr, "player: xoffset=%i yoffset=%i r=%i g=%i b=%i\n"
+			"player: r=%i g=%i b=%i\n",
 			vinfo.xoffset, vinfo.yoffset,
 			vinfo.red.offset, vinfo.green.offset, vinfo.blue.offset,
 			vinfo.red.length, vinfo.green.length, vinfo.blue.length);
@@ -1904,7 +1904,7 @@ mb_player_checkfbdev(struct mbp *inst)
 		fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
 			MAP_SHARED, fd, (off_t) 0);
 		if (fb_mem == MAP_FAILED) {
-			fprintf(stderr, "mb_player: mmap() failed\n");
+			fprintf(stderr, "player: mmap() failed\n");
 			inst->use_fbdev = 0;
 			close(fd);
 			goto end;
@@ -1952,7 +1952,7 @@ mb_player_new(struct mbv_window *window)
 	if (window == NULL) {
 		window = mbv_getrootwindow();
 		if (window == NULL) {
-			fprintf(stderr, "mb_player: Could not get root window\n");
+			fprintf(stderr, "player: Could not get root window\n");
 			free(inst);
 			return NULL;
 		}
@@ -1982,7 +1982,7 @@ mb_player_new(struct mbv_window *window)
 		pthread_cond_init(&inst->audio_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->renderer_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->resume_signal, NULL) != 0) {
-		fprintf(stderr, "mb_player: pthreads initialization failed\n");
+		fprintf(stderr, "player: pthreads initialization failed\n");
 		free(inst);
 		return NULL;
 	}
@@ -2003,7 +2003,7 @@ mb_player_destroy(struct mbp *inst)
 {
 	assert(inst != NULL);
 
-	fprintf(stderr, "mb_player: Destroying\n");
+	fprintf(stderr, "player: Destroying\n");
 
 	/* this just fails if we're not playing */
 	(void) mbp_stop(inst);
