@@ -2,6 +2,10 @@
 #define __MB_URL_UTIL_H__
 
 
+void
+urldecode(char *dst, const char *src);
+
+
 /**
  * mb_url_fetch_to_mem() -- Fetch to content of a url to a
  * malloc() allocated buffer

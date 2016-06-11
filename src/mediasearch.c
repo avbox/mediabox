@@ -39,30 +39,6 @@ static pthread_mutex_t terms_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 static int
-html_decode(char *dst, char *src)
-{
-	if (src == NULL) {
-		src = dst;
-	}
-
-	if (dst == NULL) {
-		return -1;
-	}
-
-	while (*src != '\0') {
-		if (src[0] == '%' && src[1] == '2' && src[2] == '0') {
-			*dst++ = ' ';
-			src += 3; 
-		} else {
-			*dst++ = *src++;
-		}
-	}
-	*dst = '\0';
-	return 0;
-}
-
-
-static int
 mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
 {
 	#define ITEMS_PER_PAGE (25)
@@ -142,7 +118,7 @@ mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
 							if ((buf = malloc(sz + 1)) != NULL) {
 								memcpy(buf, name, sz);
 								buf[sz] = '\0';
-								html_decode(buf, NULL);
+								urldecode(buf, buf);
 								if ((name = strdup(buf)) == NULL) {
 									fprintf(stderr, "mediasearch: Out of memory\n");
 								}
