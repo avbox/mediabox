@@ -231,6 +231,8 @@ mb_library_init(void)
 int
 mb_library_showdialog(void)
 {
+	int ret = -1;
+
 	/* show the menu window */
         mbv_window_show(window);
 
@@ -267,15 +269,22 @@ mb_library_showdialog(void)
 
 			mbv_window_hide(window);
 
-			mbp_play(player, selected);
-			break;
+			if (mbp_play(player, selected) == 0) {
+				ret = 0;
+				break;
+			} else {
+				mbv_window_show(window);
+
+				fprintf(stderr, "library: play() failed\n");
+				/* TODO: Display an error message */
+			}
 		}
 	}
 
 	/* hide the mainmenu window */
 	mbv_window_hide(window);
 
-	return 0;
+	return ret;
 }
 
 

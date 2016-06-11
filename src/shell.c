@@ -144,22 +144,6 @@ mbs_show_dialog(void)
 				mbp_play(player, NULL);
 				break;
 			}
-			#if 0
-			enum mb_player_status status;
-			status = mb_player_getstatus(player);
-			if (status == MB_PLAYER_STATUS_PAUSED) {
-				fprintf(stderr, "mbs: Resuming\n");
-				mbp_play(player, NULL);
-			} else if (status == MB_PLAYER_STATUS_PLAYING) {
-				fprintf(stderr, "mbs: Pausing\n");
-				mbp_pause(player);
-			} else if (status == MB_PLAYER_STATUS_READY) {
-				fprintf(stderr, "mbs: Playing\n");
-				mbp_play(player, MEDIA_FILE);
-			} else {
-				fprintf(stderr, "Status %i\n", status);
-			}
-			#endif
 			break;
 		}
 		case MBI_EVENT_KBD_S:

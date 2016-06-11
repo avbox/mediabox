@@ -86,47 +86,59 @@ mb_mainmenu_init(void)
 int
 mb_mainmenu_showdialog(void)
 {
+	int quit = 0;
+
 	/* show the menu window */
         mbv_window_show(window);
 
-	/* show the menu widget and run it's input loop */
-	if (mb_ui_menu_showdialog(menu) == 0) {
-		char *selected = mb_ui_menu_getselected(menu);
+	while (!quit) {
+		/* show the menu widget and run it's input loop */
+		if (mb_ui_menu_showdialog(menu) == 0) {
+			char *selected = mb_ui_menu_getselected(menu);
 
-		assert(selected != NULL);
+			assert(selected != NULL);
 
-		if (!memcmp("LIB", selected, 4)) {
-			mb_library_init();
-			mbv_window_hide(window);
-			mb_library_showdialog();
-			mb_library_destroy();
+			if (!memcmp("LIB", selected, 4)) {
+				mb_library_init();
+				mbv_window_hide(window);
+				if (mb_library_showdialog() == 0) {
+					quit = 1;
+					mb_library_destroy();
+					break;
+				} else {
+					mb_library_destroy();
+				}
 
-		} else if (!memcmp("REBOOT", selected, 6)) {
-			mbv_window_hide(window);
-			mbs_reboot();
+			} else if (!memcmp("REBOOT", selected, 6)) {
+				mbv_window_hide(window);
+				mbs_reboot();
 
-		} else if (!memcmp("ABOUT", selected, 5)) {
-			mb_about_init();
-			mbv_window_hide(window);
-			mb_about_showdialog();
-			mb_about_destroy();
+			} else if (!memcmp("ABOUT", selected, 5)) {
+				mb_about_init();
+				mbv_window_hide(window);
+				mb_about_showdialog();
+				mb_about_destroy();
 
-		} else if (!memcmp("DOWN", selected, 4)) {
-			mb_downloads_init();
-			mbv_window_hide(window);
-			mb_downloads_showdialog();
-			mb_downloads_destroy();
+			} else if (!memcmp("DOWN", selected, 4)) {
+				mb_downloads_init();
+				mbv_window_hide(window);
+				mb_downloads_showdialog();
+				mb_downloads_destroy();
 
-		} else if (!memcmp("MEDIASEARCH", selected, 11)) {
-			mb_mediasearch_init();
-			mbv_window_hide(window);
-			mb_mediasearch_showdialog();
-			mb_mediasearch_destroy();
-			
+			} else if (!memcmp("MEDIASEARCH", selected, 11)) {
+				mb_mediasearch_init();
+				mbv_window_hide(window);
+				mb_mediasearch_showdialog();
+				mb_mediasearch_destroy();
+
+			} else {
+				fprintf(stderr, "mb_mainmenu: Selected %s\n",
+					selected);
+			}
 		} else {
-			fprintf(stderr, "mb_mainmenu: Selected %s\n",
-				selected);
+			break;
 		}
+		mbv_window_show(window);
 	}
 
 	/* hide the mainmenu window */

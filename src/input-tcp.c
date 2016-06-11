@@ -150,8 +150,8 @@ mbi_tcp_server(void *arg)
 		mbi_event_send(MBI_EVENT_KBD_ ##x ); \
 	}
 
-					if (1 == 0) {
-						/* math broken */
+					if (!memcmp(buffer + 4, " ", 1)) {
+						mbi_event_send(MBI_EVENT_KBD_SPACE);
 					}
 					ELIF_KEY(A)
 					ELIF_KEY(B)

@@ -28,7 +28,6 @@ static struct mb_ui_menu *menu = NULL;
 static int items_count = 0;
 static int input_quit = 0;
 static int updater_quit = 0;
-static int updater_clearitems = 0;
 static char *terms = NULL;
 static size_t terms_sz = 0;
 static pthread_mutex_t menu_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -206,12 +205,27 @@ mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
 #define STRINGIZE2(x) #x
 #define STRINGIZE(x) STRINGIZE2(x)
 
+/**
+ * mb_mediasearch_freeitems() -- Called back by mb_ui_menu_enumitems(). Used to free
+ * item list entries
+ */
+static int
+mb_mediasearch_freeitems(void *item, void *data)
+{
+	(void) data;
+	free(item);
+	return 0;
+}
+
+
+
+
 static void *
 mb_mediasearch_resultsupdater(void *arg)
 {
 	char *last_terms = NULL, *tmp;
 
-	MB_DEBUG_SET_THREAD_NAME("mediasearch_resultsupdater");
+	MB_DEBUG_SET_THREAD_NAME("searchupdater");
 
 	assert(terms != NULL);
 
@@ -219,12 +233,21 @@ mb_mediasearch_resultsupdater(void *arg)
 
 		pthread_mutex_lock(&updater_lock);
 		if (last_terms != NULL && !strcmp(last_terms, terms)) {
+			fprintf(stderr, "mediasearch: Waiting\n");
 			pthread_cond_wait(&updater_signal, &updater_lock);
+			if (updater_quit) {
+				pthread_mutex_unlock(&updater_lock);
+				continue;
+			}
+		} else {
+			fprintf(stderr, "mediasearch: last_terms='%s' terms='%s'\n",
+				last_terms, terms);
 		}
 		pthread_mutex_unlock(&updater_lock);
 
 		pthread_mutex_lock(&terms_lock);
 		if ((tmp = strdup(terms)) == NULL) {
+			fprintf(stderr, "mediasearch: strdup() failed\n");
 			pthread_mutex_unlock(&terms_lock);
 			continue;
 		}
@@ -232,9 +255,9 @@ mb_mediasearch_resultsupdater(void *arg)
 
 		pthread_mutex_lock(&menu_lock);
 
-		if (updater_clearitems) {
-			mb_ui_menu_clearitems(menu);
-		}
+		mb_ui_menu_enumitems(menu, mb_mediasearch_freeitems, NULL);
+		mb_ui_menu_clearitems(menu);
+
 		items_count = 0;
 		if (mb_mediasearch_search(tmp, items_count, 25) == 0) {
 			mbv_window_update(window);
@@ -248,8 +271,9 @@ mb_mediasearch_resultsupdater(void *arg)
 		if (last_terms != NULL) {
 			free(last_terms);
 		}
-		last_terms = strdup(tmp);
-
+		if ((last_terms = strdup(tmp)) == NULL) {
+			fprintf(stderr, "mediasearch: strdup() failed 2\n");
+		}
 	}
 	fprintf(stderr, "updater exiting\n");
 	return NULL;
@@ -314,7 +338,10 @@ mb_mediasearch_inputthread(void *arg)
 			mb_mediasearch_appendtoterms("\b");
 			istext = 1;
 			break;
-
+		case MBI_EVENT_KBD_SPACE:
+			mb_mediasearch_appendtoterms(" ");
+			istext = 1;
+			break;
 		CASE_KBD(A)
 		CASE_KBD(B)
 		CASE_KBD(C)
@@ -354,8 +381,8 @@ mb_mediasearch_inputthread(void *arg)
 				mbv_window_settitle(window, title);
 				mbv_window_update(window);
 
+				fprintf(stderr, "mediasearch: signaling\n");
 				pthread_mutex_lock(&updater_lock);
-				updater_clearitems = 1;
 				pthread_cond_signal(&updater_signal);
 				pthread_mutex_unlock(&updater_lock);
 				free(title);
@@ -402,7 +429,12 @@ mb_mediasearch_init(void)
 	int window_height, window_width;
 	int n_entries = 10;
 
-	terms = malloc(1);
+	if ((terms = malloc(1)) == NULL) {
+		fprintf(stderr, "mediasearch: Out of memory\n");
+		return -1;
+	}
+
+	terms_sz = 1;
 	strcpy(terms, "");
 
 	/* set height according to font size */
@@ -451,6 +483,13 @@ mb_mediasearch_showdialog(void)
 	/* show the menu window */
         mbv_window_show(window);
 
+#if 0
+	if (pthread_cond_init(&updater_signal, NULL) != 0) {
+		fprintf(stderr, "mediasearch: Condition init failed\n");
+		return -1;
+	}
+#endif
+
 	input_quit = 0;
 	if (pthread_create(&input_thread, NULL, mb_mediasearch_inputthread, NULL) != 0) {
 		fprintf(stderr, "mediasearch: Could not start input thread;\n");
@@ -460,16 +499,12 @@ mb_mediasearch_showdialog(void)
 	updater_quit = 0;
 	if (pthread_create(&updater, NULL, mb_mediasearch_resultsupdater, NULL) != 0) {
 		fprintf(stderr, "mediasearch: Could not start updater thread\n");
+		pthread_mutex_unlock(&updater_lock);
 		input_quit = 1;
 		mbi_dispatchevent(MBI_EVENT_NONE);
 		pthread_join(input_thread, NULL);
 		return -1;
 	}
-
-	pthread_mutex_lock(&updater_lock);
-	updater_clearitems = 1;
-	pthread_cond_signal(&updater_signal);
-	pthread_mutex_unlock(&updater_lock);
 
 	/* show the menu widget and run it's input loop */
 	if (mb_ui_menu_showdialog(menu) == 0) {
@@ -488,6 +523,9 @@ mb_mediasearch_showdialog(void)
 	input_quit = 1;
 	mbi_dispatchevent(MBI_EVENT_NONE);
 	pthread_join(input_thread, NULL);
+	updater_quit = 1;
+	pthread_cond_signal(&updater_signal);
+	pthread_join(updater, NULL);
 
 	return 0;
 }
@@ -497,7 +535,11 @@ void
 mb_mediasearch_destroy(void)
 {
 	fprintf(stderr, "mediasearch: Destroying instance\n");
+	mb_ui_menu_enumitems(menu, mb_mediasearch_freeitems, NULL);
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);
+	if (terms != NULL) {
+		free(terms);
+	}
 }
 
