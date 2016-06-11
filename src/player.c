@@ -166,36 +166,6 @@ mb_player_updatestatus(struct mbp *inst, enum mb_player_status status)
 }
 
 
-#if (MB_VIDEO_BUFFER_FRAMES == 1)
-static void
-mb_player_videoframe(struct mbp *inst)
-{
-	int64_t delay;
-
-	assert(inst != NULL);
-	assert(inst->window != NULL);
-	abort();
-
-	if  (inst->frame_pts != AV_NOPTS_VALUE) {
-		if (inst->last_pts != AV_NOPTS_VALUE) {
-			/* sleep roughly the right amount of time;
-			 * usleep is in microseconds, just like AV_TIME_BASE. */
-			delay = av_rescale_q(inst->frame_pts - inst->last_pts,
-				inst->time_base, AV_TIME_BASE_Q);
-			if (delay > 0 && delay < 1000000) {
-				usleep(delay);
-			}
-		}
-		inst->last_pts = inst->frame_pts;
-	}
-
-	mbv_window_blit_buffer(inst->window, inst->buf,
-		inst->width, inst->height, 0, 0);
-	inst->frames_rendered++;
-}
-#endif
-
-
 /**
  * mb_player_adec_thread() -- This is the main decoding loop
  */
