@@ -231,6 +231,12 @@ mb_downloads_populatelist(void)
 		return 0;
 
 	} else { /* child */
+
+		if (nice(5) == -1) {
+			fprintf(stderr, "downloads: I'm trying to be nice but I can't. (errno=%i)\n",
+				errno);
+		}
+
 		close(pipefd[0]);
 		if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
 			fprintf(stderr, "downloads[child]: dup2() failed\n");

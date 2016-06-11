@@ -58,6 +58,11 @@ mb_downloadmanager_deluged(void *data)
 			fprintf(stderr, "download-backend: fork() failed\n");
 			return NULL;
 		} else if (pid == 0) { /* child */
+			if (nice(5) == -1) {
+				fprintf(stderr, "downloads: I'm trying to be nice but I can't. (errno=%i)\n",
+					errno);
+			}
+
 			execv(DELUGED_BIN, (char * const[]) {
 				strdup("deluged"),
 				strdup("-d"),
