@@ -74,7 +74,7 @@ mb_ui_menu_setselected(struct mb_ui_menu *inst, mb_ui_menuitem *item)
 	}
 
 	/* if there is a selected item then unselect it */
-	if (inst->selected != NULL) {
+	if (inst->selected != NULL && inst->selected->window != NULL) {
 		mb_ui_menuitem *selected = inst->selected;
 		inst->selected = NULL;
 		mb_ui_menuitem_update(inst, selected);
