@@ -132,6 +132,8 @@ mb_downloadmanager_init(void)
 	umask(000);
 	mkdir("/var/lib/mediabox", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 	mkdir("/var/lib/mediabox/deluge", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	mkdir("/var/lib/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
 	cp("/usr/local/share/mediabox/deluge-core.conf", "/var/lib/mediabox/deluge/core.conf");
 	cp("/usr/local/share/mediabox/deluge-auth", "/var/lib/mediabox/deluge/auth");
 	unlink("/var/lib/mediabox/deluge/deluged.pid");
