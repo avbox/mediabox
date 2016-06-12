@@ -241,19 +241,20 @@ mb_library_init(void)
 int
 mb_library_showdialog(void)
 {
-	int ret = -1;
+	int ret = -1, quit = 0;
 
 	/* show the menu window */
         mbv_window_show(window);
 
 	/* show the menu widget and run it's input loop */
-	while (1) {
+	while (!quit) {
 		while (mb_ui_menu_showdialog(menu) == 0) {
 			char *selected = mb_ui_menu_getselected(menu);
 
 			assert(selected != NULL);
 
 			if (selected[strlen(selected) - 1] == '/') {
+
 				char *selected_copy = strdup(selected);
 				if (selected_copy == NULL) {
 					abort(); /* for now */
@@ -267,6 +268,7 @@ mb_library_showdialog(void)
 				free(selected_copy);
 
 			} else {
+
 				struct mbp* player;
 
 				fprintf(stderr, "mb_library: Selected %s\n",
@@ -283,6 +285,7 @@ mb_library_showdialog(void)
 
 				if (mbp_play(player, selected) == 0) {
 					ret = 0;
+					quit = 1;
 					break;
 				} else {
 					mbv_window_show(window);
@@ -292,7 +295,7 @@ mb_library_showdialog(void)
 				}
 			}
 		}
-		if (dotdot != NULL) {
+		if (!quit && dotdot != NULL) {
 			/* clear the list and load the parent directory */
 			mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
 			mb_ui_menu_clearitems(menu);
