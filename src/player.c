@@ -51,10 +51,10 @@
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_BGRA)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_VIDEO_BUFFER_FRAMES  (100)
-#define MB_VIDEO_BUFFER_PACKETS (25)
-#define MB_AUDIO_BUFFER_FRAMES  (400)
-#define MB_AUDIO_BUFFER_PACKETS (100)
+#define MB_VIDEO_BUFFER_FRAMES  (15)
+#define MB_VIDEO_BUFFER_PACKETS (15)
+#define MB_AUDIO_BUFFER_FRAMES  (99)
+#define MB_AUDIO_BUFFER_PACKETS (1)
 
 #define MB_DECODER_PRINT_FPS
 
@@ -131,11 +131,11 @@ struct mbp
 	char frame_state[MB_VIDEO_BUFFER_FRAMES];
 	int64_t frame_pts[MB_VIDEO_BUFFER_FRAMES];
 	AVRational frame_time_base[MB_VIDEO_BUFFER_FRAMES];
-	int frames_avail;
+	int video_frames;
 	int video_packets;
 	int video_playback_index;
-	int decode_frame_index;
-	int renderer_quit;
+	int video_decode_index;
+	int video_quit;
 	int video_decoder_quit;
 	int video_packet_read_index;
 	int video_packet_write_index;
@@ -143,9 +143,9 @@ struct mbp
 	pthread_cond_t video_decoder_signal;
 	pthread_mutex_t video_decoder_lock;
 	pthread_t video_decoder_thread;
-	pthread_cond_t renderer_signal;
-	pthread_mutex_t renderer_lock;
-	pthread_t renderer_thread;
+	pthread_cond_t video_output_signal;
+	pthread_mutex_t video_output_lock;
+	pthread_t video_output_thread;
 
 	pthread_cond_t resume_signal;
 	pthread_mutex_t resume_lock;
@@ -175,7 +175,7 @@ mb_player_printstatus(struct mbp *inst, int fps)
 	static int i = 0;
 	if ((i++ % 10) == 0) {
 		fprintf(stdout, "| Fps: %03i | Video Packets: %03i | Video Frames: %03i | Audio Packets: %03i | Audio Frames: %03i |\r",
-			fps, inst->video_packets, inst->frames_avail, inst->audio_packets, inst->audio_frames);
+			fps, inst->video_packets, inst->video_frames, inst->audio_packets, inst->audio_frames);
 		fflush(stdout);
 	}
 }
@@ -189,7 +189,7 @@ static void
 mb_player_wait4buffers(struct mbp *inst)
 {
 	/* wait for the buffers to fill up */
-	while (inst->frames_avail < MB_VIDEO_BUFFER_FRAMES &&
+	while (inst->video_frames < MB_VIDEO_BUFFER_FRAMES &&
 		inst->audio_frames < MB_VIDEO_BUFFER_FRAMES) {
 		mb_player_printstatus(inst, 0);
 		usleep(5000);
@@ -273,6 +273,9 @@ mb_player_pauseaudio(struct mbp *inst)
 }
 
 
+/**
+ * mb_player_resumeaudio() -- Resume audio playback
+ */
 static int
 mb_player_resumeaudio(struct mbp *inst)
 {
@@ -431,6 +434,7 @@ mb_player_audio(void *arg)
 				continue;
 				#else
 				pthread_mutex_unlock(&inst->audio_lock);
+				fprintf(stderr, "player: Audio stalled\n");
 				mb_player_pauseaudio(inst);
 				mb_player_wait4buffers(inst);
 				mb_player_resumeaudio(inst);
@@ -475,10 +479,12 @@ mb_player_audio(void *arg)
 		/* update buffer state and signal decoder */
 		pthread_mutex_lock(&inst->audio_lock);
 		inst->audio_frame_state[inst->audio_playback_index] = 0;
+		pthread_mutex_unlock(&inst->audio_lock);
+		pthread_cond_signal(&inst->audio_signal);
+		pthread_cond_broadcast(&inst->audio_decoder_signal);
+
 		inst->audio_playback_index++;
 		inst->audio_playback_index %= MB_AUDIO_BUFFER_FRAMES;
-		pthread_cond_signal(&inst->audio_signal);
-		pthread_mutex_unlock(&inst->audio_lock);
 
 		//inst->audio_frames--;
 		__sync_fetch_and_sub(&inst->audio_frames, 1);
@@ -628,7 +634,7 @@ mb_player_video(void *arg)
 	MB_DEBUG_SET_THREAD_NAME("video_playback");
 
 	assert(inst != NULL);
-	assert(inst->renderer_quit == 0);
+	assert(inst->video_quit == 0);
 
 	fprintf(stderr, "player: Video renderer started\n");
 
@@ -662,10 +668,9 @@ mb_player_video(void *arg)
 	fprintf(stderr, "player: Video renderer ready\n");
 
 	/* signal control thread that we're ready */
-	pthread_mutex_lock(&inst->renderer_lock);
-	pthread_cond_signal(&inst->renderer_signal);
-	pthread_cond_signal(&inst->renderer_signal); /* in case decoder is also waiting */
-	pthread_mutex_unlock(&inst->renderer_lock);
+	pthread_mutex_lock(&inst->video_output_lock);
+	pthread_cond_broadcast(&inst->video_output_signal);
+	pthread_mutex_unlock(&inst->video_output_lock);
 
 
 #ifdef MB_DECODER_PRINT_FPS
@@ -681,30 +686,33 @@ mb_player_video(void *arg)
 		(void) clock_gettime(CLOCK_MONOTONIC, &ref_timestamp);
 	}
 
-	while (!inst->renderer_quit) {
+	while (!inst->video_quit) {
 		/* if there's no frame ready we must wait */
 		if (inst->frame_state[inst->video_playback_index] != 1) {
-			pthread_mutex_lock(&inst->renderer_lock);
-			if (inst->renderer_quit) {
-				pthread_mutex_unlock(&inst->renderer_lock);
+			pthread_mutex_lock(&inst->video_output_lock);
+			if (inst->video_quit) {
+				pthread_mutex_unlock(&inst->video_output_lock);
 				goto video_exit;
 			}
 			if (inst->frame_state[inst->video_playback_index] != 1) {
 				fprintf(stderr, "player: Waiting for video decoder\n");
 				if (inst->have_audio) {
 					inst->action |= MB_PLAYER_ACTION_PAUSE;
-					pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
-					pthread_mutex_unlock(&inst->renderer_lock);
+					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
+					pthread_mutex_unlock(&inst->video_output_lock);
 					mb_player_wait4buffers(inst);
 					inst->action &= ~MB_PLAYER_ACTION_PAUSE;
-					pthread_cond_broadcast(&inst->resume_signal);
+					while (inst->audio_paused) {
+						pthread_cond_broadcast(&inst->resume_signal);
+						usleep(1000);
+					}
 				} else {
-					pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
-					pthread_mutex_unlock(&inst->renderer_lock);
+					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
+					pthread_mutex_unlock(&inst->video_output_lock);
 				}
 				continue;
 			}
-			pthread_mutex_unlock(&inst->renderer_lock);
+			pthread_mutex_unlock(&inst->video_output_lock);
 		}
 
 		frame_pts = inst->frame_pts[inst->video_playback_index];
@@ -717,6 +725,9 @@ mb_player_video(void *arg)
 			/* delay += inst->frame_repeat[inst->video_playback_index] * delay; */
 
 recalc:
+			if (inst->video_quit) {
+				continue;
+			}
 			if (inst->have_audio) {
 				/* getaudiotime() should (when it's bug free) always give us
 				 * the time since the audio stream started playing, excluding
@@ -725,8 +736,8 @@ recalc:
 				if (elapsed > frame_time) {
 					delay = 0;
 					if (elapsed - frame_time > 100000) {
-						/* fprintf(stderr, "frame_time=%li elapsed=%li diff=%li\n",
-							frame_time, elapsed, elapsed - frame_time); */
+						fprintf(stderr, "player: skipping frame_time=%li elapsed=%li diff=%li\n",
+							frame_time, elapsed, elapsed - frame_time);
 						/* skip frame */
 						goto frame_complete;
 					}
@@ -734,6 +745,7 @@ recalc:
 					delay = frame_time - elapsed;
 				}
 			} else {
+				abort();
 				(void) clock_gettime(CLOCK_MONOTONIC, &timestamp);
 				elapsed = utimediff(&timestamp, &ref_timestamp);
 				delay = frame_time - elapsed;
@@ -783,15 +795,17 @@ recalc:
 
 frame_complete:
 		/* update buffer state and signal decoder */
-		pthread_mutex_lock(&inst->renderer_lock);
+		pthread_mutex_lock(&inst->video_output_lock);
 		inst->frame_state[inst->video_playback_index] = 0;
+		pthread_mutex_unlock(&inst->video_output_lock);
+		pthread_cond_signal(&inst->video_output_signal);
+		pthread_cond_broadcast(&inst->video_decoder_signal);
+
 		inst->video_playback_index++;
 		inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
-		pthread_cond_signal(&inst->renderer_signal);
-		pthread_mutex_unlock(&inst->renderer_lock);
 
-		/* inst->frames_avail--; */
-		__sync_fetch_and_sub(&inst->frames_avail, 1);
+		/* inst->video_frames--; */
+		__sync_fetch_and_sub(&inst->video_frames, 1);
 
 		/* pause */
 		if (!inst->have_audio && inst->action != MB_PLAYER_ACTION_NONE) {
@@ -1219,19 +1233,19 @@ mb_player_video_decode(void *arg)
 				}
 
 				/* if the renderer has not finished we must wait */
-				while (inst->frame_state[inst->decode_frame_index] != 0) {
-					pthread_mutex_lock(&inst->renderer_lock);
+				while (inst->frame_state[inst->video_decode_index] != 0) {
+					pthread_mutex_lock(&inst->video_output_lock);
 					if (inst->video_decoder_quit) {
-						pthread_mutex_unlock(&inst->renderer_lock);
+						pthread_mutex_unlock(&inst->video_output_lock);
 						goto decoder_exit;
 					}
-					if (inst->frame_state[inst->decode_frame_index] != 0) {
+					if (inst->frame_state[inst->video_decode_index] != 0) {
 						/*fprintf(stderr, "player: "
 							"Waiting for renderer\n"); */
-						pthread_cond_wait(&inst->renderer_signal,
-							&inst->renderer_lock);
+						pthread_cond_wait(&inst->video_output_signal,
+							&inst->video_output_lock);
 					}
-					pthread_mutex_unlock(&inst->renderer_lock);
+					pthread_mutex_unlock(&inst->video_output_lock);
 					if (inst->video_decoder_quit) {
 						goto decoder_exit;
 					}
@@ -1240,24 +1254,26 @@ mb_player_video_decode(void *arg)
 				/* copy picture to buffer */
 				avpicture_layout((const AVPicture*) video_frame_flt,
 					MB_DECODER_PIX_FMT, inst->width, inst->height,
-					inst->frame_data[inst->decode_frame_index], inst->bufsz);
+					inst->frame_data[inst->video_decode_index], inst->bufsz);
 
 
 				/* update the buffer index and signal renderer thread */
-				pthread_mutex_lock(&inst->renderer_lock);
-				inst->frame_repeat[inst->decode_frame_index] = video_frame_flt->repeat_pict;
-				inst->frame_state[inst->decode_frame_index] = 1;
-				inst->frame_pts[inst->decode_frame_index] = frame_pts;
-				inst->frame_time_base[inst->decode_frame_index] = 
+				pthread_mutex_lock(&inst->video_output_lock);
+				inst->frame_repeat[inst->video_decode_index] = video_frame_flt->repeat_pict;
+				inst->frame_state[inst->video_decode_index] = 1;
+				inst->frame_pts[inst->video_decode_index] = frame_pts;
+				inst->frame_time_base[inst->video_decode_index] = 
 					video_buffersink_ctx->inputs[0]->time_base;
-				inst->decode_frame_index++;
-				inst->decode_frame_index %= MB_VIDEO_BUFFER_FRAMES;
-				/* inst->frames_avail++; */
-				__sync_fetch_and_add(&inst->frames_avail, 1);
-				pthread_cond_signal(&inst->renderer_signal);
-				pthread_mutex_unlock(&inst->renderer_lock);
+				inst->video_decode_index++;
+				inst->video_decode_index %= MB_VIDEO_BUFFER_FRAMES;
+				pthread_cond_signal(&inst->video_output_signal);
+				pthread_mutex_unlock(&inst->video_output_lock);
 
 				av_frame_unref(video_frame_flt);
+
+				/* inst->video_frames++; */
+				__sync_fetch_and_add(&inst->video_frames, 1);
+
 			}
 			av_frame_unref(video_frame_nat);
 		}
@@ -1267,13 +1283,11 @@ mb_player_video_decode(void *arg)
 		inst->video_packet_state[inst->video_packet_read_index] = 0;
 		inst->video_packet_read_index++;
 		inst->video_packet_read_index %= MB_VIDEO_BUFFER_PACKETS;
-		//inst->video_packets--;
-		__sync_fetch_and_sub(&inst->video_packets, 1);
 		pthread_cond_signal(&inst->video_decoder_signal);
 		pthread_mutex_unlock(&inst->video_decoder_lock);
 
-
-
+		/* inst->video_packets--; */
+		__sync_fetch_and_sub(&inst->video_packets, 1);
 	}
 decoder_exit:
 	fprintf(stderr, "player: Video decoder exiting\n");
@@ -1372,10 +1386,11 @@ mb_player_audio_decode(void * arg)
 		/* grab the packet and signal the stream decoder thread */
 		packet = packet1 = inst->audio_packet[inst->audio_packet_read_index];
 		inst->audio_packet_state[inst->audio_packet_read_index] = 0;
-		//inst->audio_packets--;
-		__sync_fetch_and_sub(&inst->audio_packets, 1);
 		pthread_cond_signal(&inst->audio_decoder_signal);
 		pthread_mutex_unlock(&inst->audio_decoder_lock);
+
+		/*inst->audio_packets--;*/
+		__sync_fetch_and_sub(&inst->audio_packets, 1);
 
 		inst->audio_packet_read_index++;
 		inst->audio_packet_read_index %= MB_AUDIO_BUFFER_PACKETS;
@@ -1403,7 +1418,7 @@ mb_player_audio_decode(void * arg)
 				/* pull filtered audio from the filtergraph */
 				while (!inst->audio_decoder_quit) {
 
-					/* if the renderer has not finished we must wait */
+					/* if the video output has not finished we must wait */
 					if (inst->audio_frame_state[inst->audio_decode_index] != 0) {
 						pthread_mutex_lock(&inst->audio_lock);
 						if (inst->audio_decoder_quit) {
@@ -1436,11 +1451,11 @@ mb_player_audio_decode(void * arg)
 					inst->audio_frame_state[inst->audio_decode_index] = 1;
 					inst->audio_decode_index++;
 					inst->audio_decode_index %= MB_AUDIO_BUFFER_FRAMES;
-					//inst->audio_frames++;
-					__sync_fetch_and_add(&inst->audio_frames, 1);
 					pthread_cond_signal(&inst->audio_signal);
 					pthread_mutex_unlock(&inst->audio_lock);
 
+					/* inst->audio_frames++; */
+					__sync_fetch_and_add(&inst->audio_frames, 1);
 				}
 			}
 		}
@@ -1512,11 +1527,11 @@ mb_player_stream_decode(void *arg)
 	/* dump file info */
 	av_dump_format(inst->fmt_ctx, 0, inst->media_file, 0);
 
-	inst->renderer_quit = 0;
+	inst->video_quit = 0;
 	inst->video_decoder_quit = 0;
 	inst->video_playback_index = 0;
-	inst->decode_frame_index = 0;
-	inst->frames_avail = 0;
+	inst->video_decode_index = 0;
+	inst->video_frames = 0;
 	inst->video_packet_read_index = 0;
 	inst->video_packet_write_index = 0;
 	inst->video_packets = 0;
@@ -1579,7 +1594,7 @@ mb_player_stream_decode(void *arg)
 	/* start decoding */
 	while ((inst->action & MB_PLAYER_ACTION_STOP) == 0 && av_read_frame(inst->fmt_ctx, &packet) >= 0) {
 		if (packet.stream_index == inst->video_stream_index) {
-			/* wait for the decoder to finish decoding the current frame */
+			/* if the buffer is full wait for the output thread to make room */
 			while (inst->video_packet_state[inst->video_packet_write_index] == 1) {
 				pthread_mutex_lock(&inst->video_decoder_lock);
 				if (inst->action & MB_PLAYER_ACTION_STOP) {
@@ -1600,8 +1615,9 @@ mb_player_stream_decode(void *arg)
 			/* save the packet and signal decoder thread */
 			inst->video_packet[inst->video_packet_write_index] = packet;
 			inst->video_packet_state[inst->video_packet_write_index] = 1;
-			pthread_cond_signal(&inst->video_decoder_signal);
 			pthread_mutex_unlock(&inst->video_decoder_lock);
+			pthread_cond_signal(&inst->video_decoder_signal);
+			pthread_cond_signal(&inst->video_output_signal);
 
 			inst->video_packet_write_index++;
 			inst->video_packet_write_index %= MB_VIDEO_BUFFER_PACKETS;
@@ -1629,8 +1645,9 @@ mb_player_stream_decode(void *arg)
 			/* save the packet and signal decoder */
 			inst->audio_packet[inst->audio_packet_write_index] = packet;
 			inst->audio_packet_state[inst->audio_packet_write_index] = 1;
-			pthread_cond_signal(&inst->audio_decoder_signal);
 			pthread_mutex_unlock(&inst->audio_decoder_lock);
+			pthread_cond_signal(&inst->audio_decoder_signal);
+			pthread_cond_signal(&inst->audio_signal);
 
 			inst->audio_packet_write_index++;
 			inst->audio_packet_write_index %= MB_AUDIO_BUFFER_PACKETS;
@@ -1644,11 +1661,11 @@ decoder_exit:
 	fprintf(stderr, "player: Stream decoder exiting\n");
 
 	/* signal the renderer thread to exit and join it */
-	pthread_mutex_lock(&inst->renderer_lock);
-	inst->renderer_quit = 1;
-	pthread_cond_signal(&inst->renderer_signal);
-	pthread_mutex_unlock(&inst->renderer_lock);
-	pthread_join(inst->renderer_thread, NULL);
+	pthread_mutex_lock(&inst->video_output_lock);
+	inst->video_quit = 1;
+	pthread_cond_signal(&inst->video_output_signal);
+	pthread_mutex_unlock(&inst->video_output_lock);
+	pthread_join(inst->video_output_thread, NULL);
 	fprintf(stderr, "player: Video renderer exited\n");
 
 	/* signal the video decoder thread to exit and join it */
@@ -1657,21 +1674,9 @@ decoder_exit:
 	inst->video_decoder_quit = 1;
 	pthread_cond_broadcast(&inst->video_decoder_signal);
 	pthread_mutex_unlock(&inst->video_decoder_lock);
-
-	pthread_mutex_lock(&inst->renderer_lock);
-	pthread_cond_broadcast(&inst->renderer_signal);
-	pthread_mutex_unlock(&inst->renderer_lock);
-
-	#if 0
-	pthread_mutex_lock(&inst->video_decoder_lock);
-	inst->video_decoder_quit = 1;
-	pthread_cond_signal(&inst->video_decoder_signal);
-	pthread_mutex_unlock(&inst->video_decoder_lock);
-
-	pthread_mutex_lock(&inst->renderer_lock);
-	pthread_cond_signal(&inst->renderer_signal);
-	pthread_mutex_unlock(&inst->renderer_lock);
-	#endif
+	pthread_mutex_lock(&inst->video_output_lock);
+	pthread_cond_broadcast(&inst->video_output_signal);
+	pthread_mutex_unlock(&inst->video_output_lock);
 
 	pthread_join(inst->video_decoder_thread, NULL);
 	fprintf(stderr, "player: Video decoder exited\n");
@@ -1693,22 +1698,9 @@ decoder_exit:
 		inst->audio_decoder_quit = 1;
 		pthread_cond_broadcast(&inst->audio_decoder_signal);
 		pthread_mutex_unlock(&inst->audio_decoder_lock);
-
 		pthread_mutex_lock(&inst->audio_lock);
 		pthread_cond_broadcast(&inst->audio_signal);
 		pthread_mutex_unlock(&inst->audio_lock);
-
-		#if 0
-		pthread_mutex_lock(&inst->audio_decoder_lock);
-		inst->audio_decoder_quit = 1;
-		pthread_cond_signal(&inst->audio_decoder_signal);
-		pthread_mutex_unlock(&inst->audio_decoder_lock);
-
-		pthread_mutex_lock(&inst->audio_lock);
-		pthread_cond_signal(&inst->audio_signal);
-		pthread_mutex_unlock(&inst->audio_lock);
-		#endif
-
 		pthread_join(inst->audio_decoder_thread, NULL);
 		fprintf(stderr, "player: Audio decoder exited\n");
 
@@ -1734,7 +1726,9 @@ decoder_exit:
 }
 
 
-
+/**
+ * mb_player_getstatus() -- Get the player status
+ */
 enum mb_player_status
 mb_player_getstatus(struct mbp *inst)
 {
@@ -1839,10 +1833,10 @@ mbp_play(struct mbp *inst, const char * const path)
 
 	/* wait for the buffers to fill up */
 	while (inst->audio_frames < MB_AUDIO_BUFFER_FRAMES &&
-		inst->frames_avail < MB_VIDEO_BUFFER_FRAMES) {
+		inst->video_frames < MB_VIDEO_BUFFER_FRAMES) {
 
 		/* update progressbar */
-		int avail = inst->frames_avail + inst->audio_frames;
+		int avail = inst->video_frames + inst->audio_frames;
 		const int wanted = MB_AUDIO_BUFFER_FRAMES + MB_VIDEO_BUFFER_FRAMES;
 		int pcent = (((avail * 100) / wanted) * 100) / 100;
 		int donewidth = (pw * pcent) / 100;
@@ -1860,14 +1854,14 @@ mbp_play(struct mbp *inst, const char * const path)
 	fprintf(stderr, "player: Firing rendering threads\n");
 
 	/* fire the video threads */
-	pthread_mutex_lock(&inst->renderer_lock);
-	if (pthread_create(&inst->renderer_thread, NULL, mb_player_video, inst) != 0) {
+	pthread_mutex_lock(&inst->video_output_lock);
+	if (pthread_create(&inst->video_output_thread, NULL, mb_player_video, inst) != 0) {
 		fprintf(stderr, "player: Could not start renderer thread\n");
-		pthread_mutex_unlock(&inst->renderer_lock);
+		pthread_mutex_unlock(&inst->video_output_lock);
 		return -1;
 	}
-	pthread_cond_wait(&inst->renderer_signal, &inst->renderer_lock);
-	pthread_mutex_unlock(&inst->renderer_lock);
+	pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
+	pthread_mutex_unlock(&inst->video_output_lock);
 
 	/* fire the audio output thread */
 	if (inst->have_audio) {
@@ -2075,14 +2069,14 @@ mb_player_new(struct mbv_window *window)
 
 	/* initialize pthreads primitives */
 	if (pthread_mutex_init(&inst->resume_lock, NULL) != 0 ||
-		pthread_mutex_init(&inst->renderer_lock, NULL) != 0 ||
+		pthread_mutex_init(&inst->video_output_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->audio_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->audio_decoder_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->video_decoder_lock, NULL) != 0 ||
 		pthread_cond_init(&inst->video_decoder_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->audio_decoder_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->audio_signal, NULL) != 0 ||
-		pthread_cond_init(&inst->renderer_signal, NULL) != 0 ||
+		pthread_cond_init(&inst->video_output_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->resume_signal, NULL) != 0) {
 		fprintf(stderr, "player: pthreads initialization failed\n");
 		free(inst);
