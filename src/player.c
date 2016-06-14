@@ -52,8 +52,8 @@
 
 /* This is the # of frames to decode ahead of time */
 #define MB_VIDEO_BUFFER_FRAMES  (15)
-#define MB_VIDEO_BUFFER_PACKETS (15)
-#define MB_AUDIO_BUFFER_FRAMES  (99)
+#define MB_VIDEO_BUFFER_PACKETS (1)
+#define MB_AUDIO_BUFFER_FRAMES  (60)
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
 #define MB_DECODER_PRINT_FPS
@@ -106,7 +106,7 @@ struct mbp
 	int audio_packets;
 	int audio_quit;
 	int audio_paused;
-	int64_t audio_elapsed_before_trigger;
+	int64_t audio_clock_offset;
 	snd_pcm_uframes_t audio_buffer_size; /* ALSA buffer */
 	unsigned int audio_framerate;
 	pthread_cond_t audio_signal;
@@ -141,6 +141,9 @@ struct mbp
 	int video_packet_read_index;
 	int video_packet_write_index;
 	int video_paused;
+	unsigned int video_skipframes;
+	int64_t video_decoder_pts;
+	AVRational video_decoder_timebase;
 	pthread_cond_t video_decoder_signal;
 	pthread_mutex_t video_decoder_lock;
 	pthread_t video_decoder_thread;
@@ -213,7 +216,7 @@ mb_player_getaudiotime(struct mbp* inst)
 	snd_htimestamp_t audio_timestamp, audio_trigger_timestamp;
 
 	if (inst->audio_paused) {
-		return inst->audio_elapsed_before_trigger;
+		return inst->audio_clock_offset;
 	}
 
 	snd_pcm_status_alloca(&status);
@@ -228,7 +231,7 @@ mb_player_getaudiotime(struct mbp* inst)
 
 	time  = ((audio_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_timestamp.tv_nsec) / 1000;
 	time -= ((audio_trigger_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_trigger_timestamp.tv_nsec) / 1000;
-	time += inst->audio_elapsed_before_trigger;
+	time += inst->audio_clock_offset;
 
 	return (int64_t) time;
 }
@@ -259,16 +262,16 @@ mb_player_pauseaudio(struct mbp *inst)
 
 	time  = ((audio_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_timestamp.tv_nsec) / 1000;
 	time -= ((audio_trigger_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_trigger_timestamp.tv_nsec) / 1000;
-	time += inst->audio_elapsed_before_trigger;
+	time += inst->audio_clock_offset;
 
 	/* set the clock to the current audio time */
-	inst->audio_elapsed_before_trigger = time;
+	inst->audio_clock_offset = time;
 	inst->audio_paused = 1;
 	avail = snd_pcm_status_get_avail(status);
 
 	/* move the clock up to what it should be after the ALSA buffer is drained
 	 * and drain the buffer */
-	inst->audio_elapsed_before_trigger += ((1000 * 1000) / inst->audio_framerate) * (inst->audio_buffer_size - avail);
+	inst->audio_clock_offset += ((1000 * 1000) / inst->audio_framerate) * (inst->audio_buffer_size - avail);
 	snd_pcm_drain(inst->audio_pcm_handle);
 
 	return 0;
@@ -281,18 +284,13 @@ mb_player_pauseaudio(struct mbp *inst)
 static int
 mb_player_resumeaudio(struct mbp *inst)
 {
-	int64_t frame_time = av_rescale_q(inst->audio_frame[inst->audio_playback_index]->pts,
+	/* correct the audio clock to that of the next frame in the queue. */
+	inst->audio_clock_offset = av_rescale_q(inst->audio_frame[inst->audio_playback_index]->pts,
 		inst->audio_frame_timebase[inst->audio_playback_index], AV_TIME_BASE_Q);
-
-	/* fprintf(stderr, "player: elapsed_bt=%li pts=%li\n",
-		inst->audio_elapsed_before_trigger,
-		frame_time); */
-
-	/* correct the audio clock to that of the last frame in the queue. */
-	inst->audio_elapsed_before_trigger = frame_time;
 	inst->audio_paused = 0;
 
-	/* snd_pcm_pause(inst->audio_pcm_handle, 0); */
+	/* reset ALSA. The clock will start running again when the
+	 * audio starts playing */
 	snd_pcm_reset(inst->audio_pcm_handle);
 	snd_pcm_prepare(inst->audio_pcm_handle);
 	return 0;
@@ -477,6 +475,13 @@ mb_player_audio(void *arg)
 			inst->audio_frame[inst->audio_playback_index]->nb_samples);
 		if (frames < 0) {
 			frames = snd_pcm_recover(inst->audio_pcm_handle, frames, 0);
+
+			/* so no matter how hard we tried underrun still happened
+			 * so we need to re-sync. Easiest way is to just pause and
+			 * resume. It doesn't make a difference since the audio is
+			 * already breaking up */
+			mb_player_pauseaudio(inst);
+			mb_player_resumeaudio(inst);
 		}
 		if (frames < 0) {
 			fprintf(stderr, "player: snd_pcm_writei() failed: %s\n",
@@ -507,7 +512,7 @@ audio_exit:
 	fprintf(stderr, "player: Audio thread exiting\n");
 
 	/* cleanup */
-	if (inst->audio_pcm_handle == NULL) {
+	if (inst->audio_pcm_handle != NULL) {
 		snd_pcm_close(inst->audio_pcm_handle);
 		inst->audio_pcm_handle = NULL;
 	}
@@ -596,6 +601,68 @@ mb_player_sleep(int64_t usecs)
 	return utimediff(&t1, &t2);
 }
 
+
+/**
+ * mb_player_dumpvideo() -- Dump all video frames up to the specified
+ * pts (in usecs)
+ */
+static void
+mb_player_dumpvideo(struct mbp* inst, int64_t pts)
+{
+	int64_t video_time;
+	
+	pthread_mutex_lock(&inst->video_output_lock);
+	video_time = av_rescale_q(inst->video_decoder_pts,
+		inst->video_decoder_timebase, AV_TIME_BASE_Q);
+	pthread_mutex_unlock(&inst->video_output_lock);
+
+	if (video_time <= pts) {
+		//usleep(1000);
+	
+		/* first drain the decoded frames buffer */
+		pthread_mutex_lock(&inst->video_output_lock);
+		while (inst->frame_state[inst->video_playback_index] == 1) {
+			inst->frame_state[inst->video_playback_index++] = 0;
+			inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
+			/* inst->video_frames--; */
+			__sync_fetch_and_sub(&inst->video_frames, 1);
+		}
+		pthread_mutex_unlock(&inst->video_output_lock);
+
+		/* now tell the decoder to skip 5 frames */
+		inst->video_skipframes = 10;
+		while (inst->video_skipframes > 0) {
+			usleep(1000);
+		}
+
+		/* now skip all decoded frames until the frame pts is greater than pts */
+		while (1) {
+			if (inst->frame_state[inst->video_playback_index] != 1) {
+				pthread_mutex_lock(&inst->video_output_lock);
+				if (inst->frame_state[inst->video_playback_index] != 1) {
+					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
+					pthread_mutex_unlock(&inst->video_output_lock);
+					continue;
+				}
+			}
+			video_time = av_rescale_q(inst->frame_pts[inst->video_playback_index],
+				inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
+
+			if (video_time > pts) {
+				pthread_mutex_unlock(&inst->video_output_lock);
+				break;
+			}
+
+			inst->frame_state[inst->video_playback_index] = 0;
+			pthread_mutex_unlock(&inst->video_output_lock);
+			inst->video_playback_index++;
+			inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
+
+			/* inst->video_frames--; */
+			__sync_fetch_and_sub(&inst->video_frames, 1);
+		}
+	}
+}
 
 /**
  * mb_player_wait4audio() -- Waits for the audio stream to start playing
@@ -750,6 +817,11 @@ recalc:
 					if (elapsed - frame_time > 100000) {
 						/* fprintf(stderr, "player: skipping frame_time=%li elapsed=%li diff=%li\n",
 							frame_time, elapsed, elapsed - frame_time); */
+
+						/* if the decoder is lagging behind tell it to
+						 * skip a few frames */
+						mb_player_dumpvideo(inst, frame_time);
+
 						/* skip frame */
 						goto frame_complete;
 					}
@@ -1142,6 +1214,7 @@ mb_player_video_decode(void *arg)
 	assert(inst != NULL);
 	assert(inst->fmt_ctx != NULL);
 	assert(inst->video_stream_index == -1);
+	assert(inst->video_decoder_pts == 0);
 
 	/* initialize all frame data buffers to NULL */
 	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
@@ -1218,6 +1291,11 @@ mb_player_video_decode(void *arg)
 			}
 		}
 
+		if (inst->video_skipframes > 0) {
+			inst->video_skipframes--;
+			continue;
+		}
+
 		/* decode frame */
 		if ((i = avcodec_decode_video2(video_codec_ctx, video_frame_nat, &finished, &inst->video_packet[inst->video_packet_read_index])) < 0) {
 			fprintf(stderr, "player: avcodec_decode_video2() returned %i\n", i);
@@ -1268,18 +1346,21 @@ mb_player_video_decode(void *arg)
 					MB_DECODER_PIX_FMT, inst->width, inst->height,
 					inst->frame_data[inst->video_decode_index], inst->bufsz);
 
-
-				/* update the buffer index and signal renderer thread */
-				pthread_mutex_lock(&inst->video_output_lock);
 				inst->frame_repeat[inst->video_decode_index] = video_frame_flt->repeat_pict;
-				inst->frame_state[inst->video_decode_index] = 1;
 				inst->frame_pts[inst->video_decode_index] = frame_pts;
 				inst->frame_time_base[inst->video_decode_index] = 
 					video_buffersink_ctx->inputs[0]->time_base;
+
+				/* update the buffer index and signal renderer thread */
+				pthread_mutex_lock(&inst->video_output_lock);
+				inst->video_decoder_pts = frame_pts;
+				inst->video_decoder_timebase = video_buffersink_ctx->inputs[0]->time_base;
+				inst->frame_state[inst->video_decode_index] = 1;
+				pthread_mutex_unlock(&inst->video_output_lock);
+				pthread_cond_signal(&inst->video_output_signal);
+
 				inst->video_decode_index++;
 				inst->video_decode_index %= MB_VIDEO_BUFFER_FRAMES;
-				pthread_cond_signal(&inst->video_output_signal);
-				pthread_mutex_unlock(&inst->video_output_lock);
 
 				av_frame_unref(video_frame_flt);
 
@@ -1556,6 +1637,8 @@ mb_player_stream_decode(void *arg)
 	inst->video_packet_read_index = 0;
 	inst->video_packet_write_index = 0;
 	inst->video_packets = 0;
+	inst->video_skipframes = 0;
+	inst->video_decoder_pts = 0;
 
 	/* initialize all packet states */
 	for (i = 0; i < MB_VIDEO_BUFFER_PACKETS; i++) {
@@ -1586,7 +1669,7 @@ mb_player_stream_decode(void *arg)
 		inst->audio_stream_index = -1;
 		inst->audio_packet_write_index = 0;
 		inst->audio_packet_read_index = 0;
-		inst->audio_elapsed_before_trigger = 0;
+		inst->audio_clock_offset = 0;
 		inst->have_audio = 1;
 
 		for (i = 0; i < MB_AUDIO_BUFFER_FRAMES; i++) {
@@ -2096,6 +2179,7 @@ mb_player_new(struct mbv_window *window)
 	inst->status_callback = NULL;
 	inst->action = MB_PLAYER_ACTION_NONE;
 	inst->status = MB_PLAYER_STATUS_READY;
+	inst->video_decoder_pts = 0;
 
 	/* initialize pthreads primitives */
 	if (pthread_mutex_init(&inst->resume_lock, NULL) != 0 ||
