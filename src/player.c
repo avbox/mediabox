@@ -193,6 +193,71 @@ mb_player_printstatus(struct mbp *inst, int fps)
 
 
 /**
+ * mb_player_dumpvideo() -- Dump all video frames up to the specified
+ * pts (in usecs)
+ */
+static void
+mb_player_dumpvideo(struct mbp* inst, int64_t pts)
+{
+	int64_t video_time;
+
+	pthread_mutex_lock(&inst->video_output_lock);
+	video_time = av_rescale_q(inst->video_decoder_pts,
+		inst->video_decoder_timebase, AV_TIME_BASE_Q);
+	pthread_mutex_unlock(&inst->video_output_lock);
+
+	if (video_time <= pts) {
+		//usleep(1000);
+
+		/* first drain the decoded frames buffer */
+		pthread_mutex_lock(&inst->video_output_lock);
+		while (inst->frame_state[inst->video_playback_index] == 1) {
+			inst->frame_state[inst->video_playback_index++] = 0;
+			inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
+			/* inst->video_frames--; */
+			__sync_fetch_and_sub(&inst->video_frames, 1);
+		}
+		pthread_cond_broadcast(&inst->video_decoder_signal);
+		pthread_mutex_unlock(&inst->video_output_lock);
+
+		/* now tell the decoder to skip 5 frames */
+		inst->video_skipframes = 10;
+		while (inst->video_skipframes > 0) {
+			usleep(1000);
+		}
+
+		/* now skip all decoded frames until the frame pts is greater than pts */
+		while (1) {
+			if (inst->frame_state[inst->video_playback_index] != 1) {
+				pthread_mutex_lock(&inst->video_output_lock);
+				if (inst->frame_state[inst->video_playback_index] != 1) {
+					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
+					pthread_mutex_unlock(&inst->video_output_lock);
+					continue;
+				}
+			}
+			video_time = av_rescale_q(inst->frame_pts[inst->video_playback_index],
+				inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
+
+			if (video_time > pts) {
+				pthread_mutex_unlock(&inst->video_output_lock);
+				break;
+			}
+
+			inst->frame_state[inst->video_playback_index] = 0;
+			pthread_cond_broadcast(&inst->video_decoder_signal);
+			pthread_mutex_unlock(&inst->video_output_lock);
+			inst->video_playback_index++;
+			inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
+
+			/* inst->video_frames--; */
+			__sync_fetch_and_sub(&inst->video_frames, 1);
+		}
+	}
+}
+
+
+/**
  * mb_player_wait4buffers() -- Waits for the decoded stream buffers
  * to fill up
  */
@@ -201,20 +266,15 @@ mb_player_wait4buffers(struct mbp *inst)
 {
 	fprintf(stderr, "Buffering\n");
 	/* wait for the buffers to fill up */
-	while (inst->video_frames < MB_VIDEO_BUFFER_FRAMES &&
-		inst->audio_frames < MB_VIDEO_BUFFER_FRAMES) {
-
-		/* make sure everything is moving */
-		/* TODO: This is a temporary fix for deadlock issue */
-		pthread_cond_broadcast(&inst->video_decoder_signal);
-		pthread_cond_broadcast(&inst->audio_decoder_signal);
-		pthread_cond_broadcast(&inst->video_output_signal);
-		pthread_cond_broadcast(&inst->audio_signal);
-
-
-		mb_player_printstatus(inst, 0);
+	do {
+		mb_player_dumpvideo(inst, 9);
+		mb_player_printstatus(inst, inst->getmastertime(inst));
 		usleep(5000); /* TODO: make this interruptible */
 	}
+	while (inst->video_frames < MB_VIDEO_BUFFER_FRAMES &&
+		inst->audio_frames < MB_VIDEO_BUFFER_FRAMES);
+
+
 }
 
 
@@ -631,71 +691,6 @@ mb_player_sleep(int64_t usecs)
 	(void) clock_gettime(CLOCK_MONOTONIC, &t2);
 
 	return utimediff(&t1, &t2);
-}
-
-
-/**
- * mb_player_dumpvideo() -- Dump all video frames up to the specified
- * pts (in usecs)
- */
-static void
-mb_player_dumpvideo(struct mbp* inst, int64_t pts)
-{
-	int64_t video_time;
-	
-	pthread_mutex_lock(&inst->video_output_lock);
-	video_time = av_rescale_q(inst->video_decoder_pts,
-		inst->video_decoder_timebase, AV_TIME_BASE_Q);
-	pthread_mutex_unlock(&inst->video_output_lock);
-
-	if (video_time <= pts) {
-		//usleep(1000);
-	
-		/* first drain the decoded frames buffer */
-		pthread_mutex_lock(&inst->video_output_lock);
-		while (inst->frame_state[inst->video_playback_index] == 1) {
-			inst->frame_state[inst->video_playback_index++] = 0;
-			inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
-			/* inst->video_frames--; */
-			__sync_fetch_and_sub(&inst->video_frames, 1);
-		}
-		pthread_cond_broadcast(&inst->video_decoder_signal);
-		pthread_mutex_unlock(&inst->video_output_lock);
-
-		/* now tell the decoder to skip 5 frames */
-		inst->video_skipframes = 10;
-		while (inst->video_skipframes > 0) {
-			usleep(1000);
-		}
-
-		/* now skip all decoded frames until the frame pts is greater than pts */
-		while (1) {
-			if (inst->frame_state[inst->video_playback_index] != 1) {
-				pthread_mutex_lock(&inst->video_output_lock);
-				if (inst->frame_state[inst->video_playback_index] != 1) {
-					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
-					pthread_mutex_unlock(&inst->video_output_lock);
-					continue;
-				}
-			}
-			video_time = av_rescale_q(inst->frame_pts[inst->video_playback_index],
-				inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
-
-			if (video_time > pts) {
-				pthread_mutex_unlock(&inst->video_output_lock);
-				break;
-			}
-
-			inst->frame_state[inst->video_playback_index] = 0;
-			pthread_cond_broadcast(&inst->video_decoder_signal);
-			pthread_mutex_unlock(&inst->video_output_lock);
-			inst->video_playback_index++;
-			inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
-
-			/* inst->video_frames--; */
-			__sync_fetch_and_sub(&inst->video_frames, 1);
-		}
-	}
 }
 
 
