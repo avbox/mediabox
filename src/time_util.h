@@ -4,11 +4,11 @@
 #include <stdint.h>
 
 struct timespec
-timediff(struct timespec *start, struct timespec *end);
+timediff(const struct timespec *start, const struct timespec *end);
 
 
 int64_t
-utimediff(struct timespec *a, struct timespec *b);
+utimediff(const struct timespec *a, const struct timespec *b);
 
 
 void

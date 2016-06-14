@@ -283,7 +283,7 @@ mb_library_showdialog(void)
 
 				mbv_window_hide(window);
 
-				if (mbp_play(player, selected) == 0) {
+				if (mb_player_play(player, selected) == 0) {
 					ret = 0;
 					quit = 1;
 					break;

@@ -135,13 +135,13 @@ mbs_show_dialog(void)
 		{
 			switch (mb_player_getstatus(player)) {
 			case MB_PLAYER_STATUS_READY:
-				mbp_play(player, MEDIA_FILE);
+				mb_player_play(player, MEDIA_FILE);
 				break;
 			case MB_PLAYER_STATUS_PLAYING:
-				mbp_pause(player);
+				mb_player_pause(player);
 				break;
 			case MB_PLAYER_STATUS_PAUSED:
-				mbp_play(player, NULL);
+				mb_player_play(player, NULL);
 				break;
 			}
 			break;
@@ -150,7 +150,7 @@ mbs_show_dialog(void)
 		case MBI_EVENT_STOP:
 		{
 			if (mb_player_getstatus(player) != MB_PLAYER_STATUS_READY) {
-				(void) mbp_stop(player);
+				(void) mb_player_stop(player);
 			}
 			break;
 		}

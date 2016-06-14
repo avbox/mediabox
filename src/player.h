@@ -39,15 +39,15 @@ mb_player_update(struct mbp* inst);
 
 
 int 
-mbp_play(struct mbp* inst, const char * const path);
+mb_player_play(struct mbp* inst, const char * const path);
 
 
 int
-mbp_pause(struct mbp* inst);
+mb_player_pause(struct mbp* inst);
 
 
 int
-mbp_stop(struct mbp* inst);
+mb_player_stop(struct mbp* inst);
 
 
 /**
