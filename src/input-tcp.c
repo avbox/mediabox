@@ -7,6 +7,7 @@
 #include <sys/types.h> 
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <fcntl.h>
 
 
 
@@ -103,6 +104,10 @@ mbi_tcp_server(void *arg)
 
 				FD_ZERO(&fds);
 				FD_SET(newsockfd, &fds);
+
+				if (fcntl(newsockfd, F_GETFD) == -1) {
+					break;
+				}
 
 				tv.tv_sec = 1;
 				tv.tv_usec = 0;
