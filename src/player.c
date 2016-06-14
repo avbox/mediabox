@@ -203,8 +203,17 @@ mb_player_wait4buffers(struct mbp *inst)
 	/* wait for the buffers to fill up */
 	while (inst->video_frames < MB_VIDEO_BUFFER_FRAMES &&
 		inst->audio_frames < MB_VIDEO_BUFFER_FRAMES) {
+
+		/* make sure everything is moving */
+		/* TODO: This is a temporary fix for deadlock issue */
+		pthread_cond_broadcast(&inst->video_decoder_signal);
+		pthread_cond_broadcast(&inst->audio_decoder_signal);
+		pthread_cond_broadcast(&inst->video_output_signal);
+		pthread_cond_broadcast(&inst->audio_signal);
+
+
 		mb_player_printstatus(inst, 0);
-		usleep(5000);
+		usleep(5000); /* TODO: make this interruptible */
 	}
 }
 
