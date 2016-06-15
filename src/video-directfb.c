@@ -7,6 +7,8 @@
 #include <directfb.h>
 #include <directfb_windows.h>
 
+#include "debug.h"
+
 /* #define DEBUG_MEMORY */
 #define DEFAULT_FONT        ("/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf")
 #define DEFAULT_FONT_HEIGHT (default_font_height)
@@ -258,6 +260,8 @@ mbv_dfb_window_blit_buffer(
 static void *
 mbv_dfb_autofliproot(void *arg)
 {
+	MB_DEBUG_SET_THREAD_NAME("autoflip_root");
+
 	(void) arg;
 
 	while (!root_window_flipper_exit) {
