@@ -287,7 +287,7 @@ mb_player_wait4buffers(struct mbp *inst, int *quit)
 static int64_t
 mb_player_getaudiotime(struct mbp* inst)
 {
-	int err;
+	int err = 0;
 	uint64_t time;
 	snd_pcm_status_t *status;
 	snd_htimestamp_t audio_timestamp, audio_trigger_timestamp;
@@ -298,7 +298,7 @@ mb_player_getaudiotime(struct mbp* inst)
 
 	snd_pcm_status_alloca(&status);
 
-	if ((err = snd_pcm_status(inst->audio_pcm_handle, status)) < 0) {
+	if (inst->audio_pcm_handle == NULL || (err = snd_pcm_status(inst->audio_pcm_handle, status)) < 0) {
 		printf("Stream status error: %s\n", snd_strerror(err));
 		return 0;
 	}
@@ -735,21 +735,24 @@ mb_player_sleep(int64_t usecs)
  * mb_player_wait4audio() -- Waits for the audio stream to start playing
  */
 static void
-mb_player_wait4audio(struct mbp* inst)
+mb_player_wait4audio(struct mbp* inst, int *quit)
 {
 	int ret;
 	snd_pcm_status_t *status;
+	snd_pcm_state_t state;
 	snd_pcm_status_alloca(&status);
-	while (inst->audio_pcm_handle == NULL) {
+	while (*quit == 0 && inst->audio_pcm_handle == NULL) {
 		usleep(5000);
 	}
 	do {
 		if ((ret = snd_pcm_status(inst->audio_pcm_handle, status)) < 0) {
 			fprintf(stderr, "player: Could not get ALSA status\n");
+			break;
 		}
 		usleep(1); /* do not raise this value */
+		state = snd_pcm_status_get_state(status);
 	}
-	while (snd_pcm_status_get_state(status) != SND_PCM_STATE_RUNNING);
+	while (*quit == 0 && state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_SETUP);
 }
 
 
@@ -825,7 +828,7 @@ mb_player_video(void *arg)
 
 	if (inst->have_audio) {
 		/* wait for the audio to start playing */
-		mb_player_wait4audio(inst);
+		mb_player_wait4audio(inst, &inst->video_quit);
 	} else {
 		/* save the reference timestamp */
 		mb_player_wait4buffers(inst, &inst->video_quit);
