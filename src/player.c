@@ -361,6 +361,10 @@ mb_player_pauseaudio(struct mbp *inst)
 	time -= ((audio_trigger_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_trigger_timestamp.tv_nsec) / 1000;
 	time += inst->audio_clock_offset;
 
+	/* fprintf(stderr, "time=%lu offset=%li\n", time, inst->audio_clock_offset); */
+	assert(time > 0);
+	assert(time < INT64_MAX);
+
 	/* set the clock to the current audio time */
 	inst->audio_clock_offset = time;
 	inst->audio_paused = 1;
@@ -371,6 +375,8 @@ mb_player_pauseaudio(struct mbp *inst)
 	inst->audio_clock_offset += ((1000 * 1000) / inst->audio_framerate) * (inst->audio_buffer_size - avail);
 	snd_pcm_drain(inst->audio_pcm_handle);
 
+	assert(inst->audio_clock_offset > 0);
+
 	return 0;
 }
 
@@ -378,19 +384,41 @@ mb_player_pauseaudio(struct mbp *inst)
 /**
  * mb_player_resumeaudio() -- Resume audio playback
  */
-static int
+static void
 mb_player_resumeaudio(struct mbp *inst)
 {
+	/* if there's no frame ready we must wait for one before resuming */
+	while (!inst->audio_quit && inst->audio_frame_state[inst->audio_playback_index] != 1) {
+		pthread_mutex_lock(&inst->audio_lock);
+		if (!inst->audio_quit && inst->audio_frame_state[inst->audio_playback_index] != 1) {
+			pthread_cond_wait(&inst->audio_signal, &inst->audio_lock);
+		}
+		pthread_mutex_unlock(&inst->audio_lock);
+	}
+
+	if (inst->audio_quit) {
+		return;
+	}
+
 	/* correct the audio clock to that of the next frame in the queue. */
 	inst->audio_clock_offset = av_rescale_q(inst->audio_frame[inst->audio_playback_index]->pts,
 		inst->audio_frame_timebase[inst->audio_playback_index], AV_TIME_BASE_Q);
 	inst->audio_paused = 0;
 
+	/* fprintf(stderr, "index=%i, state=%i, pts=%li, timebase=%i/%i\n",
+		inst->audio_playback_index,
+		inst->audio_frame_state[inst->audio_playback_index],
+		inst->audio_frame[inst->audio_playback_index]->pts,
+		inst->audio_frame_timebase[inst->audio_playback_index].num,
+		inst->audio_frame_timebase[inst->audio_playback_index].den); */
+
+	assert(inst->audio_clock_offset > 0);
+
 	/* reset ALSA. The clock will start running again when the
 	 * audio starts playing */
 	snd_pcm_reset(inst->audio_pcm_handle);
 	snd_pcm_prepare(inst->audio_pcm_handle);
-	return 0;
+	return;
 }
 
 
