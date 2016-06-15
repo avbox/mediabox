@@ -1795,23 +1795,20 @@ mb_player_stream_decode(void *arg)
 decoder_exit:
 	fprintf(stderr, "player: Stream decoder exiting\n");
 
-	/* signal the renderer thread to exit and join it */
-	pthread_mutex_lock(&inst->video_output_lock);
+	/* signal the video thread to exit and join it */
 	inst->video_quit = 1;
 	pthread_cond_signal(&inst->video_output_signal);
-	pthread_mutex_unlock(&inst->video_output_lock);
+	pthread_cond_signal(&inst->video_output_signal);
 	pthread_join(inst->video_output_thread, NULL);
 	fprintf(stderr, "player: Video renderer exited\n");
 
 	/* signal the video decoder thread to exit and join it */
 	/* NOTE: Since this thread it's a midleman it waits on both locks */
-	pthread_mutex_lock(&inst->video_decoder_lock);
 	inst->video_decoder_quit = 1;
 	pthread_cond_broadcast(&inst->video_decoder_signal);
-	pthread_mutex_unlock(&inst->video_decoder_lock);
-	pthread_mutex_lock(&inst->video_output_lock);
+	pthread_cond_broadcast(&inst->video_decoder_signal);
 	pthread_cond_broadcast(&inst->video_output_signal);
-	pthread_mutex_unlock(&inst->video_output_lock);
+	pthread_cond_broadcast(&inst->video_output_signal);
 
 	pthread_join(inst->video_decoder_thread, NULL);
 	fprintf(stderr, "player: Video decoder exited\n");
@@ -1820,22 +1817,16 @@ decoder_exit:
 	if (inst->have_audio) {
 
 		/* signal and wait for the audio thread to exit */
-		pthread_mutex_lock(&inst->audio_lock);
 		inst->audio_quit = 1;
+		pthread_cond_signal(&inst->resume_signal);
 		pthread_cond_signal(&inst->audio_signal);
-		pthread_mutex_unlock(&inst->audio_lock);
 		pthread_join(inst->audio_thread, NULL);
 		fprintf(stderr, "player: Audio player exited\n");
 
 		/* signal the audio decoder thread to exit and join it */
-		/* NOTE: Since this thread it's a midleman it waits on both locks */
-		pthread_mutex_lock(&inst->audio_decoder_lock);
 		inst->audio_decoder_quit = 1;
 		pthread_cond_broadcast(&inst->audio_decoder_signal);
-		pthread_mutex_unlock(&inst->audio_decoder_lock);
-		pthread_mutex_lock(&inst->audio_lock);
 		pthread_cond_broadcast(&inst->audio_signal);
-		pthread_mutex_unlock(&inst->audio_lock);
 		pthread_join(inst->audio_decoder_thread, NULL);
 		fprintf(stderr, "player: Audio decoder exited\n");
 
