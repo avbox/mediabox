@@ -1663,11 +1663,11 @@ mb_player_stream_decode(void *arg)
 	assert(inst->window != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_PLAYING);
 	assert(inst->fmt_ctx == NULL);
-	assert(inst->audio_paused == 0);
-	assert(inst->video_paused == 0);
 
 	inst->have_audio = 0;
 	inst->have_video = 0;
+	inst->audio_paused = 0;
+	inst->video_paused = 0;
 	inst->audio_stream_index = -1;
 	inst->video_stream_index = -1;
 	inst->audio_packets = 0;
