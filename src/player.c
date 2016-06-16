@@ -350,6 +350,7 @@ mb_player_pauseaudio(struct mbp *inst)
 	int err;
 	uint64_t time;
 	snd_pcm_status_t *status;
+	snd_pcm_state_t state;
 	snd_htimestamp_t audio_timestamp, audio_trigger_timestamp;
 	snd_pcm_uframes_t avail;
 
@@ -360,12 +361,17 @@ mb_player_pauseaudio(struct mbp *inst)
 		return -1;
 	}
 
+	state = snd_pcm_status_get_state(status);
 	snd_pcm_status_get_trigger_htstamp(status, &audio_trigger_timestamp);
 	snd_pcm_status_get_htstamp(status, &audio_timestamp);
 
-	time  = ((audio_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_timestamp.tv_nsec) / 1000;
-	time -= ((audio_trigger_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_trigger_timestamp.tv_nsec) / 1000;
-	time += inst->audio_clock_offset;
+	if (state == SND_PCM_STATE_RUNNING) {
+		time  = ((audio_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_timestamp.tv_nsec) / 1000;
+		time -= ((audio_trigger_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_trigger_timestamp.tv_nsec) / 1000;
+		time += inst->audio_clock_offset;
+	} else {
+		time = inst->lasttime;
+	}
 
 	/* fprintf(stderr, "time=%lu offset=%li\n", time, inst->audio_clock_offset); */
 	assert(time > 0);
