@@ -75,7 +75,7 @@ mb_about_showdialog(void)
 	mbv_window_drawstring(window, "All rights reserved", window_width / 2, 80);
 
 	mbv_window_drawstring(window, "This software uses code of FFmpeg licensed", window_width / 2, 120);
-	mbv_window_drawstring(window, "under the GPLv2.1", window_width / 2, 140);
+	mbv_window_drawstring(window, "under the LGPLv2.1", window_width / 2, 140);
 
 	/* show the menu window */
         mbv_window_show(window);
@@ -100,7 +100,7 @@ mb_about_showdialog(void)
 void
 mb_about_destroy(void)
 {
-	fprintf(stderr, "about: Destroying instance\n");
+	/* fprintf(stderr, "about: Destroying instance\n"); */
 
 	mbv_window_destroy(window);
 }

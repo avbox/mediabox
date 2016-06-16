@@ -209,15 +209,15 @@ mb_mediasearch_resultsupdater(void *arg)
 
 		pthread_mutex_lock(&updater_lock);
 		if (last_terms != NULL && !strcmp(last_terms, terms)) {
-			fprintf(stderr, "mediasearch: Waiting\n");
+			/* fprintf(stderr, "mediasearch: Waiting\n"); */
 			pthread_cond_wait(&updater_signal, &updater_lock);
 			if (updater_quit) {
 				pthread_mutex_unlock(&updater_lock);
 				continue;
 			}
 		} else {
-			fprintf(stderr, "mediasearch: last_terms='%s' terms='%s'\n",
-				last_terms, terms);
+			/* fprintf(stderr, "mediasearch: last_terms='%s' terms='%s'\n",
+				last_terms, terms); */
 		}
 		pthread_mutex_unlock(&updater_lock);
 
@@ -251,7 +251,7 @@ mb_mediasearch_resultsupdater(void *arg)
 			fprintf(stderr, "mediasearch: strdup() failed 2\n");
 		}
 	}
-	fprintf(stderr, "updater exiting\n");
+	/* fprintf(stderr, "updater exiting\n"); */
 	return NULL;
 }
 
@@ -510,7 +510,7 @@ mb_mediasearch_showdialog(void)
 void
 mb_mediasearch_destroy(void)
 {
-	fprintf(stderr, "mediasearch: Destroying instance\n");
+	/* fprintf(stderr, "mediasearch: Destroying instance\n"); */
 	mb_ui_menu_enumitems(menu, mb_mediasearch_freeitems, NULL);
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);

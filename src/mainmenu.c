@@ -56,14 +56,14 @@ mb_mainmenu_init(void)
 		(yres / 2) - (window_height / 2),
 		window_width, window_height);
 	if (window == NULL) {
-		fprintf(stderr, "mb_mainmenu: Could not create new window!\n");
+		fprintf(stderr, "mainmenu: Could not create new window!\n");
 		return -1;
 	}
 
 	/* create a new menu widget inside main window */
 	menu = mb_ui_menu_new(window);
 	if (menu == NULL) {
-		fprintf(stderr, "mb_mainmenu: Could not create menu\n");
+		fprintf(stderr, "mainmenu: Could not create menu\n");
 		return -1;
 	}
 
@@ -132,7 +132,7 @@ mb_mainmenu_showdialog(void)
 				mb_mediasearch_destroy();
 
 			} else {
-				fprintf(stderr, "mb_mainmenu: Selected %s\n",
+				fprintf(stderr, "mainmenu: Selected %s\n",
 					selected);
 			}
 		} else {
@@ -151,7 +151,7 @@ mb_mainmenu_showdialog(void)
 void
 mb_mainmenu_destroy(void)
 {
-	fprintf(stderr, "mb_mainmenu: Destroying instance\n");
+	/* fprintf(stderr, "mainmenu: Destroying instance\n"); */
 
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);

@@ -316,7 +316,7 @@ mb_library_showdialog(void)
 void
 mb_library_destroy(void)
 {
-	fprintf(stderr, "mb_library: Destroying instance\n");
+	/* fprintf(stderr, "library: Destroying instance\n"); */
 	if (dotdot != NULL) {
 		free(dotdot);
 		dotdot = NULL;
