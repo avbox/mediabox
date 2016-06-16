@@ -87,7 +87,7 @@ struct mbp
 	uint8_t *render_mask;
 	int use_fbdev;
 	struct timespec systemreftime;
-	int64_t lastsystemtime;
+	int64_t lasttime;
 	int64_t systemtimeoffset;
 	int64_t (*getmastertime)(struct mbp *inst);
 	mb_player_status_callback status_callback;
@@ -290,6 +290,7 @@ mb_player_getaudiotime(struct mbp* inst)
 	int err = 0;
 	uint64_t time;
 	snd_pcm_status_t *status;
+	snd_pcm_state_t state;
 	snd_htimestamp_t audio_timestamp, audio_trigger_timestamp;
 
 	if (inst->audio_paused) {
@@ -303,14 +304,19 @@ mb_player_getaudiotime(struct mbp* inst)
 		return 0;
 	}
 
+	state = snd_pcm_status_get_state(status);
 	snd_pcm_status_get_trigger_htstamp(status, &audio_trigger_timestamp);
 	snd_pcm_status_get_htstamp(status, &audio_timestamp);
+
+	if (state != SND_PCM_STATE_RUNNING) {
+		return inst->lasttime;
+	}
 
 	time  = ((audio_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_timestamp.tv_nsec) / 1000;
 	time -= ((audio_trigger_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_trigger_timestamp.tv_nsec) / 1000;
 	time += inst->audio_clock_offset;
 
-	return (int64_t) time;
+	return inst->lasttime = (int64_t) time;
 }
 
 
@@ -327,10 +333,10 @@ mb_player_getsystemtime(struct mbp *inst)
 {
 	struct timespec tv;
 	if (UNLIKELY(inst->video_paused)) {
-		return inst->lastsystemtime;
+		return inst->lasttime;
 	}
 	(void) clock_gettime(CLOCK_MONOTONIC, &tv);
-	return (inst->lastsystemtime = (utimediff(&tv, &inst->systemreftime) + inst->systemtimeoffset));
+	return (inst->lasttime = (utimediff(&tv, &inst->systemreftime) + inst->systemtimeoffset));
 }
 
 
@@ -596,14 +602,16 @@ mb_player_audio(void *arg)
 		frames = snd_pcm_writei(inst->audio_pcm_handle, inst->audio_frame[inst->audio_playback_index]->data[0],
 			inst->audio_frame[inst->audio_playback_index]->nb_samples);
 		if (UNLIKELY(frames < 0)) {
-			frames = snd_pcm_recover(inst->audio_pcm_handle, frames, 0);
+			fprintf(stderr, "player: underrun\n");
 
-			/* so no matter how hard we tried underrun still happened
-			 * so we need to re-sync. Easiest way is to just pause and
-			 * resume. It doesn't make a difference since the audio is
-			 * already breaking up */
-			mb_player_pauseaudio(inst);
+			/* frames = snd_pcm_recover(inst->audio_pcm_handle, frames, 0); */
+
+			/* once underrun occurs getaudiotime() will continue to return
+			 * the last time before underrun so we just call resumeaudio() to
+			 * adjust the audio clock to that of the next frame and continue
+			 * to write the next frame again */
 			mb_player_resumeaudio(inst);
+			continue;
 		}
 		if (UNLIKELY(frames < 0)) {
 			fprintf(stderr, "player: snd_pcm_writei() failed: %s\n",
@@ -611,6 +619,7 @@ mb_player_audio(void *arg)
 			av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
 			goto audio_exit;
 		}
+
 
 		/* free frame */
 		av_frame_unref(inst->audio_frame[inst->audio_playback_index]);
@@ -1665,7 +1674,7 @@ mb_player_stream_decode(void *arg)
 	inst->audio_frames = 0;
 	inst->video_frames = 0;
 	inst->video_packets = 0;
-	inst->lastsystemtime = 0;
+	inst->lasttime = 0;
 
 	/* get the size of the window */
 	if (mbv_window_getsize(inst->window, &inst->width, &inst->height) == -1) {
