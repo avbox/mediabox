@@ -213,29 +213,33 @@ mb_player_dumpvideo(struct mbp* inst, int64_t pts)
 		inst->video_codec_ctx->skip_frame = AVDISCARD_NONREF;
 
 		/* first drain the decoded frames buffer */
-		pthread_mutex_lock(&inst->video_output_lock);
-		while (!inst->video_quit && (inst->frame_state[inst->video_playback_index] == 1)) {
-			video_time = av_rescale_q(inst->frame_pts[inst->video_playback_index],
-				inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
-			if (pts != -1 && video_time >= (pts - 10000)) {
-				pthread_mutex_unlock(&inst->video_output_lock);
-				goto end;
+		if (!inst->video_quit && (inst->frame_state[inst->video_playback_index] != 1)) {
+			pthread_mutex_lock(&inst->video_output_lock);
+			if (!inst->video_quit && (inst->frame_state[inst->video_playback_index] != 1)) {
+				pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
 			}
-
-			inst->frame_state[inst->video_playback_index++] = 0;
-			inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
-
-			/* inst->video_frames--; */
-			__sync_fetch_and_sub(&inst->video_frames, 1);
-			ret = 1;
+			pthread_mutex_unlock(&inst->video_output_lock);
+			continue;
 		}
 
-		pthread_mutex_lock(&inst->video_decoder_lock);
-		pthread_cond_broadcast(&inst->video_decoder_signal);
-		pthread_mutex_unlock(&inst->video_decoder_lock);
+		video_time = av_rescale_q(inst->frame_pts[inst->video_playback_index],
+			inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
+		if (pts != -1 && video_time >= (pts - 10000)) {
+			pthread_mutex_unlock(&inst->video_output_lock);
+			goto end;
+		}
+
+		pthread_mutex_lock(&inst->video_output_lock);
+		inst->frame_state[inst->video_playback_index] = 0;
 		pthread_cond_signal(&inst->video_output_signal);
-		pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
 		pthread_mutex_unlock(&inst->video_output_lock);
+		inst->video_playback_index++;
+		inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
+
+		/* inst->video_frames--; */
+		__sync_fetch_and_sub(&inst->video_frames, 1);
+		ret = 1;
+
 		if (pts == -1) {
 			break;
 		}
