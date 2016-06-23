@@ -17,6 +17,11 @@
 #include "debug.h"
 
 
+#define MB_MEDIASEARCH_STATE_NONE       (0)
+#define MB_MEDIASEARCH_STATE_CATEGORIES (1)
+#define MB_MEDIASEARCH_STATE_ITEMS      (2)
+
+
 LISTABLE_TYPE(mb_searchresult,
 	char *name;
 	char *url;
@@ -25,10 +30,12 @@ LISTABLE_TYPE(mb_searchresult,
 
 static struct mbv_window *window = NULL;
 static struct mb_ui_menu *menu = NULL;
+static int state = MB_MEDIASEARCH_STATE_NONE;
 static int items_count = 0;
 static int input_quit = 0;
 static int updater_quit = 0;
 static char *terms = NULL;
+static char *cat = NULL;
 static size_t terms_sz = 0;
 static pthread_mutex_t menu_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -66,11 +73,11 @@ mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
 		page++;
 
 		if (terms != NULL && strcmp(terms, "")) {
-			snprintf(url, 255-1, "https://kat.cr/usearch/%s category:movies/%i/",
-				terms, page);
+			snprintf(url, 255-1, "https://kat.cr/usearch/%s category:%s/%i/",
+				terms, cat, page);
 
 		} else {
-			snprintf(url, 255-1, "https://kat.cr/movies/%i/", page);
+			snprintf(url, 255-1, "https://kat.cr/%s/%i/", cat, page);
 		}
 
 		fprintf(stderr, "mediasearch: Fetching page %s...\n", url);
@@ -192,8 +199,6 @@ mb_mediasearch_freeitems(void *item, void *data)
 	free(item);
 	return 0;
 }
-
-
 
 
 static void *
@@ -380,16 +385,18 @@ mb_mediasearch_inputthread(void *arg)
 int
 mb_mediasearch_endoflist(struct mb_ui_menu *inst)
 {
-	(void) inst;
-	pthread_mutex_lock(&menu_lock);
-	if (mb_mediasearch_search(terms, items_count, 25) == 0) {
-		mbv_window_update(window);
+	if (state == MB_MEDIASEARCH_STATE_ITEMS) {
+		(void) inst;
+		pthread_mutex_lock(&menu_lock);
+		if (mb_mediasearch_search(terms, items_count, 25) == 0) {
+			mbv_window_update(window);
+			pthread_mutex_unlock(&menu_lock);
+			return 0;
+		} else {
+			fprintf(stderr, "mediasearch: search() failed\n");
+		}
 		pthread_mutex_unlock(&menu_lock);
-		return 0;
-	} else {
-		fprintf(stderr, "mediasearch: search() failed\n");
 	}
-	pthread_mutex_unlock(&menu_lock);
 	return -1;
 }
 
@@ -410,6 +417,7 @@ mb_mediasearch_init(void)
 		return -1;
 	}
 
+	state = MB_MEDIASEARCH_STATE_NONE;
 	terms_sz = 1;
 	strcpy(terms, "");
 
@@ -455,53 +463,78 @@ int
 mb_mediasearch_showdialog(void)
 {
 	pthread_t input_thread;
+	char *selected;
+	int quit = 0;
 
 	/* show the menu window */
         mbv_window_show(window);
 
-#if 0
-	if (pthread_cond_init(&updater_signal, NULL) != 0) {
-		fprintf(stderr, "mediasearch: Condition init failed\n");
-		return -1;
-	}
-#endif
+	mb_ui_menu_additem(menu, "Movies", "MOV");
+	mb_ui_menu_additem(menu, "TV Shows", "TV");
+	state = MB_MEDIASEARCH_STATE_CATEGORIES;
+	mbv_window_update(window);
 
-	input_quit = 0;
-	if (pthread_create(&input_thread, NULL, mb_mediasearch_inputthread, NULL) != 0) {
-		fprintf(stderr, "mediasearch: Could not start input thread;\n");
-		return -1;
-	}
+	while (!quit && mb_ui_menu_showdialog(menu) == 0) {
 
-	updater_quit = 0;
-	if (pthread_create(&updater, NULL, mb_mediasearch_resultsupdater, NULL) != 0) {
-		fprintf(stderr, "mediasearch: Could not start updater thread\n");
-		pthread_mutex_unlock(&updater_lock);
+		selected = mb_ui_menu_getselected(menu);
+
+		if (!strcmp(selected, "MOV")) {
+			cat = "movies";
+		} else if (!strcmp(selected, "TV")) {
+			cat = "tv";
+		} else {
+			abort();
+		}
+
+		mb_ui_menu_clearitems(menu);
+		state = MB_MEDIASEARCH_STATE_ITEMS;
+		mbv_window_update(window);
+
+		input_quit = 0;
+		if (pthread_create(&input_thread, NULL, mb_mediasearch_inputthread, NULL) != 0) {
+			fprintf(stderr, "mediasearch: Could not start input thread;\n");
+			return -1;
+		}
+
+		updater_quit = 0;
+		if (pthread_create(&updater, NULL, mb_mediasearch_resultsupdater, NULL) != 0) {
+			fprintf(stderr, "mediasearch: Could not start updater thread\n");
+			pthread_mutex_unlock(&updater_lock);
+			input_quit = 1;
+			mbi_dispatchevent(MBI_EVENT_NONE);
+			pthread_join(input_thread, NULL);
+			return -1;
+		}
+
+		/* show the menu widget and run it's input loop */
+		if (mb_ui_menu_showdialog(menu) == 0) {
+			selected = mb_ui_menu_getselected(menu);
+
+			assert(selected != NULL);
+
+			if (mb_downloadmanager_addurl(selected) == -1) {
+				fprintf(stderr, "mediasearch: deluge_add() failed\n");
+			}
+
+			fprintf(stderr, "mediasearch: Selected %s\n",
+				selected);
+			quit = 1;
+		}
+
 		input_quit = 1;
 		mbi_dispatchevent(MBI_EVENT_NONE);
 		pthread_join(input_thread, NULL);
-		return -1;
+		updater_quit = 1;
+		pthread_cond_signal(&updater_signal);
+		pthread_join(updater, NULL);
+
+		mb_ui_menu_enumitems(menu, mb_mediasearch_freeitems, NULL);
+		mb_ui_menu_clearitems(menu);
+		mb_ui_menu_additem(menu, "Movies", "MOV");
+		mb_ui_menu_additem(menu, "TV Shows", "TV");
+		state = MB_MEDIASEARCH_STATE_CATEGORIES;
+		mbv_window_update(window);
 	}
-
-	/* show the menu widget and run it's input loop */
-	if (mb_ui_menu_showdialog(menu) == 0) {
-		char *selected = mb_ui_menu_getselected(menu);
-
-		assert(selected != NULL);
-
-		if (mb_downloadmanager_addurl(selected) == -1) {
-			fprintf(stderr, "mediasearch: deluge_add() failed\n");
-		}
-
-		fprintf(stderr, "mediasearch: Selected %s\n",
-			selected);
-	}
-
-	input_quit = 1;
-	mbi_dispatchevent(MBI_EVENT_NONE);
-	pthread_join(input_thread, NULL);
-	updater_quit = 1;
-	pthread_cond_signal(&updater_signal);
-	pthread_join(updater, NULL);
 
 	return 0;
 }
@@ -511,7 +544,9 @@ void
 mb_mediasearch_destroy(void)
 {
 	/* fprintf(stderr, "mediasearch: Destroying instance\n"); */
-	mb_ui_menu_enumitems(menu, mb_mediasearch_freeitems, NULL);
+	if (state == MB_MEDIASEARCH_STATE_ITEMS) {
+		mb_ui_menu_enumitems(menu, mb_mediasearch_freeitems, NULL);
+	}
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);
 	if (terms != NULL) {
