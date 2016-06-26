@@ -105,6 +105,7 @@ struct mbp
 	int audio_pause_requested;
 	int audio_quit;
 	int audio_paused;
+	int audio_playback_running;
 	int64_t audio_clock_offset;
 	snd_pcm_uframes_t audio_buffer_size; /* ALSA buffer */
 	unsigned int audio_framerate;
@@ -141,6 +142,7 @@ struct mbp
 	int video_packet_read_index;
 	int video_packet_write_index;
 	int video_paused;
+	int video_playback_running;
 	unsigned int video_skipframes;
 	int64_t video_decoder_pts;
 	AVRational video_decoder_timebase;
@@ -458,6 +460,7 @@ mb_player_audio(void *arg)
 	snd_pcm_hw_params_alloca(&params);
 	snd_pcm_sw_params_alloca(&swparams);
 
+	inst->audio_playback_running = 1;
 	inst->audio_framerate = 48000;
 
 	(void) mb_su_gainroot();
@@ -492,13 +495,13 @@ mb_player_audio(void *arg)
 	if ((ret = snd_pcm_hw_params_set_rate_near(inst->audio_pcm_handle, params, &inst->audio_framerate, &dir)) < 0) {
 		fprintf(stderr, "player: 48000Hz not available. %s\n",
 			snd_strerror(ret));
-		return NULL;
+		goto audio_exit;
 	}
 	#if 1
 	if ((ret = snd_pcm_hw_params_set_period_size_near(inst->audio_pcm_handle, params, &period_frames, &dir)) < 0) {
 		fprintf(stderr, "player: Cannot set period. %s\n",
 			snd_strerror(ret));
-		return NULL;
+		goto audio_exit;
 	}
 	#else
 	if ((ret = snd_pcm_hw_params_set_period_time_near(inst->audio_pcm_handle, params, &period_usecs, &dir)) < 0) {
@@ -510,23 +513,23 @@ mb_player_audio(void *arg)
 	if ((ret = snd_pcm_hw_params(inst->audio_pcm_handle, params)) < 0) {
 		fprintf(stderr, "player: Could not set ALSA params: %s\n",
 			snd_strerror(ret));
-		return NULL;
+		goto audio_exit;
 	}
 
 	if ((ret = snd_pcm_sw_params_current(inst->audio_pcm_handle, swparams)) < 0) {
 		fprintf(stderr, "player: Could not determine SW params. %s\n",
 			snd_strerror(ret));
-		return NULL;
+		goto audio_exit;
 	}
 	if ((ret = snd_pcm_sw_params_set_tstamp_type(inst->audio_pcm_handle, swparams, SND_PCM_TSTAMP_TYPE_MONOTONIC)) < 0) {
 		fprintf(stderr, "player: Could not set ALSA clock to CLOCK_MONOTONIC. %s\n",
 			snd_strerror(ret));
-		return NULL;
+		goto audio_exit;
 	}
 	if ((ret = snd_pcm_sw_params(inst->audio_pcm_handle, swparams)) < 0) {
 		fprintf(stderr, "player: Could not set ALSA SW paramms. %s\n",
 			snd_strerror(ret));
-		return NULL;
+		goto audio_exit;
 	}
 
 	if ((ret = snd_pcm_hw_params_get_period_time(params, &period_usecs, &dir)) < 0) {
@@ -660,6 +663,8 @@ audio_exit:
 		inst->audio_pcm_handle = NULL;
 	}
 
+	inst->audio_playback_running = 0;
+
 	return NULL;
 }
 
@@ -747,6 +752,7 @@ mb_player_video(void *arg)
 	assert(inst->video_quit == 0);
 
 	fprintf(stderr, "player: Video renderer started\n");
+	inst->video_playback_running = 1;
 
 	/* initialize framebuffer for direct rendering */
 	if (inst->use_fbdev) {
@@ -947,6 +953,8 @@ video_exit:
 	if (inst->use_fbdev) {
 		close(fd);
 	}
+
+	inst->video_playback_running = 0;
 
 	return NULL;
 	
@@ -1615,8 +1623,9 @@ decoder_exit:
 	return NULL;
 }
 
+
 /**
- * mb_player_vdec_thread() -- This is the main decoding loop
+ * mb_player_stream_decode() -- This is the main decoding loop
  */
 static void*
 mb_player_stream_decode(void *arg)
@@ -1672,30 +1681,36 @@ mb_player_stream_decode(void *arg)
 	/* dump file info */
 	av_dump_format(inst->fmt_ctx, 0, inst->media_file, 0);
 
-	inst->video_quit = 0;
-	inst->video_decoder_quit = 0;
-	inst->video_playback_index = 0;
-	inst->video_decode_index = 0;
-	inst->video_packet_read_index = 0;
-	inst->video_packet_write_index = 0;
-	inst->video_skipframes = 0;
-	inst->video_decoder_pts = 0;
-	inst->getmastertime = mb_player_getsystemtime;
-	inst->have_video = 1;
+	/* if the file contains a video stream fire the video decoder */
+	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0) >= 0) {
 
-	/* initialize all packet states */
-	for (i = 0; i < MB_VIDEO_BUFFER_PACKETS; i++) {
-		inst->video_packet_state[i] = 0;
-	}
-	/* fire the video decoder thread */
-	pthread_mutex_lock(&inst->video_decoder_lock);
-	if (pthread_create(&inst->video_decoder_thread, NULL, mb_player_video_decode, inst) != 0) {
-		abort();
-	}
-	pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
-	pthread_mutex_unlock(&inst->video_decoder_lock);
-	fprintf(stderr, "player: Video stream: %i\n", inst->video_stream_index);
+		inst->video_quit = 0;
+		inst->video_decoder_quit = 0;
+		inst->video_playback_index = 0;
+		inst->video_decode_index = 0;
+		inst->video_packet_read_index = 0;
+		inst->video_packet_write_index = 0;
+		inst->video_skipframes = 0;
+		inst->video_decoder_pts = 0;
+		inst->getmastertime = mb_player_getsystemtime;
+		inst->have_video = 1;
 
+		/* initialize all packet states */
+		for (i = 0; i < MB_VIDEO_BUFFER_PACKETS; i++) {
+			inst->video_packet_state[i] = 0;
+		}
+		/* fire the video decoder thread */
+		pthread_mutex_lock(&inst->video_decoder_lock);
+		if (pthread_create(&inst->video_decoder_thread, NULL, mb_player_video_decode, inst) != 0) {
+			abort();
+		}
+		pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
+		pthread_mutex_unlock(&inst->video_decoder_lock);
+
+		fprintf(stderr, "player: Video stream: %i\n", inst->video_stream_index);
+	}
+
+	/* if there's an audio stream start the audio decoder */
 	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0) >= 0) {
 
 		fprintf(stderr, "player: audio found\n");
@@ -1732,10 +1747,16 @@ mb_player_stream_decode(void *arg)
 		pthread_mutex_unlock(&inst->audio_decoder_lock);
 	}
 
-	fprintf(stderr, "Stream decoder ready\n");
+	fprintf(stderr, "player: Stream decoder ready\n");
 	pthread_mutex_lock(&inst->resume_lock);
 	pthread_cond_signal(&inst->resume_signal);
 	pthread_mutex_unlock(&inst->resume_lock);
+
+	/* if there's no streams to decode then exit */
+	if (!inst->have_audio && !inst->have_video) {
+		fprintf(stderr, "player: No streams to decode!\n");
+		goto decoder_exit;
+	}
 
 	/* start decoding */
 	while (LIKELY(!inst->stream_quit && av_read_frame(inst->fmt_ctx, &packet) >= 0)) {
@@ -1806,33 +1827,39 @@ mb_player_stream_decode(void *arg)
 decoder_exit:
 	fprintf(stderr, "player: Stream decoder exiting\n");
 
-	/* signal the video thread to exit and join it */
-	inst->video_quit = 1;
-	pthread_cond_signal(&inst->video_output_signal);
-	pthread_cond_signal(&inst->video_output_signal);
-	pthread_join(inst->video_output_thread, NULL);
-	fprintf(stderr, "player: Video renderer exited\n");
+	/* clean video stuff */
+	if (inst->have_video) {
+		/* signal the video thread to exit and join it */
+		if (inst->video_playback_running) {
+			inst->video_quit = 1;
+			pthread_cond_signal(&inst->video_output_signal);
+			pthread_cond_signal(&inst->video_output_signal);
+			pthread_join(inst->video_output_thread, NULL);
+			fprintf(stderr, "player: Video playback thread exited\n");
+		}
 
-	/* signal the video decoder thread to exit and join it */
-	/* NOTE: Since this thread it's a midleman it waits on both locks */
-	inst->video_decoder_quit = 1;
-	pthread_cond_broadcast(&inst->video_decoder_signal);
-	pthread_cond_broadcast(&inst->video_decoder_signal);
-	pthread_cond_broadcast(&inst->video_output_signal);
-	pthread_cond_broadcast(&inst->video_output_signal);
+		/* signal the video decoder thread to exit and join it */
+		/* NOTE: Since this thread it's a midleman it waits on both locks */
+		inst->video_decoder_quit = 1;
+		pthread_cond_broadcast(&inst->video_decoder_signal);
+		pthread_cond_broadcast(&inst->video_decoder_signal);
+		pthread_cond_broadcast(&inst->video_output_signal);
+		pthread_cond_broadcast(&inst->video_output_signal);
 
-	pthread_join(inst->video_decoder_thread, NULL);
-	fprintf(stderr, "player: Video decoder exited\n");
+		pthread_join(inst->video_decoder_thread, NULL);
+		fprintf(stderr, "player: Video decoder thread exited\n");
+	}
 
 	/* clean audio stuff */
 	if (inst->have_audio) {
-
-		/* signal and wait for the audio thread to exit */
-		inst->audio_quit = 1;
-		pthread_cond_signal(&inst->resume_signal);
-		pthread_cond_signal(&inst->audio_signal);
-		pthread_join(inst->audio_thread, NULL);
-		fprintf(stderr, "player: Audio player exited\n");
+		if (inst->audio_playback_running) {
+			/* signal and wait for the audio thread to exit */
+			inst->audio_quit = 1;
+			pthread_cond_signal(&inst->resume_signal);
+			pthread_cond_signal(&inst->audio_signal);
+			pthread_join(inst->audio_thread, NULL);
+			fprintf(stderr, "player: Audio player exited\n");
+		}
 
 		/* signal the audio decoder thread to exit and join it */
 		inst->audio_decoder_quit = 1;
@@ -1974,6 +2001,11 @@ mb_player_play(struct mbp *inst, const char * const path)
 	pthread_cond_wait(&inst->resume_signal, &inst->resume_lock);
 	pthread_mutex_unlock(&inst->resume_lock);
 
+	/* if there's no audio or video to decode then return error and exit.
+	 * The decoder thread will shut itself down so no cleanup is necessary */
+	if (!inst->have_audio && !inst->have_video) {
+		return -1;
+	}
 
 	/* wait for the buffers to fill up */
 	while (inst->audio_frames < MB_AUDIO_BUFFER_FRAMES &&
@@ -2222,6 +2254,8 @@ mb_player_new(struct mbv_window *window)
 	inst->video_decoder_pts = 0;
 	inst->video_codec_ctx = NULL;
 	inst->stream_quit = 0;
+	inst->video_playback_running = 0;
+	inst->audio_playback_running = 0;
 
 	/* initialize pthreads primitives */
 	if (pthread_mutex_init(&inst->resume_lock, NULL) != 0 ||
