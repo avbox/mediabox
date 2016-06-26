@@ -714,7 +714,7 @@ mb_player_wait4audio(struct mbp* inst, int *quit)
 		usleep(1); /* do not raise this value */
 		state = snd_pcm_status_get_state(status);
 	}
-	while (*quit == 0 && state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_SETUP);
+	while (*quit == 0 && state != SND_PCM_STATE_RUNNING /* && state != SND_PCM_STATE_SETUP */);
 }
 
 
@@ -1415,6 +1415,15 @@ decoder_exit:
 	if (video_frame_flt != NULL) {
 		av_free(video_frame_flt);
 	}
+	if (video_buffersink_ctx != NULL) {
+		avfilter_free(video_buffersink_ctx);
+	}
+	if (video_buffersrc_ctx != NULL) {
+		avfilter_free(video_buffersrc_ctx);
+	}
+	if (video_filter_graph != NULL) {
+		avfilter_graph_free(&video_filter_graph);
+	}
 	if (inst->video_codec_ctx != NULL) {
 		avcodec_close(inst->video_codec_ctx);
 		inst->video_codec_ctx = NULL;
@@ -1465,7 +1474,7 @@ mb_player_audio_decode(void * arg)
 		goto decoder_exit;
 	}
 
-	/* initialize video filter graph */
+	/* initialize audio filter graph */
 	fprintf(stderr, "player: audio_filters: %s\n",
 		audio_filters);
 	if (mb_player_initaudiofilters(inst->fmt_ctx, audio_codec_ctx,
@@ -1590,10 +1599,18 @@ decoder_exit:
 	if (audio_frame_nat != NULL) {
 		av_free(audio_frame_nat);
 	}
+	if (audio_buffersink_ctx != NULL) {
+		avfilter_free(audio_buffersink_ctx);
+	}
+	if (audio_buffersink_ctx != NULL) {
+		avfilter_free(audio_buffersrc_ctx);
+	}
+	if (audio_filter_graph != NULL) {
+		avfilter_graph_free(&audio_filter_graph);
+	}
 	if (audio_codec_ctx != NULL) {
 		avcodec_close(audio_codec_ctx);
 	}
-
 
 	return NULL;
 }
