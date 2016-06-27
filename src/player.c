@@ -373,7 +373,7 @@ mb_player_pauseaudio(struct mbp *inst)
 	}
 
 	/* fprintf(stderr, "time=%lu offset=%li\n", time, inst->audio_clock_offset); */
-	assert(time > 0);
+	assert(time > 0 || inst->lasttime == 0);
 	assert(time < INT64_MAX);
 
 	/* set the clock to the current audio time */
