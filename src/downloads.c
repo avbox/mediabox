@@ -188,18 +188,24 @@ mb_downloads_populatelist(void)
 								free(name);
 								free(progress);
 								free(progressbar);
+								free(id);
 								name = NULL;
 								progress = NULL;
 								progressbar = NULL;
-								id = NULL; /* freed later */
+								id = NULL;
 							}
 						}
 					}
 					free(str);
+					str = NULL;
 					n = 0;
 				}
 			}
 			fclose(f);
+
+			if (str != NULL) {
+				free(str);
+			}
 
 			mb_download *dl;
 			LIST_FOREACH_SAFE(mb_download*, dl, &downloads, {

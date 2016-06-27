@@ -669,6 +669,10 @@ mbv_dfb_window_destroy(struct mbv_window *window)
 	window->content->Release(window->content);
 	window->surface->Release(window->surface);
 
+	if (window->title != NULL) {
+		free(window->title);
+	}
+
 	/* if this is not a subwindow then destroy the directfb
 	 * window object as well */
 	if (window->parent == NULL) {

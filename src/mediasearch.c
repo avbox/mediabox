@@ -255,6 +255,10 @@ mb_mediasearch_resultsupdater(void *arg)
 		if ((last_terms = strdup(tmp)) == NULL) {
 			fprintf(stderr, "mediasearch: strdup() failed 2\n");
 		}
+		free(tmp);
+	}
+	if (last_terms != NULL) {
+		free(last_terms);
 	}
 	/* fprintf(stderr, "updater exiting\n"); */
 	return NULL;

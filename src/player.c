@@ -1846,6 +1846,12 @@ decoder_exit:
 		pthread_cond_broadcast(&inst->video_output_signal);
 		pthread_cond_broadcast(&inst->video_output_signal);
 
+		for (i = 0; i < MB_VIDEO_BUFFER_PACKETS; i++) {
+			if (inst->video_packet_state[i] == 1) {
+				av_free_packet(&inst->video_packet[i]);
+			}
+		}
+
 		pthread_join(inst->video_decoder_thread, NULL);
 		fprintf(stderr, "player: Video decoder thread exited\n");
 	}
@@ -1868,6 +1874,11 @@ decoder_exit:
 		pthread_join(inst->audio_decoder_thread, NULL);
 		fprintf(stderr, "player: Audio decoder exited\n");
 
+		for (i = 0; i < MB_AUDIO_BUFFER_PACKETS; i++) {
+			if (inst->audio_packet_state[i] == 1) {
+				av_free_packet(&inst->audio_packet[i]);
+			}
+		}
 
 		for (i = 0; i < MB_AUDIO_BUFFER_FRAMES; i++) {
 			av_free(inst->audio_frame[i]);

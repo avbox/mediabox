@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <sys/types.h>
+#include <asoundlib.h>
 
 #include "video.h"
 #include "input.h"
@@ -74,6 +75,8 @@ main (int argc, char **argv)
 	mbs_destroy();
 	mbi_destroy();
 	mbv_destroy();
+
+	snd_config_update_free_global();
 
 	return 0;
 }
