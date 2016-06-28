@@ -82,6 +82,8 @@ struct mbp
 	int have_audio;
 	int have_video;
 	int stream_quit;
+	int64_t seek_to;
+	int seek_result;
 	uint8_t *buf;
 	int bufsz;
 	uint8_t *render_mask;
@@ -1635,7 +1637,7 @@ mb_player_stream_decode(void *arg)
 	AVPacket packet;
 
 
-	MB_DEBUG_SET_THREAD_NAME("stream_decoder");
+	MB_DEBUG_SET_THREAD_NAME("stream_input");
 
 
 	assert(inst != NULL);
@@ -1655,6 +1657,7 @@ mb_player_stream_decode(void *arg)
 	inst->video_frames = 0;
 	inst->video_packets = 0;
 	inst->lasttime = 0;
+	inst->seek_to = -1;
 
 	/* get the size of the window */
 	if (mbv_window_getsize(inst->window, &inst->width, &inst->height) == -1) {
@@ -1788,8 +1791,6 @@ mb_player_stream_decode(void *arg)
 
 			inst->video_packet_write_index++;
 			inst->video_packet_write_index %= MB_VIDEO_BUFFER_PACKETS;
-
-			//inst->video_packets++;
 			__sync_fetch_and_add(&inst->video_packets, 1);
 
 		} else if (packet.stream_index == inst->audio_stream_index) {
@@ -1818,9 +1819,26 @@ mb_player_stream_decode(void *arg)
 
 			inst->audio_packet_write_index++;
 			inst->audio_packet_write_index %= MB_AUDIO_BUFFER_PACKETS;
-
-			//inst->audio_packets++;
 			__sync_fetch_and_add(&inst->audio_packets, 1);
+		}
+
+		/* handle seek request */
+		if (inst->seek_to != -1) {
+
+			fprintf(stderr, "player: Seeking to %li...\n", inst->seek_to);
+
+			if (avformat_seek_file(inst->fmt_ctx, -1, INT64_MIN, inst->seek_to, INT64_MAX, 0) < 0) {
+				fprintf(stderr, "player: Error seeking\n");
+				inst->seek_result = -1;
+			} else {
+				inst->seek_result = 0;
+
+				/* flush buffers */
+			}
+
+			inst->seek_to = -1;
+
+
 		}
 	}
 
@@ -1930,6 +1948,67 @@ mb_player_add_status_callback(struct mbp *inst, mb_player_status_callback callba
 
 	inst->status_callback = callback;
 	return 0;
+}
+
+
+/**
+ * mb_player_seek_chapter() -- Seek to a chapter.
+ */
+int
+mb_player_seek_chapter(struct mbp *inst, int incr)
+{
+	int i;
+	int64_t pos;
+
+	assert(inst != NULL);
+
+	if (inst->status != MB_PLAYER_STATUS_PLAYING &&
+		inst->status != MB_PLAYER_STATUS_PAUSED) {
+		return -1;
+	}
+
+	assert(inst->fmt_ctx != NULL);
+	assert(inst->getmastertime != NULL);
+
+	pos = inst->getmastertime(inst);
+
+	for (i = 0; i < inst->fmt_ctx->nb_chapters; i++) {
+		AVChapter *ch = inst->fmt_ctx->chapters[i];
+		if (av_compare_ts(pos, AV_TIME_BASE_Q, ch->start, ch->time_base) < 0) {
+			i--;
+			break;
+		}
+	}
+
+	i += incr;
+	if (i < 0 || i > inst->fmt_ctx->nb_chapters) {
+		return -1;
+	}
+
+	int64_t seek_to = av_rescale_q(inst->fmt_ctx->chapters[i]->start,
+		inst->fmt_ctx->chapters[i]->time_base, AV_TIME_BASE_Q);
+	int64_t offset = seek_to - pos;
+
+	fprintf(stderr, "player: pos=%li, seekto=%li, offset=%li\n",
+		pos, seek_to, offset);
+
+	inst->audio_clock_offset += (seek_to - pos);
+	inst->systemtimeoffset += (seek_to - pos);
+	inst->seek_to = seek_to;
+
+	pos = inst->getmastertime(inst);
+	fprintf(stderr, "newpos=%li\n", pos);
+
+	if (inst->status == MB_PLAYER_STATUS_PAUSED) {
+		mb_player_play(inst, NULL);
+	}
+
+	/* signal and wait for seek to happen */
+	while (inst->seek_to != -1) {
+		usleep(1000);
+	}
+
+	return inst->seek_result;
 }
 
 

@@ -34,6 +34,13 @@ int
 mb_player_add_status_callback(struct mbp *inst, mb_player_status_callback callback);
 
 
+/**
+ * mb_player_seek_chapter() -- Seek to a chapter.
+ */
+int
+mb_player_seek_chapter(struct mbp *inst, int incr);
+
+
 void
 mb_player_update(struct mbp* inst);
 

@@ -149,6 +149,10 @@ mbi_tcp_server(void *arg)
 					mbi_event_send(MBI_EVENT_STOP);
 				} else if (!memcmp("CLEAR", buffer, 5)) {
 					mbi_event_send(MBI_EVENT_CLEAR);
+				} else if (!memcmp("PREV", buffer, 4)) {
+					mbi_event_send(MBI_EVENT_PREV);
+				} else if (!memcmp("NEXT", buffer, 4)) {
+					mbi_event_send(MBI_EVENT_NEXT);
 				} else if (!memcmp("KEY:", buffer, 4)) {
 #define ELIF_KEY(x) \
 	else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \

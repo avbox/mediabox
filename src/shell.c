@@ -154,6 +154,24 @@ mbs_show_dialog(void)
 			}
 			break;
 		}
+		case MBI_EVENT_PREV:
+		{
+			enum mb_player_status status;
+			status = mb_player_getstatus(player);
+			if (status == MB_PLAYER_STATUS_PLAYING || status == MB_PLAYER_STATUS_PAUSED) {
+				mb_player_seek_chapter(player, -1);
+			}
+			break;
+		}
+		case MBI_EVENT_NEXT:
+		{
+			enum mb_player_status status;
+			status = mb_player_getstatus(player);
+			if (status == MB_PLAYER_STATUS_PLAYING || status == MB_PLAYER_STATUS_PAUSED) {
+				mb_player_seek_chapter(player, 1);
+			}
+			break;
+		}
 		default:
 			fprintf(stderr, "mbs: Received event %i\n", (int) e);
 			break;
