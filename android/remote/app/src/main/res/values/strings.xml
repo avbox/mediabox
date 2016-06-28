@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">MediaBox Remote</string>
+    <string name="next"><![CDATA[>|]]></string>
 </resources>

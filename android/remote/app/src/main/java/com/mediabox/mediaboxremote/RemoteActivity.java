@@ -1,11 +1,14 @@
 package com.mediabox.mediaboxremote;
 
 import android.content.Context;
+import android.graphics.Point;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.view.Display;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.Button;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -95,6 +98,19 @@ public class RemoteActivity extends AppCompatActivity
     {
         super.onStart();
         this.openSocket();
+        Display display = getWindowManager().getDefaultDisplay();
+        Point size = new Point();
+        display.getSize(size);
+        int width = (size.x / 4) - 16;
+        ((Button) this.findViewById(R.id.btnPrev)).setMinWidth(width);
+        ((Button) this.findViewById(R.id.btnRew)).setMinWidth(width);
+        ((Button) this.findViewById(R.id.btnFF)).setMinWidth(width);
+        ((Button) this.findViewById(R.id.btnNext)).setMinWidth(width);
+
+        ((Button) this.findViewById(R.id.btnPrev)).setWidth(width);
+        ((Button) this.findViewById(R.id.btnRew)).setWidth(width);
+        ((Button) this.findViewById(R.id.btnFF)).setWidth(width);
+        ((Button) this.findViewById(R.id.btnNext)).setWidth(width);
     }
 
     @Override
@@ -109,11 +125,6 @@ public class RemoteActivity extends AppCompatActivity
     public void onKeyboard(View view) {
         InputMethodManager im = (InputMethodManager) view.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         im.showSoftInput(view, InputMethodManager.SHOW_FORCED);
-    }
-
-    public void onConnect(View view)
-    {
-        this.openSocket();
     }
 
     public void onButtonPressed(View view)
@@ -142,7 +153,7 @@ public class RemoteActivity extends AppCompatActivity
         {
             sendMessage("BACK");
         }
-        else if (view == this.findViewById(R.id.btnNext))
+        else if (view == this.findViewById(R.id.btnEnter))
         {
             sendMessage("ENTER");
         }
@@ -153,6 +164,26 @@ public class RemoteActivity extends AppCompatActivity
         else if (view == this.findViewById(R.id.btnPlay))
         {
             sendMessage("PLAY");
+        }
+        else if (view == this.findViewById(R.id.btnInfo))
+        {
+            sendMessage("INFO");
+        }
+        else if (view == this.findViewById(R.id.btnPrev))
+        {
+            sendMessage("PREV");
+        }
+        else if (view == this.findViewById(R.id.btnNext))
+        {
+            sendMessage("NEXT");
+        }
+        else if (view == this.findViewById(R.id.btnRew))
+        {
+            sendMessage("RW");
+        }
+        else if (view == this.findViewById(R.id.btnFF))
+        {
+            sendMessage("FF");
         }
     }
     class ClientThread implements Runnable {
