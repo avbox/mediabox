@@ -197,10 +197,10 @@ mb_player_printstatus(struct mbp *inst, int fps)
  * video output thread.
  */
 static inline int
-mb_player_dumpvideo(struct mbp* inst, int64_t pts)
+mb_player_dumpvideo(struct mbp* inst, int flush)
 {
 	int ret = 0;
-	int64_t video_time;
+	int64_t video_time, pts;
 
 	fprintf(stderr, "player: Skipping frames\n");
 
@@ -210,14 +210,18 @@ mb_player_dumpvideo(struct mbp* inst, int64_t pts)
 		inst->video_decoder_timebase, AV_TIME_BASE_Q);
 	pthread_mutex_unlock(&inst->video_output_lock);
 	*/
+	pts = inst->getmastertime(inst);
 	video_time = pts - 10000 - 1;
 
-	while (!inst->video_quit && (pts == -1 || video_time < (pts - 10000))) {
+	while (!inst->video_quit && (flush || video_time < (pts - 10000))) {
 		/* tell decoder to skip frames */
 		inst->video_codec_ctx->skip_frame = AVDISCARD_NONREF;
 
 		/* first drain the decoded frames buffer */
 		if (!inst->video_quit && (inst->frame_state[inst->video_playback_index] != 1)) {
+			if (flush) {
+				break;
+			}
 			pthread_mutex_lock(&inst->video_output_lock);
 			if (!inst->video_quit && (inst->frame_state[inst->video_playback_index] != 1)) {
 				pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
@@ -233,6 +237,9 @@ mb_player_dumpvideo(struct mbp* inst, int64_t pts)
 			goto end;
 		}
 
+		fprintf(stderr, "player: video_time=%li, pts=%li\n",
+			video_time, pts);
+
 		pthread_mutex_lock(&inst->video_output_lock);
 		inst->frame_state[inst->video_playback_index] = 0;
 		pthread_cond_signal(&inst->video_output_signal);
@@ -240,19 +247,41 @@ mb_player_dumpvideo(struct mbp* inst, int64_t pts)
 		inst->video_playback_index++;
 		inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
 
+		pts = inst->getmastertime(inst);
+
 		/* inst->video_frames--; */
 		__sync_fetch_and_sub(&inst->video_frames, 1);
 		ret = 1;
-
-		if (pts == -1) {
-			break;
-		}
 	}
 end:
 	inst->video_codec_ctx->skip_frame = AVDISCARD_DEFAULT;
 	return ret;
 }
 
+static void
+mb_player_flushaudio(struct mbp *inst)
+{
+	pthread_mutex_lock(&inst->audio_lock);
+	//pthread_mutex_lock(&inst->audio_decoder_lock);
+	while (!inst->audio_quit) {
+		/* first drain the decoded frames buffer */
+		if (!inst->audio_quit && (inst->audio_frame_state[inst->audio_playback_index] != 1)) {
+			break;
+		}
+
+		inst->audio_frame_state[inst->audio_playback_index] = 0;
+		inst->audio_playback_index++;
+		inst->audio_playback_index %= MB_AUDIO_BUFFER_FRAMES;
+		__sync_fetch_and_sub(&inst->video_frames, 1);
+	}
+	//while (!inst->audio_quit) {
+	//	if (!inst->audio_quit && (inst->audio_packet_state[inst->audio_decode_index]
+	//}
+	pthread_cond_signal(&inst->audio_signal);
+	pthread_mutex_unlock(&inst->audio_lock);
+
+
+}
 
 /**
  * mb_player_wait4buffers() -- Waits for the decoded stream buffers
@@ -862,7 +891,7 @@ recalc:
 
 					/* if the decoder is lagging behind tell it to
 					 * skip a few frames */
-					if (UNLIKELY(mb_player_dumpvideo(inst, elapsed))) {
+					if (UNLIKELY(mb_player_dumpvideo(inst, 0))) {
 						continue;
 					}
 
@@ -887,7 +916,7 @@ recalc:
 					 * is the audio clock behind the last video frame??
 					 */
 					if (inst->audio_paused && inst->audio_packets == 0 && inst->audio_frames == 0) {
-						mb_player_dumpvideo(inst, -1);
+						mb_player_dumpvideo(inst, 1);
 						fprintf(stderr, "Deadlock detected, recovered (I hope)\n");
 					}
 				} else {
@@ -1992,12 +2021,23 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 	fprintf(stderr, "player: pos=%li, seekto=%li, offset=%li\n",
 		pos, seek_to, offset);
 
-	inst->audio_clock_offset += (seek_to - pos);
-	inst->systemtimeoffset += (seek_to - pos);
-	inst->seek_to = seek_to;
+	if (inst->have_audio) {
+		inst->audio_pause_requested = 1;
+		while (!inst->audio_quit && inst->audio_pause_requested == 1) {
+			usleep(1000);
+		}
+		inst->audio_clock_offset = seek_to;
+		inst->seek_to = seek_to;
+		mb_player_dumpvideo(inst, 1);
+		mb_player_flushaudio(inst);
+		pthread_cond_broadcast(&inst->resume_signal);
+
+	} else {
+		inst->systemtimeoffset += (seek_to - pos);
+	}
 
 	pos = inst->getmastertime(inst);
-	fprintf(stderr, "newpos=%li\n", pos);
+	fprintf(stderr, "player: newpos=%li\n", pos);
 
 	if (inst->status == MB_PLAYER_STATUS_PAUSED) {
 		mb_player_play(inst, NULL);
