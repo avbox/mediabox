@@ -1,9 +1,11 @@
 package com.mediabox.mediaboxremote;
 
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Point;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Display;
 import android.view.KeyEvent;
 import android.view.View;
@@ -70,6 +72,8 @@ public class RemoteActivity extends AppCompatActivity
     {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_remote);
+        startService(new Intent(this, UDPListener.class));
+        Log.d("Remote", "UDPListener started.");
 
         this.findViewById(R.id.btnKeyboard).setOnKeyListener(new View.OnKeyListener()
         {
@@ -91,6 +95,14 @@ public class RemoteActivity extends AppCompatActivity
                 return true;
             }
         });
+    }
+
+    @Override
+    protected void onDestroy()
+    {
+        Log.d("Remote", "Destroying");
+        stopService(new Intent(this, UDPListener.class));
+        super.onDestroy();
     }
 
     @Override

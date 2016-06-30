@@ -45,6 +45,7 @@ SOURCES=main.o \
 	url_util.o \
 	time_util.o \
 	about.o \
+	announce.o \
 	library.o
 
 all: mediabox

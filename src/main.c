@@ -16,12 +16,16 @@
 #include "shell.h"
 #include "su.h"
 #include "downloads-backend.h"
+#include "announce.h"
+#include "debug.h"
 
 
 int
 main (int argc, char **argv)
 {
 	int i;
+
+	MB_DEBUG_SET_THREAD_NAME("main");
 
 	/* parse command line */
 	for (i = 1; i < argc; i++) {
@@ -67,10 +71,17 @@ main (int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
+	if (mb_announce_start() == -1) {
+		fprintf(stderr, "Could not start announcer.\n");
+		mb_downloadmanager_destroy();
+		exit(EXIT_FAILURE);
+	}
+
 	/* show the shell */
 	mbs_show_dialog();
 
 	/* cleanup */
+	mb_announce_stop();
 	mb_downloadmanager_destroy();
 	mbs_destroy();
 	mbi_destroy();
