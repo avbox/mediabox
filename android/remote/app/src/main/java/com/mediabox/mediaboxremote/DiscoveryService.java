@@ -9,19 +9,128 @@ import android.util.Log;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
 public class DiscoveryService extends Service
 {
-    private Thread listener_thread = null;
-    private Thread gc_thread = null;
+    private static final int FIELD_INDEX_ID = 1;
+    private static final int FIELD_INDEX_NAME = 2;
+    private static final int FIELD_INDEX_ADDRESS = 3;
+    private static final int FIELD_INDEX_FEATURES = 4;
+    private static final int ANNOUNCEMENTS_PORT = 49550;
+
     private DatagramSocket socket = null;
     private final ServiceBinder binder = new ServiceBinder();
-    private int ANNOUNCEMENTS_PORT = 49550;
     private final Object device_list_lock = new Object();
-    private Map<String, Device> device_list = new HashMap<>();
+    private final Map<String, Device> device_list = new HashMap<>();
+    private final Thread gc_thread = new Thread(new Runnable()
+    {
+        @Override
+        public void run()
+        {
+            while (!Thread.interrupted())
+            {
+                long expired = (System.currentTimeMillis() / 1000L) - 15;
+
+                try
+                {
+                    Thread.sleep(10 * 1000L);
+                }
+                catch (InterruptedException ex)
+                {
+                    break;
+                }
+
+                Log.d("DiscoveryService", "Removing expired entries.");
+
+                synchronized (device_list_lock)
+                {
+                    Iterator<Device> iter = device_list.values().iterator();
+                    while (iter.hasNext())
+                    {
+                        Device dev = iter.next();
+                        if (dev.timestamp < expired)
+                        {
+                            iter.remove();
+                            Log.d("DiscoveryService",
+                                    String.format("Timestamp %d, exp %d. Removing %s",
+                                            dev.timestamp, expired, dev.name));
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    private final Thread listener_thread = new Thread(new Runnable()
+    {
+        @Override
+        public void run()
+        {
+            InetAddress ip = null;
+            while (!Thread.interrupted())
+            {
+                try
+                {
+                    ip = InetAddress.getByName("255.255.255.255");
+                    break;
+                }
+                catch (UnknownHostException e)
+                {
+                    Log.d("DiscoveryService", "Could not resolve 255.255.255.255!!");
+                    try
+                    {
+                        Thread.sleep(10 * 1000L);
+                    }
+                    catch (InterruptedException ex)
+                    {
+                        /* nothing */
+                    }
+                }
+            }
+
+            while (!Thread.interrupted())
+            {
+                try
+                {
+                    byte[] buf = new byte[15000];
+                    if (socket == null || socket.isClosed())
+                    {
+                        socket = new DatagramSocket(ANNOUNCEMENTS_PORT, ip);
+                        socket.setBroadcast(true);
+                    }
+
+                    DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                    socket.receive(packet);
+
+                    processMessage(packet.getAddress().getHostAddress(),
+                            new String(packet.getData()).trim());
+                }
+                catch (Exception ex)
+                {
+                    Log.d("DiscoveryService", ex.toString());
+                    try
+                    {
+                        Thread.sleep(10 * 1000L);
+                    }
+                    catch (InterruptedException e)
+                    {
+                        /* nothing */
+                    }
+                }
+                finally
+                {
+                    if (socket != null && !socket.isClosed())
+                    {
+                        socket.close();
+                    }
+                }
+            }
+        }
+    });
 
     public DiscoveryService()
     {
@@ -36,11 +145,6 @@ public class DiscoveryService extends Service
     private void processMessage(String src, String msg)
     {
         String[] fields;
-        String hostId;
-        String hostName;
-        String hostIp;
-        String features;
-        Device dev;
 
         /* ignore messages that don't start with MediaBox: */
         if (!msg.startsWith("MediaBox:"))
@@ -56,154 +160,62 @@ public class DiscoveryService extends Service
             return;
         }
 
-        hostId = fields[1];
-        hostName = fields[2];
-        hostIp = fields[3];
-        features = fields[4];
-
         /* if the device does not not support the player
            feature then it is not a set-top box and it doesn't
            need a remote. */
-        if (!features.contains("PLAYER")) {
+        if (!fields[FIELD_INDEX_FEATURES].contains("PLAYER")) {
             return;
         }
 
         synchronized (device_list_lock)
         {
-            if (device_list.containsKey(hostId))
+            Device dev;
+
+            if (device_list.containsKey(fields[FIELD_INDEX_ID]))
             {
-                dev = device_list.get(hostId);
+                dev = device_list.get(fields[FIELD_INDEX_ID]);
             }
             else
             {
                 dev = new Device();
-                device_list.put(hostId, dev);
+                device_list.put(fields[FIELD_INDEX_ID], dev);
                 Log.d("DiscoveryService", String.format("Host %s (%s) added.",
-                        hostId, hostIp));
+                        fields[FIELD_INDEX_ID], fields[FIELD_INDEX_ADDRESS]));
             }
 
-            dev.address = hostIp;
-            dev.id = hostId;
-            dev.name = hostName;
+            dev.id = fields[FIELD_INDEX_ID];
+            dev.name = fields[FIELD_INDEX_NAME];
+            dev.address = fields[FIELD_INDEX_ADDRESS];
             dev.timestamp = System.currentTimeMillis() / 1000L;
         }
+
         Log.d("DiscoveryService", String.format("Host %s (%s) updated.",
-                hostId, hostIp));
+                fields[FIELD_INDEX_ID], fields[FIELD_INDEX_ADDRESS]));
     }
 
     @Override
     public void onCreate()
     {
-        assert gc_thread == null;
-        assert listener_thread == null;
-
-        gc_thread = new Thread(new Runnable()
-        {
-            @Override
-            public void run()
-            {
-                while (true)
-                {
-                    long expired = (System.currentTimeMillis() / 1000L) - 15;
-
-                    try
-                    {
-                        Thread.sleep(10 * 1000L);
-                    }
-                    catch (InterruptedException ex)
-                    {
-                        break;
-                    }
-
-                    Log.d("DiscoveryService", "Removing expired entries.");
-
-                    synchronized (device_list_lock)
-                    {
-                        Iterator<Device> iter = device_list.values().iterator();
-                        while (iter.hasNext())
-                        {
-                            Device dev = iter.next();
-                            if (dev.timestamp < expired)
-                            {
-                                iter.remove();
-                                Log.d("DiscoveryService",
-                                        String.format("Timestamp %d, exp %d. Removing %s",
-                                        dev.timestamp, expired, dev.name));
-                            }
-                        }
-                    }
-                }
-                gc_thread = null;
-            }
-        });
-
-        listener_thread = new Thread(new Runnable()
-        {
-            @Override
-            public void run()
-            {
-                try
-                {
-                    InetAddress ip = InetAddress.getByName("255.255.255.255");
-
-                    while (true)
-                    {
-                        byte[] buf = new byte[15000];
-                        if (socket == null || socket.isClosed())
-                        {
-                            socket = new DatagramSocket(ANNOUNCEMENTS_PORT, ip);
-                            socket.setBroadcast(true);
-                        }
-
-                        DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                        socket.receive(packet);
-
-                        processMessage(packet.getAddress().getHostAddress(),
-                                new String(packet.getData()).trim());
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.d("DiscoveryService", ex.toString());
-                }
-                finally
-                {
-                    if (socket != null && !socket.isClosed())
-                    {
-                        socket.close();
-                    }
-                    listener_thread = null;
-                }
-            }
-        });
-
-        listener_thread.start();
-        gc_thread.start();
         super.onCreate();
+        this.listener_thread.start();
+        this.gc_thread.start();
     }
 
     @Override
     public void onDestroy()
     {
+        super.onDestroy();
         try
         {
             listener_thread.interrupt();
-            listener_thread.join();
-        }
-        catch (InterruptedException ex)
-        {
-            /* nothing */
-        }
-        try
-        {
             gc_thread.interrupt();
+            listener_thread.join();
             gc_thread.join();
         }
         catch (InterruptedException ex)
         {
             /* nothing */
         }
-        super.onDestroy();
     }
 
     @Override
