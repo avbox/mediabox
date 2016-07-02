@@ -2,12 +2,17 @@ package com.mediabox.mediaboxremote;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Point;
+import android.preference.PreferenceManager;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
 import android.view.KeyEvent;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -72,8 +77,7 @@ public class RemoteActivity extends AppCompatActivity
     {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_remote);
-        startService(new Intent(this, UDPListener.class));
-        Log.d("Remote", "UDPListener started.");
+        startService(new Intent(this, DiscoveryService.class));
 
         this.findViewById(R.id.btnKeyboard).setOnKeyListener(new View.OnKeyListener()
         {
@@ -97,11 +101,34 @@ public class RemoteActivity extends AppCompatActivity
         });
     }
 
+    public boolean onCreateOptionsMenu(Menu menu)
+    {
+        MenuInflater inflater = getMenuInflater();
+        inflater.inflate(R.menu.main_menu, menu);
+        return true;
+    }
+
+    public boolean onOptionsItemSelected(MenuItem item)
+    {
+        int id = item.getItemId();
+        if (id == R.id.discover)
+        {
+            startActivity(new Intent(this, DeviceListActivity.class));
+            return true;
+        }
+        else if (id == R.id.about)
+        {
+            startActivity(new Intent(this, AboutActivity.class));
+            return true;
+        }
+        return false;
+    }
+
     @Override
     protected void onDestroy()
     {
         Log.d("Remote", "Destroying");
-        stopService(new Intent(this, UDPListener.class));
+        stopService(new Intent(this, DiscoveryService.class));
         super.onDestroy();
     }
 
@@ -202,8 +229,10 @@ public class RemoteActivity extends AppCompatActivity
         @Override
         public void run() {
             try {
-                InetAddress serverAddr = InetAddress.getByName(SERVER_IP);
-                socket = new Socket(serverAddr, SERVER_PORT);
+                SharedPreferences prefs = PreferenceManager.
+                        getDefaultSharedPreferences(RemoteActivity.this);
+                InetAddress deviceAddress = InetAddress.getByName(prefs.getString("device", ""));
+                socket = new Socket(deviceAddress, SERVER_PORT);
             } catch (UnknownHostException e1) {
                 e1.printStackTrace();
             } catch (IOException e1) {

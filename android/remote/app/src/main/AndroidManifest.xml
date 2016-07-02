@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest package="com.mediabox.mediaboxremote"
           xmlns:android="http://schemas.android.com/apk/res/android">
+
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -14,13 +16,21 @@
             android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
+
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
         <service
-            android:name=".UDPListener"
+            android:name=".DiscoveryService"
             android:enabled="true"
             android:exported="false">
         </service>
+
+        <activity android:name=".DeviceListActivity">
+        </activity>
+        <activity android:name=".AboutActivity">
+        </activity>
     </application>
+
 </manifest>
