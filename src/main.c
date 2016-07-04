@@ -19,6 +19,10 @@
 #include "announce.h"
 #include "debug.h"
 
+#ifdef ENABLE_IONICE
+#include "ionice.h"
+#endif
+
 
 int
 main (int argc, char **argv)
@@ -56,6 +60,12 @@ main (int argc, char **argv)
 		fprintf(stderr, "Could not initialize input device(s)\n");
 		exit(EXIT_FAILURE);
 	}
+
+#ifdef ENABLE_IONICE
+	if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 4)) == -1) {
+		fprintf(stderr, "main: WARNING: Could not set IO priority to realtime!!\n");
+	}
+#endif
 
 	/* drop root prividges after initializing framebuffer */
 	mb_su_droproot();

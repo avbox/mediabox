@@ -1,3 +1,6 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
@@ -9,6 +12,11 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/sendfile.h>
+
+#ifdef ENABLE_IONICE
+#include "ionice.h"
+#include "su.h"
+#endif
 
 #define DELUGE_BIN "/usr/bin/deluge-console"
 #define DELUGED_BIN "/usr/bin/deluged"
@@ -25,6 +33,7 @@ cp(const char *src, const char *dst)
 {
 	int fdr, fdw, ret = -1;
 	struct stat st;
+
 
 	if (stat(src, &st) == 0) {
 		if ((fdr = open(src, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) != -1) {
@@ -59,9 +68,16 @@ mb_downloadmanager_deluged(void *data)
 			return NULL;
 		} else if (pid == 0) { /* child */
 			if (nice(5) == -1) {
-				fprintf(stderr, "downloads: I'm trying to be nice but I can't. (errno=%i)\n",
+				fprintf(stderr, "downloads-backend: I'm trying to be nice but I can't. (errno=%i)\n",
 					errno);
 			}
+#ifdef ENABLE_IONICE
+			(void) mb_su_gainroot();
+			if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)) == -1) {
+				fprintf(stderr, "downloads-backend: WARNING: Could not set deluged IO priority to idle!!\n");
+			}
+			(void) mb_su_droproot();
+#endif
 
 			execv(DELUGED_BIN, (char * const[]) {
 				strdup("deluged"),
@@ -100,6 +116,16 @@ mb_downloadmanager_addurl(char *url)
 		return -1;
 
 	} else if (pid == 0) { /* child */
+		if (nice(5) == -1) {
+			fprintf(stderr, "downloads-backend: I'm trying to be nice but I can't. (errno=%i)\n",
+				errno);
+		}
+#ifdef ENABLE_IONICE
+		if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 0)) == -1) {
+			fprintf(stderr, "downloads-backend: WARNING: Could not set deluge-console IO priority to best-effort!!\n");
+		}
+#endif
+
 		execv(DELUGE_BIN, (char * const[]) {
 			strdup("deluge-console"),
 			strdup("connect"),

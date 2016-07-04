@@ -24,6 +24,13 @@ else
 	CFLAGS="-O2 -DNDEBUG -DHAVE_CONFIG_H"
 fi
 
+
+AC_ARG_ENABLE([ionice], [realtime IO priority for main process])
+if test x"$enable_ionice" = xyes; then
+	AC_DEFINE([ENABLE_IONICE], 1, [Define to 1 to enable ionice])
+fi
+
+
 #AC_SUBST(DAEMON_ARGS)
 
 #

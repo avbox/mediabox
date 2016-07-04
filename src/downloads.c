@@ -1,3 +1,6 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
@@ -14,6 +17,10 @@
 #include "ui-menu.h"
 #include "linkedlist.h"
 
+#ifdef ENABLE_IONICE
+#include "ionice.h"
+#include "su.h"
+#endif
 
 #define DELUGE_BIN "/usr/bin/deluge-console"
 
@@ -243,11 +250,20 @@ mb_downloads_populatelist(void)
 				errno);
 		}
 
+#ifdef ENABLE_IONICE
+		(void) mb_su_gainroot();
+		if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 0)) == -1) {
+			fprintf(stderr, "downloads: WARNING: Could not set deluge-console IO priority to best-effort!!\n");
+		}
+		(void) mb_su_droproot();
+#endif
+
 		close(pipefd[0]);
 		if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
 			fprintf(stderr, "downloads[child]: dup2() failed\n");
 			exit(EXIT_FAILURE);
 		}
+
 		//10.10.0.130 fernan test; $@
 		execv(DELUGE_BIN, (char * const[]) {
 			strdup("deluge-console"),
