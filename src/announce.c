@@ -83,7 +83,7 @@ mb_broadcast_address(const char * const iface_name, void *arg)
 		fprintf(stderr, "announce: Could not broadcast announcement. errno=%i\n", errno);
 	}
 
-	fprintf(stderr, "announce: Sent %s\n", ann);
+	/* fprintf(stderr, "announce: Sent %s\n", ann); */
 
 	return -1;
 }
