@@ -13,9 +13,10 @@ struct mbp;
  */
 enum mb_player_status
 {
-        MB_PLAYER_STATUS_READY,
-        MB_PLAYER_STATUS_PLAYING,
-        MB_PLAYER_STATUS_PAUSED
+	MB_PLAYER_STATUS_READY,
+	MB_PLAYER_STATUS_BUFFERING,
+	MB_PLAYER_STATUS_PLAYING,
+	MB_PLAYER_STATUS_PAUSED
 };
 
 
@@ -28,6 +29,13 @@ typedef void (*mb_player_status_callback)(struct mbp *inst, enum mb_player_statu
  */
 enum mb_player_status
 mb_player_getstatus(struct mbp* inst);
+
+
+/**
+ * Get the state of the stream buffer
+ */
+unsigned int
+mb_player_bufferstate(struct mbp *inst);
 
 
 int

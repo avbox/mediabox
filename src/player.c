@@ -158,6 +158,8 @@ struct mbp
 	pthread_cond_t resume_signal;
 	pthread_mutex_t resume_lock;
 	pthread_t thread;
+
+	int stream_percent;
 };
 
 
@@ -1672,7 +1674,7 @@ mb_player_stream_decode(void *arg)
 	assert(inst != NULL);
 	assert(inst->media_file != NULL);
 	assert(inst->window != NULL);
-	assert(inst->status == MB_PLAYER_STATUS_PLAYING);
+	assert(inst->status == MB_PLAYER_STATUS_PLAYING || inst->status == MB_PLAYER_STATUS_BUFFERING);
 	assert(inst->fmt_ctx == NULL);
 
 	inst->have_audio = 0;
@@ -2051,6 +2053,12 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 	return inst->seek_result;
 }
 
+unsigned int
+mb_player_bufferstate(struct mbp *inst)
+{
+	assert(inst != NULL);
+	return inst->stream_percent;
+}
 
 /**
  * mb_player_play() -- If path is not NULL it opens the file
@@ -2061,8 +2069,6 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 int 
 mb_player_play(struct mbp *inst, const char * const path)
 {
-	struct mbv_window *progress;
-
 	assert(inst != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_READY ||
 		inst->status == MB_PLAYER_STATUS_PLAYING ||
@@ -2102,24 +2108,8 @@ mb_player_play(struct mbp *inst, const char * const path)
 	inst->media_file = path;
 
 	/* update status */
-	mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
-
-	/* clear the screen */
-	mbv_window_clear(inst->window, 0x00000000);
-	mbv_window_update(inst->window);
-
-	int sw, sh, pw, ph, px, py;
-	mbv_window_getsize(inst->window, &sw, &sh);
-	pw = (sw * 70) / 100;
-	ph = 30;
-	px = (sw / 2) - (pw / 2);
-	py = (sh / 2) - (ph / 2);
-
-
-	progress = mbv_window_new(NULL, px, py, pw, ph);
-	assert(progress != NULL);
-
-	mbv_window_show(progress);
+	inst->stream_percent = 0;
+	mb_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
 
 	/* start the main decoder thread */
 	pthread_mutex_lock(&inst->resume_lock);
@@ -2144,18 +2134,15 @@ mb_player_play(struct mbp *inst, const char * const path)
 		/* update progressbar */
 		int avail = inst->video_frames + inst->audio_frames;
 		const int wanted = MB_AUDIO_BUFFER_FRAMES + MB_VIDEO_BUFFER_FRAMES;
-		int pcent = (((avail * 100) / wanted) * 100) / 100;
-		int donewidth = (pw * pcent) / 100;
-
-		mbv_window_clear(progress, 0x3349ffFF);
-		mbv_window_fillrectangle(progress, 0, 0, donewidth, ph);
-		mbv_window_update(progress);
+		inst->stream_percent = (((avail * 100) / wanted) * 100) / 100;
+		mb_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
 
 		mb_player_printstatus(inst, 0);
 		usleep(5000);
 	}
 
-	mbv_window_destroy(progress);
+	/* we're done buffering, set state to PLAYING */
+	mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
 
 	fprintf(stderr, "player: Firing rendering threads\n");
 

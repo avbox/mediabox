@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <assert.h>
 #include <unistd.h>
 #include <pthread.h>
 
@@ -15,7 +16,9 @@
 #define MEDIA_FILE "/mov.mp4"
 
 
+static int pw = 0, ph = 0;
 static struct mbv_window *root_window = NULL;
+static struct mbv_window *progress = NULL;
 static struct mbp *player = NULL;
 static int input_fd = -1;
 
@@ -39,12 +42,20 @@ mbs_clearscreen(void)
 {
 	/* show the root window */
 	mbv_window_clear(root_window, 0x00000000);
+        mbv_window_show(root_window);
+}
+
+
+static void
+mbs_welcomescreen(void)
+{
+	/* show the root window */
+	mbv_window_clear(root_window, 0x00000000);
 	mbv_window_setcolor(root_window, 0x8080ffff);
 	mbv_window_drawline(root_window, 0, mbv_screen_height_get() / 2,
 		mbv_screen_width_get() - 1, mbv_screen_height_get() / 2);
         mbv_window_show(root_window);
 }
-
 
 /**
  * mbs_playerstatuschanged() -- Handle player state change events
@@ -55,10 +66,46 @@ mbs_playerstatuschanged(struct mbp *inst, enum mb_player_status status)
 	if (inst == player) {
 		switch (status) {
 		case MB_PLAYER_STATUS_READY:
-			mbs_clearscreen();
+			fprintf(stderr, "shell: Player state changed to READY\n");
+			mbs_welcomescreen();
+			break;
+		case MB_PLAYER_STATUS_BUFFERING:
+			fprintf(stderr, "shell: Player state changed to BUFFERING\n");
+
+			if (progress == NULL) {
+				int sw, sh, px, py;
+
+				mbs_clearscreen();
+				mbv_window_getsize(root_window, &sw, &sh);
+
+				pw = (sw * 70) / 100;
+				ph = 30;
+				px = (sw / 2) - (pw / 2);
+				py = (sh / 2) - (ph / 2);
+
+				progress = mbv_window_new(NULL, px, py, pw, ph);
+				assert(progress != NULL);
+
+				mbv_window_show(progress);
+
+			} else {
+				int donewidth = (pw * mb_player_bufferstate(inst)) / 100;
+
+				mbv_window_clear(progress, 0x3349ffFF);
+				mbv_window_fillrectangle(progress, 0, 0, donewidth, ph);
+				mbv_window_update(progress);
+			}
+
 			break;
 		case MB_PLAYER_STATUS_PLAYING:
+			fprintf(stderr, "shell: Player state changed to PLAYING\n");
+			if (progress != NULL) {
+				mbv_window_destroy(progress);
+				progress = NULL;
+			}
+			break;
 		case MB_PLAYER_STATUS_PAUSED:
+			fprintf(stderr, "shell: Player state changed to PAUSED\n");
 			break;
 		}
 	}
@@ -98,7 +145,7 @@ mbs_show_dialog(void)
 	int quit = 0;
 	mbi_event e;
 
-	mbs_clearscreen();
+	mbs_welcomescreen();
 
 	/* grab the input device */
 	if ((input_fd = mbi_grab_input()) == -1) {
@@ -136,6 +183,11 @@ mbs_show_dialog(void)
 			switch (mb_player_getstatus(player)) {
 			case MB_PLAYER_STATUS_READY:
 				mb_player_play(player, MEDIA_FILE);
+				break;
+			case MB_PLAYER_STATUS_BUFFERING:
+				/* this should never happen since this state is
+				 * a temporary state in mb_player_player(). */
+				abort();
 				break;
 			case MB_PLAYER_STATUS_PLAYING:
 				mb_player_pause(player);
