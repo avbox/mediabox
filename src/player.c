@@ -484,6 +484,7 @@ mb_player_audio(void *arg)
 
 
 	MB_DEBUG_SET_THREAD_NAME("audio_playback");
+	DEBUG_PRINT("player", "Audio playback thread started");
 
 	assert(inst != NULL);
 	assert(inst->audio_pcm_handle == NULL);
@@ -582,10 +583,10 @@ mb_player_audio(void *arg)
 			snd_strerror(ret));
 	}
 
-	fprintf(stderr, "player: ALSA buffer size: %lu\n", (unsigned long) inst->audio_buffer_size);
-	fprintf(stderr, "player: ALSA period size: %lu\n", (unsigned long) period_frames);
-	fprintf(stderr, "player: ALSA period time: %u\n", period_usecs);
-	fprintf(stderr, "player: ALSA framerate: %u\n", inst->audio_framerate);
+	DEBUG_VPRINT("player", "ALSA buffer size: %lu", (unsigned long) inst->audio_buffer_size);
+	DEBUG_VPRINT("player", "ALSA period size: %lu", (unsigned long) period_frames);
+	DEBUG_VPRINT("player", "ALSA period time: %u", period_usecs);
+	DEBUG_VPRINT("player", "ALSA framerate: %u", inst->audio_framerate);
 
 	(void) mb_su_droproot();
 
@@ -594,7 +595,7 @@ mb_player_audio(void *arg)
 	pthread_cond_broadcast(&inst->audio_signal);
 	pthread_mutex_unlock(&inst->audio_lock);
 
-	fprintf(stderr, "player: Audio thread ready\n");
+	DEBUG_PRINT("player", "Audio thread ready");
 
 	/* start decoding */
 	while (LIKELY(inst->audio_quit == 0)) {
@@ -681,7 +682,7 @@ mb_player_audio(void *arg)
 	}
 
 audio_exit:
-	fprintf(stderr, "player: Audio thread exiting\n");
+	DEBUG_PRINT("player", "Audio thread exiting");
 
 	/* clear the have_audio flag and set the timer to system */
 	inst->have_audio = 0;
@@ -780,11 +781,11 @@ mb_player_video(void *arg)
 #endif
 
 	MB_DEBUG_SET_THREAD_NAME("video_playback");
+	DEBUG_PRINT("player", "Video renderer started");
 
 	assert(inst != NULL);
 	assert(inst->video_quit == 0);
 
-	fprintf(stderr, "player: Video renderer started\n");
 	inst->video_playback_running = 1;
 
 	/* initialize framebuffer for direct rendering */
@@ -814,7 +815,7 @@ mb_player_video(void *arg)
 		mb_su_droproot();
 	}
 
-	fprintf(stderr, "player: Video renderer ready\n");
+	DEBUG_PRINT("player", "Video renderer ready");
 
 	/* signal control thread that we're ready */
 	pthread_mutex_lock(&inst->video_output_lock);
@@ -972,7 +973,7 @@ frame_complete:
 	}
 
 video_exit:
-	fprintf(stderr, "player: Video renderer exiting\n");
+	DEBUG_PRINT("player", "Video renderer exiting");
 
 	/* clear screen */
 	memset(inst->frame_data[0], 0, inst->bufsz);
@@ -1224,39 +1225,39 @@ static int
 open_codec_context(int *stream_idx,
                               AVFormatContext *fmt_ctx, enum AVMediaType type)
 {
-    int ret;
-    AVStream *st;
-    AVCodecContext *dec_ctx = NULL;
-    AVCodec *dec = NULL;
-    AVDictionary *opts = NULL;
+	int ret;
+	AVStream *st;
+	AVCodecContext *dec_ctx = NULL;
+	AVCodec *dec = NULL;
+	AVDictionary *opts = NULL;
 
-    ret = av_find_best_stream(fmt_ctx, type, -1, -1, NULL, 0);
-    if (ret < 0) {
-        fprintf(stderr, "Could not find %s stream in input file\n",
-                av_get_media_type_string(type));
-        return ret;
-    } else {
-        *stream_idx = ret;
-        st = fmt_ctx->streams[*stream_idx];
+	ret = av_find_best_stream(fmt_ctx, type, -1, -1, NULL, 0);
+	if (ret < 0) {
+		fprintf(stderr, "Could not find %s stream in input file\n",
+		av_get_media_type_string(type));
+		return ret;
+	} else {
+		*stream_idx = ret;
+		st = fmt_ctx->streams[*stream_idx];
 
-        /* find decoder for the stream */
-        dec_ctx = st->codec;
-        dec = avcodec_find_decoder(dec_ctx->codec_id);
-        if (!dec) {
-            fprintf(stderr, "Failed to find %s codec\n",
-                    av_get_media_type_string(type));
-            return AVERROR(EINVAL);
-        }
+		/* find decoder for the stream */
+		dec_ctx = st->codec;
+		dec = avcodec_find_decoder(dec_ctx->codec_id);
+		if (!dec) {
+			fprintf(stderr, "Failed to find %s codec\n",
+				av_get_media_type_string(type));
+			return AVERROR(EINVAL);
+		}
 
-        /* Init the video decoder */
-        av_dict_set(&opts, "flags2", "+export_mvs", 0);
-        if ((ret = avcodec_open2(dec_ctx, dec, &opts)) < 0) {
-            fprintf(stderr, "Failed to open %s codec\n",
-                    av_get_media_type_string(type));
-            return ret;
-        }
-   }
-   return 0;
+		/* Init the video decoder */
+		av_dict_set(&opts, "flags2", "+export_mvs", 0);
+		if ((ret = avcodec_open2(dec_ctx, dec, &opts)) < 0) {
+			fprintf(stderr, "Failed to open %s codec\n",
+				av_get_media_type_string(type));
+			return ret;
+		}
+	}
+	return 0;
 }
 
 
@@ -1275,6 +1276,7 @@ mb_player_video_decode(void *arg)
 	AVFilterContext *video_buffersrc_ctx = NULL;
 
 	MB_DEBUG_SET_THREAD_NAME("video_decode");
+	DEBUG_PRINT("player", "Video decoder starting");
 
 	assert(inst != NULL);
 	assert(inst->fmt_ctx != NULL);
@@ -1300,8 +1302,9 @@ mb_player_video_decode(void *arg)
 		"scale='if(gt(a,4/3),%i,-1)':'if(gt(a,4/3),-1,%i)',"
 		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
 		inst->width, inst->height, inst->width, inst->height);
-	fprintf(stderr, "player: video_filters: %s\n",
-		video_filters);
+
+	DEBUG_VPRINT("player", "Video filters: %s", video_filters);
+
 	if (mb_player_initvideofilters(inst->fmt_ctx, inst->video_codec_ctx,
 		&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
 		video_filters, inst->video_stream_index) < 0) {
@@ -1319,7 +1322,7 @@ mb_player_video_decode(void *arg)
 		inst->frame_state[i] = 0;
 	}
 
-	fprintf(stderr, "player: video_codec_ctx: width=%i height=%i pix_fmt=%i\n",
+	DEBUG_VPRINT("player", "video_codec_ctx: width=%i height=%i pix_fmt=%i",
 		inst->width, inst->height, inst->video_codec_ctx->pix_fmt);
 
 	/* allocate video frames */
@@ -1330,7 +1333,7 @@ mb_player_video_decode(void *arg)
 		goto decoder_exit;
 	}
 
-	fprintf(stderr, "player: Video decoder ready\n");
+	DEBUG_PRINT("player", "Video decoder ready");
 
 	/* signal control trhead that we're ready */
 	pthread_mutex_lock(&inst->video_decoder_lock);
@@ -1442,7 +1445,7 @@ mb_player_video_decode(void *arg)
 		__sync_fetch_and_sub(&inst->video_packets, 1);
 	}
 decoder_exit:
-	fprintf(stderr, "player: Video decoder exiting\n");
+	DEBUG_PRINT("player", "Video decoder exiting");
 
 	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
 		if (inst->frame_data[i] != NULL) {
@@ -1498,7 +1501,7 @@ mb_player_audio_decode(void * arg)
 	assert(inst->fmt_ctx != NULL);
 	assert(inst->audio_stream_index == -1);
 
-	fprintf(stderr, "player: Audio decoder starting\n");
+	DEBUG_PRINT("player", "Audio decoder starting");
 
 	/* open the audio codec */
 	if (open_codec_context(&inst->audio_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
@@ -1525,8 +1528,9 @@ mb_player_audio_decode(void * arg)
 		goto decoder_exit;
 	}
 
+	DEBUG_PRINT("player", "Audio decoder ready");
+
 	/* signl control thread that we're ready */
-	fprintf(stderr, "player: Audio decoder ready\n");
 	pthread_mutex_lock(&inst->audio_decoder_lock);
 	pthread_cond_signal(&inst->audio_decoder_signal);
 	pthread_mutex_unlock(&inst->audio_decoder_lock);
@@ -1635,7 +1639,7 @@ mb_player_audio_decode(void * arg)
 	}
 
 decoder_exit:
-	fprintf(stderr, "player: Audio decoder exiting\n");
+	DEBUG_PRINT("player", "Audio decoder exiting");
 
 	if (audio_frame_nat != NULL) {
 		av_free(audio_frame_nat);
@@ -1696,8 +1700,7 @@ mb_player_stream_decode(void *arg)
 		goto decoder_exit;
 	}
 
-
-	fprintf(stderr, "player: Attempting to play (%ix%i) '%s'\n",
+	DEBUG_VPRINT("player", "Attempting to play (%ix%i) '%s'",
 		inst->width, inst->height, inst->media_file);
 
 	/* open file */
@@ -1747,7 +1750,7 @@ mb_player_stream_decode(void *arg)
 	/* if there's an audio stream start the audio decoder */
 	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0) >= 0) {
 
-		fprintf(stderr, "player: audio found\n");
+		DEBUG_PRINT("player", "Audio stream found");
 
 		/* allocate filtered audio frames */
 		inst->audio_pcm_handle = NULL;
@@ -1781,7 +1784,8 @@ mb_player_stream_decode(void *arg)
 		pthread_mutex_unlock(&inst->audio_decoder_lock);
 	}
 
-	fprintf(stderr, "player: Stream decoder ready\n");
+	DEBUG_PRINT("player", "Stream decoder ready");
+
 	pthread_mutex_lock(&inst->resume_lock);
 	pthread_cond_signal(&inst->resume_signal);
 	pthread_mutex_unlock(&inst->resume_lock);
@@ -1856,7 +1860,7 @@ mb_player_stream_decode(void *arg)
 		/* handle seek request */
 		if (inst->seek_to != -1) {
 
-			fprintf(stderr, "player: Seeking to %li...\n", inst->seek_to);
+			DEBUG_VPRINT("player", "Seeking to %li...", inst->seek_to);
 
 			if (avformat_seek_file(inst->fmt_ctx, -1, INT64_MIN, inst->seek_to, INT64_MAX, 0) < 0) {
 				fprintf(stderr, "player: Error seeking\n");
@@ -1874,7 +1878,7 @@ mb_player_stream_decode(void *arg)
 	}
 
 decoder_exit:
-	fprintf(stderr, "player: Stream decoder exiting\n");
+	DEBUG_PRINT("player", "Stream decoder exiting");
 
 	/* clean video stuff */
 	if (inst->have_video) {
@@ -1884,7 +1888,7 @@ decoder_exit:
 			pthread_cond_signal(&inst->video_output_signal);
 			pthread_cond_signal(&inst->video_output_signal);
 			pthread_join(inst->video_output_thread, NULL);
-			fprintf(stderr, "player: Video playback thread exited\n");
+			DEBUG_PRINT("player", "Video playback thread exited");
 		}
 
 		/* signal the video decoder thread to exit and join it */
@@ -1902,7 +1906,7 @@ decoder_exit:
 		}
 
 		pthread_join(inst->video_decoder_thread, NULL);
-		fprintf(stderr, "player: Video decoder thread exited\n");
+		DEBUG_PRINT("player", "Video decoder thread exited");
 	}
 
 	/* clean audio stuff */
@@ -1913,7 +1917,7 @@ decoder_exit:
 			pthread_cond_signal(&inst->resume_signal);
 			pthread_cond_signal(&inst->audio_signal);
 			pthread_join(inst->audio_thread, NULL);
-			fprintf(stderr, "player: Audio player exited\n");
+			DEBUG_PRINT("player", "Audio player exited");
 		}
 
 		/* signal the audio decoder thread to exit and join it */
@@ -1921,7 +1925,7 @@ decoder_exit:
 		pthread_cond_broadcast(&inst->audio_decoder_signal);
 		pthread_cond_broadcast(&inst->audio_signal);
 		pthread_join(inst->audio_decoder_thread, NULL);
-		fprintf(stderr, "player: Audio decoder exited\n");
+		DEBUG_PRINT("player", "Audio decoder exiting");
 
 		for (i = 0; i < MB_AUDIO_BUFFER_PACKETS; i++) {
 			if (inst->audio_packet_state[i] == 1) {
@@ -2069,6 +2073,8 @@ mb_player_bufferstate(struct mbp *inst)
 int 
 mb_player_play(struct mbp *inst, const char * const path)
 {
+	int last_percent;
+
 	assert(inst != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_READY ||
 		inst->status == MB_PLAYER_STATUS_PLAYING ||
@@ -2108,7 +2114,7 @@ mb_player_play(struct mbp *inst, const char * const path)
 	inst->media_file = path;
 
 	/* update status */
-	inst->stream_percent = 0;
+	inst->stream_percent = last_percent = 0;
 	mb_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
 
 	/* start the main decoder thread */
@@ -2135,7 +2141,11 @@ mb_player_play(struct mbp *inst, const char * const path)
 		int avail = inst->video_frames + inst->audio_frames;
 		const int wanted = MB_AUDIO_BUFFER_FRAMES + MB_VIDEO_BUFFER_FRAMES;
 		inst->stream_percent = (((avail * 100) / wanted) * 100) / 100;
-		mb_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
+
+		if (inst->stream_percent != last_percent) {
+			mb_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
+			last_percent = inst->stream_percent;
+		}
 
 		mb_player_printstatus(inst, 0);
 		usleep(5000);
@@ -2144,7 +2154,7 @@ mb_player_play(struct mbp *inst, const char * const path)
 	/* we're done buffering, set state to PLAYING */
 	mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
 
-	fprintf(stderr, "player: Firing rendering threads\n");
+	DEBUG_PRINT("player", "Firing rendering threads");
 
 	/* fire the video threads */
 	pthread_mutex_lock(&inst->video_output_lock);
@@ -2263,7 +2273,7 @@ mb_player_checkfbdev(struct mbp *inst)
 		return;
 	}
 
-	fprintf(stderr, "player: Initializing /dev/fb0\n");
+	DEBUG_PRINT("player", "Initializing /dev/fb0");
 
 	/* try to gain root */
 	if (mb_su_gainroot() == -1) {
@@ -2280,19 +2290,19 @@ mb_player_checkfbdev(struct mbp *inst)
 		if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
 			ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1)
 		{
-			fprintf(stderr, "player: ioctl() failed\n");
+			fprintf(stderr, "player: mb_player_checkfbdev(): ioctl() failed\n");
 			inst->use_fbdev = 0;
 			goto end;
 		}
 
 		/* dump some screen info */
-		fprintf(stderr, "player: bpp=%i\n", vinfo.bits_per_pixel);
-		fprintf(stderr, "player: type=%i\n", finfo.type);
-		fprintf(stderr, "player: visual=%i\n", finfo.visual);
-		fprintf(stderr, "player: FOURCC (grayscale): '%c%c%c%c'\n",
+		DEBUG_VPRINT("player", "fbdev: bpp=%i", vinfo.bits_per_pixel);
+		DEBUG_VPRINT("player", "fbdev: type=%i", finfo.type);
+		DEBUG_VPRINT("player", "fbdev: visual=%i", finfo.visual);
+		DEBUG_VPRINT("player", "fbdev: FOURCC (grayscale): '%c%c%c%c'",
 			((char*)&vinfo.grayscale)[0], ((char*)&vinfo.grayscale)[1],
 			((char*)&vinfo.grayscale)[2], ((char*)&vinfo.grayscale)[3]);
-		fprintf(stderr, "player: xoffset=%i yoffset=%i r=%i g=%i b=%i\n"
+		DEBUG_VPRINT("player", "fbdev: xoffset=%i yoffset=%i r=%i g=%i b=%i"
 			"player: r=%i g=%i b=%i\n",
 			vinfo.xoffset, vinfo.yoffset,
 			vinfo.red.offset, vinfo.green.offset, vinfo.blue.offset,
@@ -2406,7 +2416,7 @@ mb_player_destroy(struct mbp *inst)
 {
 	assert(inst != NULL);
 
-	fprintf(stderr, "player: Destroying\n");
+	DEBUG_PRINT("player", "Destroying object");
 
 	/* this just fails if we're not playing */
 	(void) mb_player_stop(inst);
