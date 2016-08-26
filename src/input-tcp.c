@@ -22,6 +22,12 @@
 #define STRINGIZE(x) STRINGIZE2(x)
 
 
+struct conn_state
+{
+	int fd;
+	pthread_t thread;
+};
+
 
 static int sockfd = -1;
 static int newsockfd = -1;
@@ -30,13 +36,134 @@ static pthread_t thread;
 
 
 static void *
+mbi_tcp_connection(void *arg)
+{
+	int fd = (int) ((struct conn_state*) arg)->fd;
+	int n;
+	struct timeval tv;
+	char buffer[256];
+	fd_set fds;
+
+	MB_DEBUG_SET_THREAD_NAME("input-tcp-conn");
+	pthread_detach(pthread_self());
+	fprintf(stderr, "input-tcp-connection: Connection handler running\n");
+
+	bzero(buffer,256);
+
+	while (!server_quit) {
+
+		FD_ZERO(&fds);
+		FD_SET(fd, &fds);
+
+		if (fcntl(fd, F_GETFD) == -1) {
+			fprintf(stderr, "input-tcp: Connection broken (fd=%i)\n",
+				fd);
+			break;
+		}
+
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		if ((n = select(fd + 1, &fds, NULL, NULL, &tv)) == 0) {
+			continue;
+		} else if (n < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			fprintf(stderr, "input-tcp: select() returned %i\n", n);
+			break;
+		}
+
+		if (!FD_ISSET(fd, &fds)) {
+			continue;
+		}
+
+		if ((n = read(fd, buffer, 255)) <= 0) {
+			break;
+		}
+
+		if (!memcmp("MENU", buffer, 4)) {
+			mbi_event_send(MBI_EVENT_MENU);
+		} else if (!memcmp("LEFT", buffer, 4)) {
+			mbi_event_send(MBI_EVENT_ARROW_LEFT);
+		} else if (!memcmp("RIGHT", buffer, 5)) {
+			mbi_event_send(MBI_EVENT_ARROW_RIGHT);
+		} else if (!memcmp("UP", buffer, 2)) {
+			mbi_event_send(MBI_EVENT_ARROW_UP);
+		} else if (!memcmp("DOWN", buffer, 4)) {
+			mbi_event_send(MBI_EVENT_ARROW_DOWN);
+		} else if (!memcmp("ENTER", buffer, 5)) {
+			mbi_event_send(MBI_EVENT_ENTER);
+		} else if (!memcmp("BACK", buffer, 4)) {
+			mbi_event_send(MBI_EVENT_BACK);
+		} else if (!memcmp("PLAY", buffer, 4)) {
+			mbi_event_send(MBI_EVENT_PLAY);
+		} else if (!memcmp("STOP", buffer, 4)) {
+			mbi_event_send(MBI_EVENT_STOP);
+		} else if (!memcmp("CLEAR", buffer, 5)) {
+			mbi_event_send(MBI_EVENT_CLEAR);
+		} else if (!memcmp("PREV", buffer, 4)) {
+			mbi_event_send(MBI_EVENT_PREV);
+		} else if (!memcmp("NEXT", buffer, 4)) {
+			mbi_event_send(MBI_EVENT_NEXT);
+		} else if (!memcmp("KEY:", buffer, 4)) {
+#define ELIF_KEY(x) \
+else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \
+mbi_event_send(MBI_EVENT_KBD_ ##x ); \
+}
+
+			if (!memcmp(buffer + 4, " ", 1)) {
+				mbi_event_send(MBI_EVENT_KBD_SPACE);
+			}
+			ELIF_KEY(A)
+			ELIF_KEY(B)
+			ELIF_KEY(C)
+			ELIF_KEY(D)
+			ELIF_KEY(E)
+			ELIF_KEY(F)
+			ELIF_KEY(G)
+			ELIF_KEY(H)
+			ELIF_KEY(I)
+			ELIF_KEY(J)
+			ELIF_KEY(K)
+			ELIF_KEY(L)
+			ELIF_KEY(M)
+			ELIF_KEY(N)
+			ELIF_KEY(O)
+			ELIF_KEY(P)
+			ELIF_KEY(Q)
+			ELIF_KEY(R)
+			ELIF_KEY(S)
+			ELIF_KEY(T)
+			ELIF_KEY(U)
+			ELIF_KEY(V)
+			ELIF_KEY(W)
+			ELIF_KEY(X)
+			ELIF_KEY(Y)
+			ELIF_KEY(Z)
+#undef ELIF_KEY
+		} else {
+			fprintf(stderr, "input-tcp: Unknown command: '%s'\n",
+				buffer);
+		}
+	}
+
+	fprintf(stderr, "input-tcp: Closing connection (fd=%i)\n",
+		fd);
+	close(fd);
+	free(arg); /* free conn state */
+
+	return NULL;
+}
+
+
+static void *
 mbi_tcp_server(void *arg)
 {
 	int portno;
 	unsigned int clilen;
-	char buffer[256];
 	struct sockaddr_in serv_addr, cli_addr;
 	struct timeval tv;
+	struct conn_state *state = NULL;
 	fd_set fds;
 	int n;
 
@@ -78,7 +205,7 @@ mbi_tcp_server(void *arg)
 			FD_ZERO(&fds);
 			FD_SET(sockfd, &fds);
 
-			fprintf(stderr, "input-tcp: Waiting for connection\n");
+			/* fprintf(stderr, "input-tcp: Waiting for connection\n"); */
 
 			tv.tv_sec = 1;
 			tv.tv_usec = 0;
@@ -105,108 +232,20 @@ mbi_tcp_server(void *arg)
 			fprintf(stderr, "input-tcp: Incoming connection accepted (fd=%i)\n",
 				newsockfd);
 
-			bzero(buffer,256);
-			while (!server_quit) {
-
-				FD_ZERO(&fds);
-				FD_SET(newsockfd, &fds);
-
-				if (fcntl(newsockfd, F_GETFD) == -1) {
-					fprintf(stderr, "input-tcp: Connection broken (fd=%i)\n",
-						newsockfd);
-					break;
-				}
-
-				tv.tv_sec = 1;
-				tv.tv_usec = 0;
-				if ((n = select(newsockfd + 1, &fds, NULL, NULL, &tv)) == 0) {
-					continue;
-				} else if (n < 0) {
-					if (errno == EINTR) {
-						continue;
-					}
-					fprintf(stderr, "input-tcp: select() returned %i\n", n);
-					break;
-				}
-
-				if (!FD_ISSET(newsockfd, &fds)) {
-					continue;
-				}
-
-				if ((n = read(newsockfd, buffer, 255)) <= 0) {
-					break;
-				}
-
-				if (!memcmp("MENU", buffer, 4)) {
-					mbi_event_send(MBI_EVENT_MENU);
-				} else if (!memcmp("LEFT", buffer, 4)) {
-					mbi_event_send(MBI_EVENT_ARROW_LEFT);
-				} else if (!memcmp("RIGHT", buffer, 5)) {
-					mbi_event_send(MBI_EVENT_ARROW_RIGHT);
-				} else if (!memcmp("UP", buffer, 2)) {
-					mbi_event_send(MBI_EVENT_ARROW_UP);
-				} else if (!memcmp("DOWN", buffer, 4)) {
-					mbi_event_send(MBI_EVENT_ARROW_DOWN);
-				} else if (!memcmp("ENTER", buffer, 5)) {
-					mbi_event_send(MBI_EVENT_ENTER);
-				} else if (!memcmp("BACK", buffer, 4)) {
-					mbi_event_send(MBI_EVENT_BACK);
-				} else if (!memcmp("PLAY", buffer, 4)) {
-					mbi_event_send(MBI_EVENT_PLAY);
-				} else if (!memcmp("STOP", buffer, 4)) {
-					mbi_event_send(MBI_EVENT_STOP);
-				} else if (!memcmp("CLEAR", buffer, 5)) {
-					mbi_event_send(MBI_EVENT_CLEAR);
-				} else if (!memcmp("PREV", buffer, 4)) {
-					mbi_event_send(MBI_EVENT_PREV);
-				} else if (!memcmp("NEXT", buffer, 4)) {
-					mbi_event_send(MBI_EVENT_NEXT);
-				} else if (!memcmp("KEY:", buffer, 4)) {
-#define ELIF_KEY(x) \
-	else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \
-		mbi_event_send(MBI_EVENT_KBD_ ##x ); \
-	}
-
-					if (!memcmp(buffer + 4, " ", 1)) {
-						mbi_event_send(MBI_EVENT_KBD_SPACE);
-					}
-					ELIF_KEY(A)
-					ELIF_KEY(B)
-					ELIF_KEY(C)
-					ELIF_KEY(D)
-					ELIF_KEY(E)
-					ELIF_KEY(F)
-					ELIF_KEY(G)
-					ELIF_KEY(H)
-					ELIF_KEY(I)
-					ELIF_KEY(J)
-					ELIF_KEY(K)
-					ELIF_KEY(L)
-					ELIF_KEY(M)
-					ELIF_KEY(N)
-					ELIF_KEY(O)
-					ELIF_KEY(P)
-					ELIF_KEY(Q)
-					ELIF_KEY(R)
-					ELIF_KEY(S)
-					ELIF_KEY(T)
-					ELIF_KEY(U)
-					ELIF_KEY(V)
-					ELIF_KEY(W)
-					ELIF_KEY(X)
-					ELIF_KEY(Y)
-					ELIF_KEY(Z)
-#undef ELIF_KEY
-				} else {
-					fprintf(stderr, "input-tcp: Unknown command: '%s'\n",
-						buffer);
-				}
+			if ((state = malloc(sizeof(struct conn_state))) == NULL) {
+				fprintf(stderr, "input-tcp: Could not allocate connection state: Out of memory\n");
+				close(newsockfd);
+				continue;
 			}
 
-			fprintf(stderr, "input-tcp: Closing connection (fd=%i)\n",
-				newsockfd);
-			close(newsockfd);
-			newsockfd = -1;
+			state->fd = newsockfd;
+
+			if (pthread_create(&state->thread, NULL, &mbi_tcp_connection, state) != 0) {
+				fprintf(stderr, "input-tcp: Could not launch connection thread\n");
+				close(newsockfd);
+				free(state);
+				continue;
+			}
 		}
 		close(sockfd);
 		sockfd = -1;
