@@ -29,8 +29,6 @@ main (int argc, char **argv)
 {
 	int i;
 
-	MB_DEBUG_SET_THREAD_NAME("main");
-
 	/* parse command line */
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--no-direct")) {

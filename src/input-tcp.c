@@ -1,3 +1,6 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -40,9 +43,7 @@ mbi_tcp_server(void *arg)
 
 	MB_DEBUG_SET_THREAD_NAME("input-tcp");
 
-	fprintf(stderr, "TCP Server starting\n");
-
-
+	fprintf(stderr, "input-tcp: TCP Server starting\n");
 
 	while (!server_quit) {
 
@@ -69,11 +70,15 @@ mbi_tcp_server(void *arg)
 		listen(sockfd, 1);
 		clilen = sizeof(cli_addr);
 
+		fprintf(stderr, "input-tcp: Listening for connections on port %i\n",
+			portno);
 
 		while(!server_quit) {
+
 			FD_ZERO(&fds);
 			FD_SET(sockfd, &fds);
 
+			fprintf(stderr, "input-tcp: Waiting for connection\n");
 
 			tv.tv_sec = 1;
 			tv.tv_usec = 0;
@@ -86,8 +91,6 @@ mbi_tcp_server(void *arg)
 				fprintf(stderr, "input-tcp: select() returned %i\n", n);
 				break;
 			}
-
-			fprintf(stderr, "input-tcp: got connection\n");
 			
 			if (!FD_ISSET(sockfd, &fds)) {
 				continue;
@@ -99,6 +102,9 @@ mbi_tcp_server(void *arg)
 				continue;
 			}
 
+			fprintf(stderr, "input-tcp: Incoming connection accepted (fd=%i)\n",
+				newsockfd);
+
 			bzero(buffer,256);
 			while (!server_quit) {
 
@@ -106,6 +112,8 @@ mbi_tcp_server(void *arg)
 				FD_SET(newsockfd, &fds);
 
 				if (fcntl(newsockfd, F_GETFD) == -1) {
+					fprintf(stderr, "input-tcp: Connection broken (fd=%i)\n",
+						newsockfd);
 					break;
 				}
 
@@ -189,9 +197,14 @@ mbi_tcp_server(void *arg)
 					ELIF_KEY(Y)
 					ELIF_KEY(Z)
 #undef ELIF_KEY
+				} else {
+					fprintf(stderr, "input-tcp: Unknown command: '%s'\n",
+						buffer);
 				}
 			}
 
+			fprintf(stderr, "input-tcp: Closing connection (fd=%i)\n",
+				newsockfd);
 			close(newsockfd);
 			newsockfd = -1;
 		}
