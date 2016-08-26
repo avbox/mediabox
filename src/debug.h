@@ -9,6 +9,23 @@
 #else
 #define MB_DEBUG_SET_THREAD_NAME(name) (void) name
 #endif
-	
+
+/**
+ * DEBUG_VPRINT() - Variadic debug print macro.
+ */
+#ifndef NDEBUG
+#define DEBUG_VPRINT(module, fmt, ...) fprintf(stderr, module ": " fmt "\n", __VA_ARGS__)
+#else
+#define DEBUG_VPRINT(module, fmt, ...) (void) 0
+#endif
+
+/**
+ * DEBUG_PRINT() -- Debug print macro.
+ */
+#ifndef NDEBUG
+#define DEBUG_PRINT(module, str) fprintf(stderr, module ": " str "\n");
+#else
+#define DEBUG_PRINT(module, str) (void) 0
+#endif
 
 #endif

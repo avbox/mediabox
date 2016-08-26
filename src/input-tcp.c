@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <assert.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/types.h> 
@@ -44,9 +45,12 @@ mbi_tcp_connection(void *arg)
 	char buffer[256];
 	fd_set fds;
 
+	assert(arg != NULL);
+	assert(((struct conn_state*) arg)->fd > 0);
+
 	MB_DEBUG_SET_THREAD_NAME("input-tcp-conn");
+	DEBUG_PRINT("input-tcp-conn", "Connection handler running");
 	pthread_detach(pthread_self());
-	fprintf(stderr, "input-tcp-connection: Connection handler running\n");
 
 	bzero(buffer,256);
 
@@ -107,9 +111,9 @@ mbi_tcp_connection(void *arg)
 			mbi_event_send(MBI_EVENT_NEXT);
 		} else if (!memcmp("KEY:", buffer, 4)) {
 #define ELIF_KEY(x) \
-else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \
-mbi_event_send(MBI_EVENT_KBD_ ##x ); \
-}
+	else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \
+		mbi_event_send(MBI_EVENT_KBD_ ##x ); \
+	}
 
 			if (!memcmp(buffer + 4, " ", 1)) {
 				mbi_event_send(MBI_EVENT_KBD_SPACE);
@@ -142,13 +146,12 @@ mbi_event_send(MBI_EVENT_KBD_ ##x ); \
 			ELIF_KEY(Z)
 #undef ELIF_KEY
 		} else {
-			fprintf(stderr, "input-tcp: Unknown command: '%s'\n",
-				buffer);
+			DEBUG_VPRINT("input-tcp-conn", "Unknown command '%s'", buffer);
 		}
 	}
 
-	fprintf(stderr, "input-tcp: Closing connection (fd=%i)\n",
-		fd);
+	DEBUG_VPRINT("input-tcp", "Closing connection (fd=%i)", fd);
+
 	close(fd);
 	free(arg); /* free conn state */
 
@@ -167,10 +170,8 @@ mbi_tcp_server(void *arg)
 	fd_set fds;
 	int n;
 
-
 	MB_DEBUG_SET_THREAD_NAME("input-tcp");
-
-	fprintf(stderr, "input-tcp: TCP Server starting\n");
+	DEBUG_PRINT("input-tcp", "TCP input server starting");
 
 	while (!server_quit) {
 
@@ -197,8 +198,7 @@ mbi_tcp_server(void *arg)
 		listen(sockfd, 1);
 		clilen = sizeof(cli_addr);
 
-		fprintf(stderr, "input-tcp: Listening for connections on port %i\n",
-			portno);
+		DEBUG_VPRINT("input-tcp", "Listening for connections on port %i", portno);
 
 		while(!server_quit) {
 
@@ -229,8 +229,7 @@ mbi_tcp_server(void *arg)
 				continue;
 			}
 
-			fprintf(stderr, "input-tcp: Incoming connection accepted (fd=%i)\n",
-				newsockfd);
+			DEBUG_VPRINT("input-tcp", "Incoming connection accepted (fd=%i)", newsockfd);
 
 			if ((state = malloc(sizeof(struct conn_state))) == NULL) {
 				fprintf(stderr, "input-tcp: Could not allocate connection state: Out of memory\n");
@@ -251,7 +250,7 @@ mbi_tcp_server(void *arg)
 		sockfd = -1;
 	}
 
-	fprintf(stderr, "input-tcp: TCP Input server exiting\n");
+	DEBUG_PRINT("input-tcp", "TCP input server exiting");
 
 	return NULL;
 }
@@ -274,7 +273,8 @@ mbi_tcp_init(void)
 void
 mbi_tcp_destroy(void)
 {
-	fprintf(stderr, "input-tcp: Exiting (give me 2 secs)\n");
+	DEBUG_PRINT("input-tcp", "Exiting (give me 2 secs)");
+
 	server_quit = 1;
 	if (newsockfd != -1) {
 		close(newsockfd);
