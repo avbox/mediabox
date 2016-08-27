@@ -11,6 +11,7 @@
 #include "mainmenu.h"
 #include "player.h"
 #include "su.h"
+#include "debug.h"
 
 
 #define MEDIA_FILE "/mov.mp4"
@@ -22,6 +23,12 @@ static struct mbv_window *progress = NULL;
 static struct mbp *player = NULL;
 static int input_fd = -1;
 
+/* TODO: This only works because we only have one player
+ * instance. Once we implement PIP we'll need a way to store
+ * this for each player. Perhaps a last_state argument to the
+ * playerstatuschanged callback.
+ */
+static int buffering = 0;
 
 /**
  * mbs_get_active_player() -- Gets the currently active player instance.
@@ -40,9 +47,11 @@ mbs_get_active_player(void)
 static void
 mbs_clearscreen(void)
 {
+	DEBUG_PRINT("shell", "Clear screen");
+
 	/* show the root window */
 	mbv_window_clear(root_window, 0x00000000);
-        mbv_window_show(root_window);
+        mbv_window_update(root_window);
 }
 
 
@@ -64,16 +73,27 @@ static void
 mbs_playerstatuschanged(struct mbp *inst, enum mb_player_status status)
 {
 	if (inst == player) {
+		if (buffering == 1 && status != MB_PLAYER_STATUS_BUFFERING) {
+			assert(progress != NULL);
+			DEBUG_PRINT("shell", "Destroying progress bar");
+			mbv_window_destroy(progress);
+			progress = NULL;
+			buffering = 0;
+		}
 		switch (status) {
 		case MB_PLAYER_STATUS_READY:
-			fprintf(stderr, "shell: Player state changed to READY\n");
+			DEBUG_PRINT("shell", "Player state changed to READY");
 			mbs_welcomescreen();
 			break;
 		case MB_PLAYER_STATUS_BUFFERING:
-			fprintf(stderr, "shell: Player state changed to BUFFERING\n");
+			DEBUG_PRINT("shell", "Player state changed to BUFFERING");
 
 			if (progress == NULL) {
 				int sw, sh, px, py;
+
+				assert(buffering == 0);
+
+				DEBUG_PRINT("shell", "Initializing progress bar");
 
 				mbs_clearscreen();
 				mbv_window_getsize(root_window, &sw, &sh);
@@ -87,8 +107,11 @@ mbs_playerstatuschanged(struct mbp *inst, enum mb_player_status status)
 				assert(progress != NULL);
 
 				mbv_window_show(progress);
+				buffering = 1;
 
 			} else {
+				assert(buffering == 1);
+
 				int donewidth = (pw * mb_player_bufferstate(inst)) / 100;
 
 				mbv_window_clear(progress, 0x3349ffFF);
@@ -98,14 +121,12 @@ mbs_playerstatuschanged(struct mbp *inst, enum mb_player_status status)
 
 			break;
 		case MB_PLAYER_STATUS_PLAYING:
-			fprintf(stderr, "shell: Player state changed to PLAYING\n");
-			if (progress != NULL) {
-				mbv_window_destroy(progress);
-				progress = NULL;
-			}
+			assert(progress == NULL);
+			DEBUG_PRINT("shell", "Player state changed to PLAYING");
 			break;
 		case MB_PLAYER_STATUS_PAUSED:
-			fprintf(stderr, "shell: Player state changed to PAUSED\n");
+			assert(progress == NULL);
+			DEBUG_PRINT("shell", "Player state changed to PAUSED");
 			break;
 		}
 	}
