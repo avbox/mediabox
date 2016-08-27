@@ -1,3 +1,6 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
@@ -15,6 +18,7 @@
 #include "about.h"
 #include "downloads.h"
 #include "mediasearch.h"
+#include "debug.h"
 
 
 static struct mbv_window *window = NULL;
@@ -30,7 +34,7 @@ mb_mainmenu_init(void)
 	int xres, yres;
 	int font_height;
 	int window_height, window_width;
-	int n_entries = 6;
+	int n_entries = 8;
 
 	if (mb_su_canroot()) {
 		n_entries++;
@@ -73,6 +77,8 @@ mb_mainmenu_init(void)
 	mb_ui_menu_additem(menu, "TV TUNNER", "DVR");
 	mb_ui_menu_additem(menu, "DOWNLOADS", "DOWN");
 	mb_ui_menu_additem(menu, "MEDIA SEARCH", "MEDIASEARCH");
+	mb_ui_menu_additem(menu, "GAMING CONSOLES", "CONSOLES");
+	mb_ui_menu_additem(menu, "SETTINGS", "SETTINGS");
 	mb_ui_menu_additem(menu, "ABOUT MEDIABOX", "ABOUT");
 
 	if (mb_su_canroot()) {
@@ -132,8 +138,7 @@ mb_mainmenu_showdialog(void)
 				mb_mediasearch_destroy();
 
 			} else {
-				fprintf(stderr, "mainmenu: Selected %s\n",
-					selected);
+				DEBUG_VPRINT("mainmenu", "Selected %s", selected);
 			}
 		} else {
 			break;
@@ -151,7 +156,7 @@ mb_mainmenu_showdialog(void)
 void
 mb_mainmenu_destroy(void)
 {
-	/* fprintf(stderr, "mainmenu: Destroying instance\n"); */
+	DEBUG_PRINT("mainmenu", "Destroying object");
 
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);
