@@ -21,7 +21,8 @@ enum mb_player_status
 
 
 /* status changed callback function */
-typedef void (*mb_player_status_callback)(struct mbp *inst, enum mb_player_status status);
+typedef void (*mb_player_status_callback)(struct mbp *inst,
+	enum mb_player_status status, enum mb_player_status last_status);
 
 
 /**
@@ -29,6 +30,13 @@ typedef void (*mb_player_status_callback)(struct mbp *inst, enum mb_player_statu
  */
 enum mb_player_status
 mb_player_getstatus(struct mbp* inst);
+
+
+/**
+ * Get the last played file
+ */
+const char *
+mb_player_getmediafile(struct mbp *inst);
 
 
 /**

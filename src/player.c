@@ -170,11 +170,16 @@ struct mbp
 static void
 mb_player_updatestatus(struct mbp *inst, enum mb_player_status status)
 {
+	enum mb_player_status last_status;
+
 	assert(inst != NULL);
 
+	last_status = inst->status;
 	inst->status = status;
+
+	/* invoke the status callback */
 	if (inst->status_callback != NULL) {
-		inst->status_callback(inst, status);
+		inst->status_callback(inst, status, last_status);
 	}
 }
 
@@ -2057,12 +2062,22 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 	return inst->seek_result;
 }
 
+
 unsigned int
 mb_player_bufferstate(struct mbp *inst)
 {
 	assert(inst != NULL);
 	return inst->stream_percent;
 }
+
+
+const char *
+mb_player_getmediafile(struct mbp *inst)
+{
+	assert(inst != NULL);
+	return inst->media_file;
+}
+
 
 /**
  * mb_player_play() -- If path is not NULL it opens the file
@@ -2111,7 +2126,11 @@ mb_player_play(struct mbp *inst, const char * const path)
 	}
 
 	/* initialize player object */
-	inst->media_file = path;
+	const char *old_media_file = inst->media_file;
+	inst->media_file = strdup(path);
+	if (old_media_file != NULL) {
+		free((void*) old_media_file);
+	}
 
 	/* update status */
 	inst->stream_percent = last_percent = 0;
@@ -2422,7 +2441,8 @@ mb_player_destroy(struct mbp *inst)
 	(void) mb_player_stop(inst);
 
 	if (inst->media_file != NULL) {
-		free(inst);
+		free((void*) inst->media_file);
 	}
+	free(inst);
 }
 

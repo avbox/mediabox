@@ -19,16 +19,11 @@
 
 static int pw = 0, ph = 0;
 static struct mbv_window *root_window = NULL;
+static struct mbv_window *status_overlay = NULL;
 static struct mbv_window *progress = NULL;
 static struct mbp *player = NULL;
 static int input_fd = -1;
 
-/* TODO: This only works because we only have one player
- * instance. Once we implement PIP we'll need a way to store
- * this for each player. Perhaps a last_state argument to the
- * playerstatuschanged callback.
- */
-static int buffering = 0;
 
 /**
  * mbs_get_active_player() -- Gets the currently active player instance.
@@ -50,7 +45,7 @@ mbs_clearscreen(void)
 	DEBUG_PRINT("shell", "Clear screen");
 
 	/* show the root window */
-	mbv_window_clear(root_window, 0x00000000);
+	mbv_window_clear(root_window, 0x000000FF);
         mbv_window_update(root_window);
 }
 
@@ -59,39 +54,45 @@ static void
 mbs_welcomescreen(void)
 {
 	/* show the root window */
-	mbv_window_clear(root_window, 0x00000000);
+	mbv_window_clear(root_window, 0x000000ff);
 	mbv_window_setcolor(root_window, 0x8080ffff);
 	mbv_window_drawline(root_window, 0, mbv_screen_height_get() / 2,
 		mbv_screen_width_get() - 1, mbv_screen_height_get() / 2);
         mbv_window_show(root_window);
 }
 
+
 /**
  * mbs_playerstatuschanged() -- Handle player state change events
  */
 static void
-mbs_playerstatuschanged(struct mbp *inst, enum mb_player_status status)
+mbs_playerstatuschanged(struct mbp *inst,
+	enum mb_player_status status, enum mb_player_status last_status)
 {
 	if (inst == player) {
-		if (buffering == 1 && status != MB_PLAYER_STATUS_BUFFERING) {
+		if (last_status == MB_PLAYER_STATUS_BUFFERING && status != MB_PLAYER_STATUS_BUFFERING) {
 			assert(progress != NULL);
 			DEBUG_PRINT("shell", "Destroying progress bar");
 			mbv_window_destroy(progress);
 			progress = NULL;
-			buffering = 0;
+		} else if (last_status == MB_PLAYER_STATUS_PAUSED && status != MB_PLAYER_STATUS_PAUSED) {
+			/* destroy "PAUSED" window */
+			assert(status_overlay != NULL);
+			DEBUG_PRINT("shell", "Destroying status overlay");
+			mbv_window_destroy(status_overlay);
 		}
+
 		switch (status) {
 		case MB_PLAYER_STATUS_READY:
 			DEBUG_PRINT("shell", "Player state changed to READY");
 			mbs_welcomescreen();
 			break;
+
 		case MB_PLAYER_STATUS_BUFFERING:
 			DEBUG_PRINT("shell", "Player state changed to BUFFERING");
 
 			if (progress == NULL) {
 				int sw, sh, px, py;
-
-				assert(buffering == 0);
 
 				DEBUG_PRINT("shell", "Initializing progress bar");
 
@@ -107,26 +108,33 @@ mbs_playerstatuschanged(struct mbp *inst, enum mb_player_status status)
 				assert(progress != NULL);
 
 				mbv_window_show(progress);
-				buffering = 1;
 
 			} else {
-				assert(buffering == 1);
-
 				int donewidth = (pw * mb_player_bufferstate(inst)) / 100;
+
+				assert(progress != NULL);
 
 				mbv_window_clear(progress, 0x3349ffFF);
 				mbv_window_fillrectangle(progress, 0, 0, donewidth, ph);
 				mbv_window_update(progress);
 			}
-
 			break;
+
 		case MB_PLAYER_STATUS_PLAYING:
 			assert(progress == NULL);
 			DEBUG_PRINT("shell", "Player state changed to PLAYING");
 			break;
+
 		case MB_PLAYER_STATUS_PAUSED:
 			assert(progress == NULL);
 			DEBUG_PRINT("shell", "Player state changed to PAUSED");
+
+			status_overlay = mbv_window_new(NULL, 25, 25, 200, 60);
+			mbv_window_clear(status_overlay, 0x000000ff);
+			mbv_window_setcolor(status_overlay, 0xffffffff);
+			mbv_window_drawstring(status_overlay, "PAUSED", 100, 5);
+			assert(status_overlay != NULL);
+			mbv_window_show(status_overlay);
 			break;
 		}
 	}
@@ -183,6 +191,8 @@ mbs_show_dialog(void)
 #ifndef NDEBUG
 			close(input_fd);
 			quit = 1;
+#else
+			abort();
 #endif
 			break;
 		}
@@ -203,18 +213,35 @@ mbs_show_dialog(void)
 		{
 			switch (mb_player_getstatus(player)) {
 			case MB_PLAYER_STATUS_READY:
-				mb_player_play(player, MEDIA_FILE);
+			{
+				const char *media_file = mb_player_getmediafile(player);
+				if (media_file == NULL) {
+					media_file = MEDIA_FILE;
+				} else {
+					DEBUG_VPRINT("shell", "Playing '%s' from memory",
+						media_file);
+				}
+				mb_player_play(player, media_file);
 				break;
+			}
 			case MB_PLAYER_STATUS_BUFFERING:
+			{
 				/* this should never happen since this state is
 				 * a temporary state in mb_player_player(). */
 				abort();
 				break;
+			}
 			case MB_PLAYER_STATUS_PLAYING:
+			{
 				mb_player_pause(player);
 				break;
+			}
 			case MB_PLAYER_STATUS_PAUSED:
+			{
 				mb_player_play(player, NULL);
+				break;
+			}
+			default:
 				break;
 			}
 			break;
