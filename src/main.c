@@ -12,6 +12,7 @@
 
 #include "video.h"
 #include "input.h"
+#include "timers.h"
 #include "player.h"
 #include "shell.h"
 #include "su.h"
@@ -68,6 +69,12 @@ main (int argc, char **argv)
 	/* drop root prividges after initializing framebuffer */
 	mb_su_droproot();
 
+	/* initialize timers system */
+	if (mbt_init() != 0) {
+		fprintf(stderr, "Could not initialize timers system. Exiting.\n");
+		exit(EXIT_FAILURE);
+	}
+
 	/* initialize the shell */
 	if (mbs_init() != 0) {
 		fprintf(stderr, "Could not initialize shell\n");
@@ -92,6 +99,8 @@ main (int argc, char **argv)
 	mb_announce_stop();
 	mb_downloadmanager_destroy();
 	mbs_destroy();
+
+	mbt_shutdown();
 	mbi_destroy();
 	mbv_destroy();
 
