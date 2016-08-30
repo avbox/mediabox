@@ -104,11 +104,12 @@ enum_devices_callback(
 {
 	if (keyboard_device_id == -1 && desc.type & DIDTF_KEYBOARD) {
 		keyboard_device_id = device_id;	
-		fprintf(stderr, "Device id: %i\n", device_id);
-		fprintf(stderr, "Device name: %s\n", desc.name);
+		fprintf(stderr, "input-dfb: Discovered device: %s (id=%i)\n",
+			desc.name, device_id);
 	}
 	return 0;
 }
+
 
 /**
  * mbi_directfb_init() -- Initialize the directfb input driver

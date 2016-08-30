@@ -89,7 +89,9 @@ mbs_playerstatuschanged(struct mbp *inst,
 			break;
 
 		case MB_PLAYER_STATUS_BUFFERING:
-			DEBUG_PRINT("shell", "Player state changed to BUFFERING");
+			if (last_status != MB_PLAYER_STATUS_BUFFERING) {
+				DEBUG_PRINT("shell", "Player state changed to BUFFERING");
+			}
 
 			if (progress == NULL) {
 				int sw, sh, px, py;
