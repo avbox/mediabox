@@ -48,6 +48,11 @@ LDFLAGS="$LDFLAGS $PTHREAD_CFLAGS"
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 CC="$PTHREAD_CC"
 
+PKG_CHECK_MODULES([PANGOFT2], [pangoft2], ,
+	[AS_IF([test -z "${PANGOFT2_LIBS+x}"],
+	[AC_MSG_WARN([Pango Freetype support is required to build some of the examples.])])])
+CFLAGS="$CFLAGS $PANGOFT2_CFLAGS"
+LDFLAGS="$LDFLAGS $PANGOFT2_LIBS"
 
 PKG_CHECK_MODULES(DIRECTFB, [directfb >= 1.7.6], ,
 AC_MSG_ERROR('Unable to find DirectFB. Please make sure library and header files are installed.'))
