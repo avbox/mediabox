@@ -3,6 +3,23 @@
 
 #include <stdint.h>
 
+
+int
+timelt(const struct timespec *time1, const struct timespec *time2);
+
+
+int
+timelte(const struct timespec *time1, const struct timespec *time2);
+
+
+struct timespec
+timeadd(const struct timespec *time1, const struct timespec *time2);
+
+
+struct timespec
+abstime(void);
+
+
 struct timespec
 timediff(const struct timespec *start, const struct timespec *end);
 

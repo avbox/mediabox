@@ -1,8 +1,61 @@
 #include <stdlib.h>
 #include <time.h>
 #include <stdint.h>
+#include <sys/time.h>
 
 static const struct timespec zerotime = { .tv_sec = 0, .tv_nsec = 0 };
+
+
+static inline int
+_timelt(const struct timespec *time1, const struct timespec *time2)
+{
+	if (time1->tv_sec < time2->tv_sec) {
+		return 1;
+	} else if (time1->tv_sec > time2->tv_sec) {
+		return 0;
+	} else if (time1->tv_nsec < time2->tv_nsec) {
+		return 1;
+	} else {
+		return 0;
+	}
+}
+
+
+int
+timelt(const struct timespec *time1, const struct timespec *time2)
+{
+	return _timelt(time1, time2);
+}
+
+
+int
+timelte(const struct timespec *time1, const struct timespec *time2)
+{
+	if (time1->tv_sec == time2->tv_sec && time1->tv_nsec == time2->tv_nsec) {
+		return 1;
+	} else {
+		return _timelt(time1, time2);
+	}
+}
+
+
+struct timespec
+timeadd(const struct timespec *time1, const struct timespec *time2)
+{
+	struct timespec tmp;
+	int64_t nsec = time1->tv_nsec + time2->tv_nsec;
+
+	tmp.tv_sec = time1->tv_sec + time2->tv_sec;
+
+	while (nsec > 1000L * 1000L * 1000L) {
+		nsec -= 1000L * 1000L * 1000L;
+		tmp.tv_sec++;
+	}
+
+	tmp.tv_nsec = nsec;
+	return tmp;
+}
+
 
 struct timespec
 timediff(const struct timespec *start, const struct timespec *end)
@@ -25,6 +78,20 @@ timediff(const struct timespec *start, const struct timespec *end)
 	}
 	return temp;
 }
+
+
+struct timespec
+abstime(void)
+{
+	struct timespec tmp;
+	struct timeval now; 
+	gettimeofday(&now, NULL);
+	long int abstime_ns_large = now.tv_usec * 1000;
+	tmp.tv_sec = now.tv_sec + (abstime_ns_large / 1000000000);
+	tmp.tv_nsec = abstime_ns_large % 1000000000;
+	return tmp;
+}
+
 
 int64_t
 utimediff(const struct timespec *a, const struct timespec *b)
