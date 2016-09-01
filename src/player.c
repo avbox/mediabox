@@ -39,6 +39,7 @@
 #include "debug.h"
 #include "su.h"
 #include "time_util.h"
+#include "timers.h"
 
 
 /*
@@ -162,6 +163,9 @@ struct mbp
 	pthread_t thread;
 
 	int stream_percent;
+
+	int top_overlay_timer_id;
+	char *top_overlay_text;
 };
 
 
@@ -983,29 +987,31 @@ recalc:
 
 		buf = inst->frame_data[inst->video_playback_index];
 
-		/* create a cairo context for this buffer */
-		cairo_t *context;
-		cairo_surface_t *surface;
-		surface = cairo_image_surface_create_for_data(buf,
-			CAIRO_FORMAT_ARGB32, inst->width, inst->height,
-			cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, inst->width));
-		if (surface != NULL) {
-			context = cairo_create(surface);
-			cairo_surface_destroy(surface);
+		/* if there is something to display in the top overlay
+		 * then do it */
+		if (inst->top_overlay_text != NULL) {
+			/* create a cairo context for this frame */
+			cairo_t *context;
+			cairo_surface_t *surface;
+			surface = cairo_image_surface_create_for_data(buf,
+				CAIRO_FORMAT_ARGB32, inst->width, inst->height,
+				cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, inst->width));
+			if (surface != NULL) {
+				context = cairo_create(surface);
+				cairo_surface_destroy(surface);
 
-			if (context != NULL) {
-				PangoRectangle rect;
-				rect.x = 15;
-				rect.width = inst->width - 30;
-				rect.y = 50;
-				rect.height = 400;
+				if (context != NULL) {
+					PangoRectangle rect;
+					rect.x = 15;
+					rect.width = inst->width - 30;
+					rect.y = 50;
+					rect.height = 400;
 
-				mb_player_rendertext(inst, context,
-					"Lorem ipsum dolor sit amet,\n"
-					"consectetur adipiscing elit, "
-					"sed do eiusmod tempor incididunt", &rect);
+					mb_player_rendertext(inst, context,
+						inst->top_overlay_text, &rect);
 
-				cairo_destroy(context);
+					cairo_destroy(context);
+				}
 			}
 		}
 
@@ -2146,6 +2152,27 @@ mb_player_getmediafile(struct mbp *inst)
 }
 
 
+static enum mbt_result
+mb_player_dismiss_top_overlay(int timer_id, void *data)
+{
+	struct mbp *inst = (struct mbp*) data;
+
+	assert(inst != NULL);
+
+	DEBUG_VPRINT("player", "Dismissing top overlay for %s",
+		inst->media_file);
+
+	if (inst->top_overlay_text != NULL) {
+		free(inst->top_overlay_text);
+	}
+
+	inst->top_overlay_text = NULL;
+	inst->top_overlay_timer_id = 0;
+
+	return MB_TIMER_CALLBACK_RESULT_CONTINUE; /* doesn't matter for ONESHOT timers */
+}
+
+
 /**
  * mb_player_play() -- If path is not NULL it opens the file
  * specified by path and starts playing it. If path is NULL
@@ -2156,6 +2183,7 @@ int
 mb_player_play(struct mbp *inst, const char * const path)
 {
 	int last_percent;
+	struct timespec tv;
 
 	assert(inst != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_READY ||
@@ -2239,6 +2267,14 @@ mb_player_play(struct mbp *inst, const char * const path)
 
 	/* we're done buffering, set state to PLAYING */
 	mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
+
+	/* register the top overlay */
+	tv.tv_sec = 15;
+	tv.tv_nsec = 0;
+	inst->top_overlay_text = strdup(inst->media_file);
+	inst->top_overlay_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT,
+		&mb_player_dismiss_top_overlay, inst);
+
 
 	DEBUG_PRINT("player", "Firing rendering threads");
 
@@ -2472,6 +2508,8 @@ mb_player_new(struct mbv_window *window)
 	inst->stream_quit = 0;
 	inst->video_playback_running = 0;
 	inst->audio_playback_running = 0;
+	inst->top_overlay_timer_id = 0;
+	inst->top_overlay_text = NULL;
 
 	/* get the size of the window */
 	if (mbv_window_getsize(inst->window, &inst->width, &inst->height) == -1) {
