@@ -21,7 +21,7 @@
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
 
-#include <pango/pangoft2.h>
+#include <pango/pangocairo.h>
 
 
 /* for direct rendering */
@@ -162,15 +162,10 @@ struct mbp
 	pthread_t thread;
 
 	int stream_percent;
-
-	PangoLayout *top_overlay;
 };
 
 
 /* Pango global context */
-int pango_initialized = 0;
-PangoFontMap *pango_font_map = NULL;
-PangoContext *pango_context = NULL;
 PangoFontDescription *pango_font_desc = NULL;
 
 
@@ -212,17 +207,30 @@ mb_player_printstatus(struct mbp *inst, int fps)
  * the video image
  */
 static int
-mb_player_rendertext(struct mbp *inst, FT_Bitmap *bitmap, char *text, PangoRectangle *rect)
+mb_player_rendertext(struct mbp *inst, cairo_t *context, char *text, PangoRectangle *rect)
 {
+	PangoLayout *layout;
+
 	assert(inst != NULL);
-	assert(bitmap != NULL);
+	assert(context != NULL);
 	assert(text != NULL);
 	assert(rect != NULL);
-	assert(pango_initialized == 1);
 
-	pango_layout_set_alignment(inst->top_overlay, PANGO_ALIGN_CENTER);
-	pango_layout_set_text(inst->top_overlay, text, -1);
-	pango_ft2_render_layout(bitmap, inst->top_overlay, rect->x, rect->y);
+	cairo_translate(context, rect->x, rect->y);
+
+	if ((layout = pango_cairo_create_layout(context)) != NULL) {
+		pango_layout_set_font_description(layout, pango_font_desc);
+		pango_layout_set_width(layout, rect->width * PANGO_SCALE);
+		pango_layout_set_height(layout, 400 * PANGO_SCALE);
+		pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
+		pango_layout_set_text(layout, text, -1);
+
+		cairo_set_source_rgba(context, 1.0, 1.0, 1.0, 1.0);
+		pango_cairo_update_layout(context, layout);
+		pango_cairo_show_layout(context, layout);
+
+		g_object_unref(layout);
+	}
 
 	return 0;
 }
@@ -975,23 +983,32 @@ recalc:
 
 		buf = inst->frame_data[inst->video_playback_index];
 
-		FT_Bitmap bitmap;
-		memset(&bitmap, 0, sizeof(FT_Bitmap));
-		bitmap.rows = inst->height;
-		bitmap.width = inst->width;
-		bitmap.pitch = bitmap.width * 4;
-		bitmap.buffer = buf;
-		bitmap.pixel_mode = FT_PIXEL_MODE_BGRA;
+		/* create a cairo context for this buffer */
+		cairo_t *context;
+		cairo_surface_t *surface;
+		surface = cairo_image_surface_create_for_data(buf,
+			CAIRO_FORMAT_ARGB32, inst->width, inst->height,
+			cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, inst->width));
+		if (surface != NULL) {
+			context = cairo_create(surface);
+			cairo_surface_destroy(surface);
 
-		PangoRectangle rect;
-		rect.x = 0;
-		rect.width = inst->width;
-		rect.y = 50;
-		rect.height = 400;
+			if (context != NULL) {
+				PangoRectangle rect;
+				rect.x = 15;
+				rect.width = inst->width - 30;
+				rect.y = 50;
+				rect.height = 400;
 
+				mb_player_rendertext(inst, context,
+					"Lorem ipsum dolor sit amet,\n"
+					"consectetur adipiscing elit, "
+					"sed do eiusmod tempor incididunt", &rect);
 
-		mb_player_rendertext(inst, &bitmap, "Lorem ipsum dolor sit amet,\nconsectetur adipiscing elit, "
-			"sed do eiusmod tempor incididunt", &rect);
+				cairo_destroy(context);
+			}
+		}
+
 
 		if (LIKELY(inst->use_fbdev)) {
 			mb_player_fbdev_render(inst, fd, &vinfo, &finfo, fb_mem, buf);
@@ -2412,31 +2429,13 @@ mb_player_new(struct mbv_window *window)
 	struct mbp* inst;
 	static int initialized = 0;
 
-	/* initialize pango */
-	if (!pango_initialized) {
-		if ((pango_font_map = pango_ft2_font_map_new()) == NULL) {
-			fprintf(stderr, "player: Could not create pango font map\n");
-			return NULL;
-		}
-
-		/* pango_ft2_font_map_set_resolution((PangoFT2FontMap*) pango_font_map, 1280, 1024); */
-
-		if ((pango_context = pango_font_map_create_context(pango_font_map)) == NULL) {
-			fprintf(stderr, "player: Could not create pango context!!!!!!");
-			return NULL;
-		}
-
-		pango_font_desc = pango_font_description_from_string("Sans Bold 64px");
-		/* pango_font_description_set_absolute_size(pango_font_desc, 64 * PANGO_SCALE); */
-		/* pango_font_description_set_stretch(pango_font_desc, PANGO_STRETCH_EXTRA_EXPANDED); */
-		pango_context_set_font_description(pango_context, pango_font_desc);
-		pango_initialized = 1;
-	}
-
 	/* initialize libav */
 	if (!initialized) {
 		av_register_all();
 		avfilter_register_all();
+
+		pango_font_desc = pango_font_description_from_string("Sans Bold 36px");
+		assert(pango_font_desc != NULL);
 		initialized = 1;
 	}
 
@@ -2501,6 +2500,7 @@ mb_player_new(struct mbv_window *window)
 	 * direct rendering */
 	mb_player_checkfbdev(inst);
 
+	#if 0
 	/* initialize pango layout for info text (top) */
 	if ((inst->top_overlay = pango_layout_new(pango_context)) == NULL) {
 		fprintf(stderr, "player: Could not create pango layout\n");
@@ -2511,6 +2511,7 @@ mb_player_new(struct mbv_window *window)
 	pango_layout_set_font_description(inst->top_overlay, pango_font_desc);
 	pango_layout_set_width(inst->top_overlay, inst->width * PANGO_SCALE);
 	pango_layout_set_height(inst->top_overlay, 400 * PANGO_SCALE);
+	#endif
 
 	return inst;
 }
@@ -2532,9 +2533,6 @@ mb_player_destroy(struct mbp *inst)
 	if (inst->media_file != NULL) {
 		free((void*) inst->media_file);
 	}
-	if (inst->top_overlay != NULL) {
-		g_object_unref(inst->top_overlay);
-	}
 	free(inst);
 }
 
@@ -2543,11 +2541,5 @@ mb_player_shutdown()
 {
 	if (LIKELY(pango_font_desc != NULL)) {
 		pango_font_description_free(pango_font_desc);
-	}
-	if (LIKELY(pango_context != NULL)) {
-		g_object_unref(pango_context);
-	}
-	if (LIKELY(pango_font_map != NULL)) {
-		g_object_unref(pango_font_map);
 	}
 }
