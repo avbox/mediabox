@@ -2,7 +2,7 @@
 #define __MB_VIDEO_H__
 
 #include <stdint.h>
-#include <cairo/cairo.h>
+#include <pango/pangocairo.h>
 
 
 #define MBV_DEFAULT_FONT        ("/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf")
@@ -11,12 +11,29 @@
 #define MBV_DEFAULT_OPACITY     (100)
 
 
+/* convenience macros for converting colors to RGBA floating point
+ * for cairo */
+#define CAIRO_COLOR_RGBA_R(x) (((double)((x >> 24) & 0xFF)) / 256.0F)
+#define CAIRO_COLOR_RGBA_G(x) (((double)((x >> 16) & 0xFF)) / 256.0F)
+#define CAIRO_COLOR_RGBA_B(x) (((double)((x >>  8) & 0xFF)) / 256.0F)
+#define CAIRO_COLOR_RGBA_A(x) (((double)((x      ) & 0xFF)) / 256.0F)
+#define CAIRO_COLOR_RGBA(color) \
+	CAIRO_COLOR_RGBA_R(color), \
+	CAIRO_COLOR_RGBA_G(color), \
+	CAIRO_COLOR_RGBA_B(color), \
+	CAIRO_COLOR_RGBA_A(color)
+
+
 struct mbv_window;
 struct mbv_font;
 
 
 cairo_t *
 mbv_window_cairo_begin(struct mbv_window *window);
+
+
+PangoFontDescription *
+mbv_getdefaultfont(void);
 
 
 void

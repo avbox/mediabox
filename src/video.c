@@ -1,9 +1,17 @@
 #include <stdlib.h>
-#include <cairo/cairo.h>
+#include <assert.h>
+#include <pango/pangocairo.h>
 
+#include "video.h"
 #include "video-directfb.h"
+#include "debug.h"
+
 
 struct mbv_window;
+
+
+static PangoFontDescription *font_desc;
+static unsigned int forecolor;
 
 
 cairo_t *
@@ -20,6 +28,16 @@ mbv_window_cairo_end(struct mbv_window *window)
 }
 
 
+/**
+ * mbv_getdefaultfont() -- Gets the default system font description.
+ */
+PangoFontDescription *
+mbv_getdefaultfont(void)
+{
+	return font_desc;
+}
+
+
 int
 mbv_window_getsize(struct mbv_window *window, int *width, int *height)
 {
@@ -27,6 +45,9 @@ mbv_window_getsize(struct mbv_window *window, int *width, int *height)
 }
 
 
+/**
+ * mbv_window_settitle() -- Sets the window title.
+ */
 int
 mbv_window_settitle(struct mbv_window *window, char *title)
 {
@@ -137,6 +158,7 @@ mbv_window_getcanvassize(struct mbv_window *window,
 void
 mbv_window_setcolor(struct mbv_window *window, uint32_t color)
 {
+	forecolor = color;
 	mbv_dfb_window_setcolor(window, color);
 }
 
@@ -153,7 +175,48 @@ void
 mbv_window_drawstring(struct mbv_window *window,
 	char *str, int x, int y)
 {
-	mbv_dfb_window_drawstring(window, str, x, y);
+	PangoLayout *layout;
+	cairo_t *context;
+	int window_width, window_height;
+
+
+	assert(window != NULL);
+
+	if (str == NULL) {
+		DEBUG_PRINT("video", "Did not draw null string");
+		return;
+	}
+
+	/* TODO: Rewrite this using cairo directly. Because we need
+	 * to guarantee that this function succeeds */
+
+	mbv_window_getcanvassize(window, &window_width, &window_height);
+
+	if ((context = mbv_window_cairo_begin(window)) != NULL) {
+
+		cairo_translate(context, 0, 0);
+
+		if ((layout = pango_cairo_create_layout(context)) != NULL) {
+
+			DEBUG_VPRINT("video", "Drawing string (x=%i,y=%i,w=%i,h=%i): '%s'",
+				x, y, window_width, window_height, str);
+
+			pango_layout_set_font_description(layout, font_desc);
+			pango_layout_set_width(layout, window_width * PANGO_SCALE);
+			pango_layout_set_height(layout, window_height * PANGO_SCALE);
+			pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
+			pango_layout_set_text(layout, str, -1);
+
+			cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(forecolor));
+			pango_cairo_update_layout(context, layout);
+			pango_cairo_show_layout(context, layout);
+		} else {
+			DEBUG_PRINT("video", "Could not create layout");
+		}
+		mbv_window_cairo_end(window);
+	} else {
+		DEBUG_PRINT("video", "Could not get cairo context");
+	}
 }
 
 
@@ -202,6 +265,12 @@ mbv_screen_width_get(void)
 void
 mbv_init(int argc, char **argv)
 {
+	font_desc = pango_font_description_from_string("Sans Bold 36px");
+	if (font_desc == NULL) {
+		fprintf(stderr, "video: Could not initialize font description. Exiting!\n");
+		exit(EXIT_FAILURE);
+	}
+
 	mbv_dfb_init(argc, argv);
 }
 
@@ -209,6 +278,9 @@ mbv_init(int argc, char **argv)
 void
 mbv_destroy()
 {
+	assert(font_desc != NULL);
+
+	pango_font_description_free(font_desc);
 	mbv_dfb_destroy();
 }
 

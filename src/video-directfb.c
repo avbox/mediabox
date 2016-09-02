@@ -613,6 +613,10 @@ mbv_dfb_window_getchildwindow(struct mbv_window *window,
 	inst->visible = 0;
 	inst->font_height = window->font_height;
 	inst->cairo_context = NULL;
+	inst->rect.w = width;
+	inst->rect.h = height;
+	inst->rect.x = x;
+	inst->rect.y = y;
 
 	/* create the sub-window surface */
 	DFBRectangle rect = { x, y, width, height };
