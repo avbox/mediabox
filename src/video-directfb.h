@@ -2,6 +2,7 @@
 #define __MB_VIDEO_DIRECTFB__
 
 #include <stdint.h>
+#include <cairo/cairo.h>
 
 struct mbv_window;
 
@@ -23,6 +24,22 @@ mbv_dfb_window_settitle(struct mbv_window *window, char *title);
 
 struct mbv_font *
 mbv_dfb_font_new(char *file, int height);
+
+
+/**
+ * mbv_dfb_window_cairo_begin() -- Gets a cairo context for drawing
+ * to the window
+ */
+cairo_t *
+mbv_dfb_window_cairo_begin(struct mbv_window *window);
+
+
+/**
+ * mbv_dfb_window_cairo_end() -- Ends a cairo drawing session and
+ * unlocks the surface
+ */
+void
+mbv_dfb_window_cairo_end(struct mbv_window *window);
 
 
 void

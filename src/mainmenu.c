@@ -45,11 +45,13 @@ mb_mainmenu_init(void)
 	font_height = mbv_getdefaultfontheight();
 	window_height = 30 + font_height + ((font_height + 10) * n_entries);
 
+	DEBUG_VPRINT("mainmenu", "Default font size: %i", font_height);
+
 	/* set width according to screen size */
 	switch (xres) {
-	case 1024: window_width = 400; break;
-	case 1280: window_width = 500; break;
-	case 1920: window_width = 600; break;
+	case 1024: window_width =  400; break;
+	case 1280: window_width =  800; break;
+	case 1920: window_width = 1024; break;
 	case 640:
 	default:   window_width = 300; break;
 	}

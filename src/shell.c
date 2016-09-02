@@ -116,7 +116,7 @@ mbs_playerstatuschanged(struct mbp *inst,
 
 				assert(progress != NULL);
 
-				mbv_window_clear(progress, 0x3349ffFF);
+				mbv_window_clear(progress, MBV_DEFAULT_BACKGROUND);
 				mbv_window_fillrectangle(progress, 0, 0, donewidth, ph);
 				mbv_window_update(progress);
 			}

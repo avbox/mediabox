@@ -206,13 +206,17 @@ mb_library_init(void)
 {
 	int resx, resy, width;
 	const int height = 450;
-	int width_percent = 60;
 
 	mbv_getscreensize(&resx, &resy);
-	if (resx == 640) {
-		width_percent = 90;
+
+	/* set width according to screen size */
+	switch (resx) {
+	case 1024: width =  800; break;
+	case 1280: width = 1000; break;
+	case 1920: width = 1280; break;
+	case 640:
+	default:   width = 300; break;
 	}
-	width = (resx * width_percent) / 100;
 
 	/* create a new window for the library dialog */
 	window = mbv_window_new("MEDIA LIBRARY",

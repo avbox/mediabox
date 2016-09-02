@@ -8,6 +8,7 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+#include <pango/pangocairo.h>
 
 
 #include "video.h"
@@ -16,6 +17,7 @@
 #include "library.h"
 #include "su.h"
 #include "shell.h"
+#include "debug.h"
 
 
 static struct mbv_window *window = NULL;
@@ -44,7 +46,7 @@ mb_about_init(void)
 	/* set width according to screen size */
 	switch (xres) {
 	case 1024: window_width = 500; break;
-	case 1280: window_width = 600; break;
+	case 1280: window_width = 900; break;
 	case 1920: window_width = 700; break;
 	case 640:
 	default:   window_width = 400; break;
@@ -69,13 +71,41 @@ mb_about_showdialog(void)
 {
 	int fd;
 	mbi_event e;
+	cairo_t *context;
 
-	mbv_window_drawstring(window, "MEDIABOX " PACKAGE_VERSION, window_width / 2, 10);
-	mbv_window_drawstring(window, "Copyright (c) 2016 - Fernando Rodriguez", window_width / 2, 60);
-	mbv_window_drawstring(window, "All rights reserved", window_width / 2, 80);
+	PangoLayout *layout;
+	PangoFontDescription *font_desc;
 
-	mbv_window_drawstring(window, "This software uses code of FFmpeg licensed", window_width / 2, 120);
-	mbv_window_drawstring(window, "under the LGPLv2.1", window_width / 2, 140);
+	if ((context = mbv_window_cairo_begin(window)) != NULL) {
+
+		cairo_translate(context, 0, 20);
+
+		if ((layout = pango_cairo_create_layout(context)) != NULL) {
+			if ((font_desc = pango_font_description_from_string("Sans Bold 36px")) != NULL) {
+				const char *text = "MEDIABOX v" PACKAGE_VERSION "\n\n"
+					"Copyright (c) 2016 - Fernando Rodriguez\n"
+					"All rights reserved.\n\n"
+					"This software uses code of FFmpeg licensed "
+					"under the LGPLv2.1";
+				pango_layout_set_font_description(layout, font_desc);
+				pango_font_description_free(font_desc);
+				pango_layout_set_width(layout, window_width * PANGO_SCALE);
+				pango_layout_set_height(layout, window_height * PANGO_SCALE);
+				pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
+				pango_layout_set_text(layout, text, -1);
+
+				cairo_set_source_rgba(context, 1.0, 1.0, 1.0, 1.0);
+				pango_cairo_update_layout(context, layout);
+				pango_cairo_show_layout(context, layout);
+			} else {
+				DEBUG_PRINT("about", "Could not create font descriptor");
+			}
+			g_object_unref(layout);
+		}
+		mbv_window_cairo_end(window);
+	} else {
+		DEBUG_PRINT("about", "Could not get cairo context");
+	}
 
 	/* show the menu window */
         mbv_window_show(window);

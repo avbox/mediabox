@@ -6,14 +6,17 @@
 #include <string.h>
 #include <directfb.h>
 #include <directfb_windows.h>
+#include <cairo/cairo.h>
 
 #include "debug.h"
+#include "video.h"
 
 /* #define DEBUG_MEMORY */
-#define DEFAULT_FONT        ("/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf")
+#define DEFAULT_FONT        (MBV_DEFAULT_FONT)
 #define DEFAULT_FONT_HEIGHT (default_font_height)
-#define DEFAULT_FOREGROUND  (0xFFFFFFFF)
-#define DEFAULT_OPACITY     (100)
+#define DEFAULT_FOREGROUND  (MBV_DEFAULT_FOREGROUND)
+#define DEFAULT_BACKGROUND  (MBV_DEFAULT_BACKGROUND)
+#define DEFAULT_OPACITY     (MBV_DEFAULT_OPACITY)
 
 
 /* window object structure */
@@ -25,6 +28,7 @@ struct mbv_window
 	IDirectFBSurface *title_surface;
 	IDirectFBSurface *content;
 	DFBRectangle rect;
+	cairo_t *cairo_context;
 	char *title;
 	int visible;
 	int font_height;
@@ -401,6 +405,7 @@ mbv_dfb_window_new(
 	win->rect.y = posy;
 	win->font_height = DEFAULT_FONT_HEIGHT;
 	win->opacity = (uint8_t) ((0xFF * DEFAULT_OPACITY) / 100);
+	win->cairo_context = NULL;
 
 	if (0 && root_window == NULL) {
 		DFBCHECK(layer->GetWindow(layer, 1, &win->dfb_window));
@@ -428,7 +433,7 @@ mbv_dfb_window_new(
 	//DFBCHECK(win->surface->SetDrawingFlags(win->surface, DSDRAW_BLEND));
 
 	/* clear window */
-	DFBCHECK(win->surface->Clear(win->surface, 0x33, 0x49, 0xff, 0xFF));
+	DFBCHECK(win->surface->Clear(win->surface, DFBCOLOR(DEFAULT_BACKGROUND)));
 
 	/* set default font as window font */
 	DFBCHECK(win->surface->SetFont(win->surface, font));
@@ -492,7 +497,7 @@ mbv_dfb_window_settitle(struct mbv_window *window, char *title)
 
 	if (window->title_surface) {
 		DFBCHECK(window->title_surface->GetSize(window->title_surface, &width, &height));
-		DFBCHECK(window->title_surface->Clear(window->title_surface, DFBCOLOR(0x3349ffFF)));
+		DFBCHECK(window->title_surface->Clear(window->title_surface, DFBCOLOR(DEFAULT_BACKGROUND)));
 		DFBCHECK(window->surface->SetColor(window->title_surface, DFBCOLOR(DEFAULT_FOREGROUND)));
 		DFBCHECK(window->surface->DrawString(window->title_surface, window->title, -1,
 			width / 2, 5, DSTF_TOPCENTER));
@@ -501,6 +506,57 @@ mbv_dfb_window_settitle(struct mbv_window *window, char *title)
 	}
 
 	return 0;
+}
+
+
+/**
+ * mbv_dfb_window_cairo_begin() -- Gets a cairo context for drawing
+ * to the window
+ */
+cairo_t *
+mbv_dfb_window_cairo_begin(struct mbv_window *window)
+{
+	cairo_surface_t *surface;
+	int pitch;
+	void *buf;
+
+	assert(window != NULL);
+	assert(window->cairo_context == NULL);
+
+	DFBCHECK(window->content->Lock(window->content, DSLF_READ | DSLF_WRITE, &buf, &pitch));
+
+	surface = cairo_image_surface_create_for_data(buf,
+		CAIRO_FORMAT_ARGB32, window->rect.w, window->rect.h,
+		cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, window->rect.w));
+	if (surface == NULL) {
+		DFBCHECK(window->content->Unlock(window->content));
+		return NULL;
+	}
+
+	window->cairo_context = cairo_create(surface);
+	cairo_surface_destroy(surface);
+	if (window->cairo_context == NULL) {
+		DFBCHECK(window->content->Unlock(window->content));
+	}
+		
+	return window->cairo_context;
+}
+
+
+/**
+ * mbv_dfb_window_cairo_end() -- Ends a cairo drawing session and
+ * unlocks the surface
+ */
+void
+mbv_dfb_window_cairo_end(struct mbv_window *window)
+{
+	assert(window != NULL);
+	assert(window->cairo_context != NULL);
+
+	cairo_destroy(window->cairo_context);
+	window->cairo_context = NULL;
+
+	DFBCHECK(window->content->Unlock(window->content));
 }
 
 
@@ -556,6 +612,7 @@ mbv_dfb_window_getchildwindow(struct mbv_window *window,
 	inst->title_surface = NULL;
 	inst->visible = 0;
 	inst->font_height = window->font_height;
+	inst->cairo_context = NULL;
 
 	/* create the sub-window surface */
 	DFBRectangle rect = { x, y, width, height };
@@ -775,7 +832,7 @@ mbv_dfb_init(int argc, char **argv)
 	switch (screen_width) {
 	case 640:  default_font_height = 16; break;
 	case 1024: default_font_height = 20; break;
-	case 1280: default_font_height = 22; break;
+	case 1280: default_font_height = 32; break;
 	case 1920: default_font_height = 24; break;
 	}
 	DFBFontDescription font_dsc = { .flags = DFDESC_HEIGHT, .height = default_font_height };

@@ -51,8 +51,8 @@ mb_ui_menuitem_update(struct mb_ui_menu *inst, mb_ui_menuitem *item)
 		mbv_window_setcolor(inst->selected->window, 0x000000ff);
 		mbv_window_drawstring(inst->selected->window, inst->selected->name, canvas_width / 2, 5);
 	} else {
-		mbv_window_clear(item->window, 0x3349ffff);
-		mbv_window_setcolor(item->window, 0xffffffff);
+		mbv_window_clear(item->window, MBV_DEFAULT_BACKGROUND);
+		mbv_window_setcolor(item->window, MBV_DEFAULT_FOREGROUND);
 		mbv_window_drawstring(item->window, item->name, canvas_width / 2, 5);
 	}
 }
@@ -212,8 +212,8 @@ mb_ui_menu_additem(struct mb_ui_menu *inst, char *name, void *data)
 			mbv_window_clear(item->window, 0xFFFFFFFF);
 			mbv_window_setcolor(item->window, 0x000000FF);
 		} else {
-			mbv_window_clear(item->window, 0x3349ffff);
-			mbv_window_setcolor(item->window, 0xffffffff);
+			mbv_window_clear(item->window, MBV_DEFAULT_BACKGROUND);
+			mbv_window_setcolor(item->window, MBV_DEFAULT_FOREGROUND);
 		}
 
 		/* draw the menu item */
@@ -248,7 +248,7 @@ mb_ui_menu_removeitem(struct mb_ui_menu *inst, void *item)
 		if (menuitem->data == item) {
 			LIST_REMOVE(menuitem);
 			if (menuitem->window != NULL) {
-				mbv_window_clear(menuitem->window, 0x3349ffff);
+				mbv_window_clear(menuitem->window, MBV_DEFAULT_BACKGROUND);
 			}
 			free(menuitem->name);
 			free(menuitem);
@@ -277,7 +277,7 @@ mb_ui_menu_clearitems(struct mb_ui_menu *inst)
 	LIST_FOREACH_SAFE(mb_ui_menuitem*, item, &inst->items, {
 		LIST_REMOVE(item);
 		if (item->window != NULL) {
-			mbv_window_clear(item->window, 0x3349ffff);
+			mbv_window_clear(item->window, MBV_DEFAULT_BACKGROUND);
 		}
 		free(item->name);
 		free(item);

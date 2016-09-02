@@ -1,8 +1,23 @@
 #include <stdlib.h>
+#include <cairo/cairo.h>
 
 #include "video-directfb.h"
 
 struct mbv_window;
+
+
+cairo_t *
+mbv_window_cairo_begin(struct mbv_window *window)
+{
+	return mbv_dfb_window_cairo_begin(window);
+}
+
+
+void
+mbv_window_cairo_end(struct mbv_window *window)
+{
+	mbv_dfb_window_cairo_end(window);
+}
 
 
 int
@@ -10,6 +25,7 @@ mbv_window_getsize(struct mbv_window *window, int *width, int *height)
 {
 	return mbv_dfb_window_getsize(window, width, height);
 }
+
 
 int
 mbv_window_settitle(struct mbv_window *window, char *title)

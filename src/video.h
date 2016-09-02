@@ -2,9 +2,25 @@
 #define __MB_VIDEO_H__
 
 #include <stdint.h>
+#include <cairo/cairo.h>
+
+
+#define MBV_DEFAULT_FONT        ("/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf")
+#define MBV_DEFAULT_FOREGROUND  (0xFFFFFFFF)
+#define MBV_DEFAULT_BACKGROUND  (0x0951AFFF)
+#define MBV_DEFAULT_OPACITY     (100)
+
 
 struct mbv_window;
 struct mbv_font;
+
+
+cairo_t *
+mbv_window_cairo_begin(struct mbv_window *window);
+
+
+void
+mbv_window_cairo_end(struct mbv_window *window);
 
 
 void
