@@ -19,7 +19,6 @@
 
 static int pw = 0, ph = 0;
 static struct mbv_window *root_window = NULL;
-static struct mbv_window *status_overlay = NULL;
 static struct mbv_window *progress = NULL;
 static struct mbp *player = NULL;
 static int input_fd = -1;
@@ -79,10 +78,8 @@ mbs_playerstatuschanged(struct mbp *inst,
 			mbv_window_destroy(progress);
 			progress = NULL;
 		} else if (last_status == MB_PLAYER_STATUS_PAUSED && status != MB_PLAYER_STATUS_PAUSED) {
-			/* destroy "PAUSED" window */
-			assert(status_overlay != NULL);
-			DEBUG_PRINT("shell", "Destroying status overlay");
-			mbv_window_destroy(status_overlay);
+			mb_player_showoverlaytext(player, "", 1,
+				MBV_ALIGN_LEFT);
 		}
 
 		switch (status) {
@@ -134,12 +131,9 @@ mbs_playerstatuschanged(struct mbp *inst,
 			assert(progress == NULL);
 			DEBUG_PRINT("shell", "Player state changed to PAUSED");
 
-			status_overlay = mbv_window_new(NULL, 25, 25, 200, 60);
-			mbv_window_clear(status_overlay, 0x000000ff);
-			mbv_window_setcolor(status_overlay, 0xffffffff);
-			mbv_window_drawstring(status_overlay, "PAUSED", 100, 5);
-			assert(status_overlay != NULL);
-			mbv_window_show(status_overlay);
+			mb_player_showoverlaytext(player, "  PAUSED", 1000,
+				MBV_ALIGN_LEFT);
+			mb_player_update(inst);
 			break;
 		}
 	}
@@ -291,6 +285,7 @@ mbs_show_dialog(void)
 			fprintf(stderr, "mbs: Received event %i\n", (int) e);
 			break;
 		}
+		mb_player_update(player);
 	}
 
 	fprintf(stderr, "mbs: Exiting\n");

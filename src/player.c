@@ -132,6 +132,7 @@ struct mbp
 	AVCodecContext *video_codec_ctx;
 	AVPacket video_packet[MB_VIDEO_BUFFER_PACKETS];
 	char video_packet_state[MB_VIDEO_BUFFER_PACKETS];
+	void *video_last_frame;
 	uint8_t frame_repeat[MB_VIDEO_BUFFER_FRAMES];
 	uint8_t *frame_data[MB_VIDEO_BUFFER_FRAMES];
 	char frame_state[MB_VIDEO_BUFFER_FRAMES];
@@ -809,6 +810,42 @@ mb_player_wait4audio(struct mbp* inst, int *quit)
 }
 
 
+static inline void
+mb_player_postproc(struct mbp *inst, void *buf)
+{
+	/* if there is something to display in the top overlay
+	 * then do it */
+	if (UNLIKELY(inst->top_overlay_text != NULL)) {
+		pthread_mutex_lock(&inst->top_overlay_lock);
+		if (LIKELY(inst->top_overlay_text != NULL)) {
+			/* create a cairo context for this frame */
+			cairo_t *context;
+			cairo_surface_t *surface;
+			surface = cairo_image_surface_create_for_data(buf,
+				CAIRO_FORMAT_ARGB32, inst->width, inst->height,
+				cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, inst->width));
+			if (LIKELY(surface != NULL)) {
+				context = cairo_create(surface);
+				cairo_surface_destroy(surface);
+
+				if (LIKELY(context != NULL)) {
+					PangoRectangle rect;
+					rect.x = 15;
+					rect.width = inst->width - 30;
+					rect.y = 50;
+					rect.height = 400;
+
+					mb_player_rendertext(inst, context,
+						inst->top_overlay_text, &rect);
+
+					cairo_destroy(context);
+				}
+			}
+		}
+		pthread_mutex_unlock(&inst->top_overlay_lock);
+	}
+}
+
 /**
  * mb_player_vrend_thread() -- Video rendering thread.
  */
@@ -924,6 +961,20 @@ mb_player_video(void *arg)
 			pthread_mutex_unlock(&inst->video_output_lock);
 		}
 
+		/* dereference the frame pointer for later use */
+		buf = inst->frame_data[inst->video_playback_index];
+
+		/* copy to the last frame buffer in case we need to
+		 * repaint the screen. This is fast so it makes sense
+		 * to do it for every frame even if it will get skipped
+		 * because that way if the video is paused the latest
+		 * frame can be drawn even if we're skipping frames */
+		memcpy(inst->video_last_frame, buf, inst->bufsz);
+
+		/* perform post processing (overlays, etc) */
+		mb_player_postproc(inst, buf);
+
+		/* get the frame pts */
 		frame_pts = inst->frame_pts[inst->video_playback_index];
 
 		if  (LIKELY(frame_pts != AV_NOPTS_VALUE)) {
@@ -988,40 +1039,6 @@ recalc:
 			}
 		}
 
-		buf = inst->frame_data[inst->video_playback_index];
-
-		/* if there is something to display in the top overlay
-		 * then do it */
-		if (UNLIKELY(inst->top_overlay_text != NULL)) {
-			pthread_mutex_lock(&inst->top_overlay_lock);
-			if (LIKELY(inst->top_overlay_text != NULL)) {
-				/* create a cairo context for this frame */
-				cairo_t *context;
-				cairo_surface_t *surface;
-				surface = cairo_image_surface_create_for_data(buf,
-					CAIRO_FORMAT_ARGB32, inst->width, inst->height,
-					cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, inst->width));
-				if (LIKELY(surface != NULL)) {
-					context = cairo_create(surface);
-					cairo_surface_destroy(surface);
-
-					if (LIKELY(context != NULL)) {
-						PangoRectangle rect;
-						rect.x = 15;
-						rect.width = inst->width - 30;
-						rect.y = 50;
-						rect.height = 400;
-
-						mb_player_rendertext(inst, context,
-							inst->top_overlay_text, &rect);
-
-						cairo_destroy(context);
-					}
-				}
-			}
-			pthread_mutex_unlock(&inst->top_overlay_lock);
-		}
-
 
 		if (LIKELY(inst->use_fbdev)) {
 			mb_player_fbdev_render(inst, fd, &vinfo, &finfo, fb_mem, buf);
@@ -1079,6 +1096,25 @@ video_exit:
 	
 }
 #endif
+
+
+/**
+ * mb_player_update() -- Update the player window
+ */
+void
+mb_player_update(struct mbp *inst)
+{
+	void *frame_data;
+
+	if ((frame_data = av_malloc(inst->bufsz)) == NULL) {
+		return;
+	}
+
+	memcpy(frame_data, inst->video_last_frame, inst->bufsz);
+	mb_player_postproc(inst, frame_data);
+	mbv_window_blit_buffer(inst->window, frame_data, inst->width, inst->height, 0, 0);
+	free(frame_data);
+}
 
 
 /**
@@ -1370,6 +1406,7 @@ mb_player_video_decode(void *arg)
 	assert(inst->video_codec_ctx == NULL);
 
 	/* initialize all frame data buffers to NULL */
+	inst->video_last_frame = NULL;
 	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
 		inst->frame_data[i] = NULL;
 	}
@@ -1399,6 +1436,10 @@ mb_player_video_decode(void *arg)
 
 	/* calculate the size of each frame and allocate buffer for it */
 	inst->bufsz = avpicture_get_size(MB_DECODER_PIX_FMT, inst->width, inst->height);
+	inst->video_last_frame = av_malloc(inst->bufsz * sizeof(int8_t));
+	if (inst->video_last_frame == NULL) {
+		goto decoder_exit;
+	}
 	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
 		inst->frame_data[i] = av_malloc(inst->bufsz * sizeof(int8_t));
 		if (inst->frame_data[i] == NULL) {
@@ -1531,6 +1572,10 @@ mb_player_video_decode(void *arg)
 	}
 decoder_exit:
 	DEBUG_PRINT("player", "Video decoder exiting");
+
+	if (inst->video_last_frame != NULL) {
+		free(inst->video_last_frame);
+	}
 
 	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
 		if (inst->frame_data[i] != NULL) {
@@ -2049,16 +2094,6 @@ mb_player_getstatus(struct mbp *inst)
 }
 
 
-/**
- * mb_player_update() -- Redraw the media player window
- */
-void
-mb_player_update(struct mbp *inst)
-{
-	assert(inst != NULL);
-}
-
-
 int
 mb_player_add_status_callback(struct mbp *inst, mb_player_status_callback callback)
 {
@@ -2545,6 +2580,8 @@ mb_player_new(struct mbv_window *window)
 		return NULL;
 	}
 
+	memset(inst, 0, sizeof(struct mbp));
+
 	/* if no window argument was provided then use the root window */
 	if (window == NULL) {
 		window = mbv_getrootwindow();
@@ -2556,23 +2593,9 @@ mb_player_new(struct mbv_window *window)
 	}
 
 	inst->window = window;
-	inst->media_file = NULL;
-	inst->buf = NULL;
-	inst->fmt_ctx = NULL;
-	inst->bufsz = 0;
 	inst->use_fbdev = 1;
 	inst->video_stream_index = -1;
-	inst->video_paused = 0;
-	inst->audio_paused = 0;
-	inst->status_callback = NULL;
 	inst->status = MB_PLAYER_STATUS_READY;
-	inst->video_decoder_pts = 0;
-	inst->video_codec_ctx = NULL;
-	inst->stream_quit = 0;
-	inst->video_playback_running = 0;
-	inst->audio_playback_running = 0;
-	inst->top_overlay_timer_id = 0;
-	inst->top_overlay_text = NULL;
 
 	/* get the size of the window */
 	if (mbv_window_getsize(inst->window, &inst->width, &inst->height) == -1) {
