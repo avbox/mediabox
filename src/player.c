@@ -60,7 +60,7 @@
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
 #define MB_DECODER_PRINT_FPS
-
+#define ENABLE_DOUBLE_BUFFERING (1)
 
 /* render directly to fbdev */
 #define MB_FBDEV_RENDERER
@@ -133,6 +133,9 @@ struct mbp
 	AVPacket video_packet[MB_VIDEO_BUFFER_PACKETS];
 	char video_packet_state[MB_VIDEO_BUFFER_PACKETS];
 	void *video_last_frame;
+#ifdef ENABLE_DOUBLE_BUFFERING
+	void *video_buffer;
+#endif
 	uint8_t frame_repeat[MB_VIDEO_BUFFER_FRAMES];
 	uint8_t *frame_data[MB_VIDEO_BUFFER_FRAMES];
 	char frame_state[MB_VIDEO_BUFFER_FRAMES];
@@ -767,21 +770,32 @@ mb_player_fbdev_render(struct mbp *inst,
 {
 	int x, y, pixelsz;
 	unsigned int screen = 0;
+	void *fb_buf;
 	uint8_t *m = (uint8_t*) mbv_dfb_getscreenmask();
 
 	pixelsz = vinfo->bits_per_pixel / CHAR_BIT;
 	
+#ifdef ENABLE_DOUBLE_BUFFERING
+	fb_buf = inst->video_buffer;
+#else
+	fb_buf = fb_mem;
 	(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
+#endif
 
 	for (y = 0; y < vinfo->yres; y++) {
 		for (x = 0; x < vinfo->xres; x++) {
 			if (LIKELY(!m[(inst->width * y) + x])) {
 				long location = (x + vinfo->xoffset) * pixelsz + (y + vinfo->yoffset) * finfo->line_length;
 				uint32_t *ppix = (uint32_t*) buf;
-				*((uint32_t*)(fb_mem + location)) = *(ppix + (((inst->width * y) + x)));
+				*((uint32_t*)(fb_buf + location)) = *(ppix + (((inst->width * y) + x)));
 			}
 		}
 	}
+
+#ifdef ENABLE_DOUBLE_BUFFERING
+	(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
+	memcpy(fb_mem, inst->video_buffer, inst->bufsz * sizeof(uint8_t));
+#endif
 }
 
 
@@ -1407,6 +1421,9 @@ mb_player_video_decode(void *arg)
 
 	/* initialize all frame data buffers to NULL */
 	inst->video_last_frame = NULL;
+#ifdef ENABLE_DOUBLE_BUFFERING
+	inst->video_buffer = NULL;
+#endif
 	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
 		inst->frame_data[i] = NULL;
 	}
@@ -1436,6 +1453,12 @@ mb_player_video_decode(void *arg)
 
 	/* calculate the size of each frame and allocate buffer for it */
 	inst->bufsz = avpicture_get_size(MB_DECODER_PIX_FMT, inst->width, inst->height);
+#ifdef ENABLE_DOUBLE_BUFFERING
+	inst->video_buffer = av_malloc(inst->bufsz * sizeof(int8_t));
+	if (inst->video_buffer == NULL) {
+		goto decoder_exit;
+	}
+#endif
 	inst->video_last_frame = av_malloc(inst->bufsz * sizeof(int8_t));
 	if (inst->video_last_frame == NULL) {
 		goto decoder_exit;
@@ -1575,7 +1598,15 @@ decoder_exit:
 
 	if (inst->video_last_frame != NULL) {
 		free(inst->video_last_frame);
+		inst->video_last_frame = NULL;
 	}
+
+#ifdef ENABLE_DOUBLE_BUFFERING
+	if (inst->video_buffer != NULL) {
+		free(inst->video_buffer);
+		inst->video_buffer = NULL;
+	}
+#endif
 
 	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
 		if (inst->frame_data[i] != NULL) {
