@@ -277,6 +277,16 @@ mbs_show_dialog(void)
 			}
 			break;
 		}
+		case MBI_EVENT_KBD_I:
+		case MBI_EVENT_INFO:
+		{
+			char *title = mb_player_gettitle(player);
+			if (title != NULL) {
+				mb_player_showoverlaytext(player, title, 15,
+					MBV_ALIGN_CENTER);
+				free(title);
+			}
+		}
 		default:
 			fprintf(stderr, "mbs: Received event %i\n", (int) e);
 			break;

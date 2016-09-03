@@ -33,10 +33,28 @@ mb_player_getstatus(struct mbp* inst);
 
 
 /**
+ * mb_player_showoverlaytext() -- Shows overlay text on the top of the
+ * screen.
+ */
+void
+mb_player_showoverlaytext(struct mbp *inst,
+	const char *text, int duration, enum mbv_alignment alignment);
+
+
+/**
  * Get the last played file
  */
 const char *
 mb_player_getmediafile(struct mbp *inst);
+
+
+/**
+ * mb_player_gettitle() -- Gets the title of the currently playing
+ * media file or NULL if nothing is playing. The result needs to be
+ * freed with free().
+ */
+char *
+mb_player_gettitle(struct mbp *inst);
 
 
 /**

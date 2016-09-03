@@ -186,7 +186,7 @@ mbt_register(struct timespec *interval,
 	/* wake the timers thread */
 	pthread_cond_signal(&timers_signal);
 
-	return 0;
+	return timer->id;
 }
 
 

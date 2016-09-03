@@ -72,7 +72,6 @@
 #define LIKELY(x)               (__builtin_expect(!!(x), 1))
 #define UNLIKELY(x)             (__builtin_expect(!!(x), 0))
 
-
 struct mbp
 {
 	struct mbv_window *window;
@@ -166,6 +165,8 @@ struct mbp
 
 	int top_overlay_timer_id;
 	char *top_overlay_text;
+	enum mbv_alignment top_overlay_alignment;
+	pthread_mutex_t top_overlay_lock;
 };
 
 
@@ -226,8 +227,10 @@ mb_player_rendertext(struct mbp *inst, cairo_t *context, char *text, PangoRectan
 		pango_layout_set_font_description(layout, pango_font_desc);
 		pango_layout_set_width(layout, rect->width * PANGO_SCALE);
 		pango_layout_set_height(layout, 400 * PANGO_SCALE);
-		pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
+		pango_layout_set_alignment(layout, mbv_get_pango_alignment(inst->top_overlay_alignment));
 		pango_layout_set_text(layout, text, -1);
+
+
 
 		cairo_set_source_rgba(context, 1.0, 1.0, 1.0, 1.0);
 		pango_cairo_update_layout(context, layout);
@@ -989,30 +992,34 @@ recalc:
 
 		/* if there is something to display in the top overlay
 		 * then do it */
-		if (inst->top_overlay_text != NULL) {
-			/* create a cairo context for this frame */
-			cairo_t *context;
-			cairo_surface_t *surface;
-			surface = cairo_image_surface_create_for_data(buf,
-				CAIRO_FORMAT_ARGB32, inst->width, inst->height,
-				cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, inst->width));
-			if (surface != NULL) {
-				context = cairo_create(surface);
-				cairo_surface_destroy(surface);
+		if (UNLIKELY(inst->top_overlay_text != NULL)) {
+			pthread_mutex_lock(&inst->top_overlay_lock);
+			if (LIKELY(inst->top_overlay_text != NULL)) {
+				/* create a cairo context for this frame */
+				cairo_t *context;
+				cairo_surface_t *surface;
+				surface = cairo_image_surface_create_for_data(buf,
+					CAIRO_FORMAT_ARGB32, inst->width, inst->height,
+					cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, inst->width));
+				if (LIKELY(surface != NULL)) {
+					context = cairo_create(surface);
+					cairo_surface_destroy(surface);
 
-				if (context != NULL) {
-					PangoRectangle rect;
-					rect.x = 15;
-					rect.width = inst->width - 30;
-					rect.y = 50;
-					rect.height = 400;
+					if (LIKELY(context != NULL)) {
+						PangoRectangle rect;
+						rect.x = 15;
+						rect.width = inst->width - 30;
+						rect.y = 50;
+						rect.height = 400;
 
-					mb_player_rendertext(inst, context,
-						inst->top_overlay_text, &rect);
+						mb_player_rendertext(inst, context,
+							inst->top_overlay_text, &rect);
 
-					cairo_destroy(context);
+						cairo_destroy(context);
+					}
 				}
 			}
+			pthread_mutex_unlock(&inst->top_overlay_lock);
 		}
 
 
@@ -2152,6 +2159,10 @@ mb_player_getmediafile(struct mbp *inst)
 }
 
 
+/**
+ * mb_player_dismiss_top_overlay() -- Callback function to dismiss
+ * overlay text
+ */
 static enum mbt_result
 mb_player_dismiss_top_overlay(int timer_id, void *data)
 {
@@ -2159,17 +2170,70 @@ mb_player_dismiss_top_overlay(int timer_id, void *data)
 
 	assert(inst != NULL);
 
-	DEBUG_VPRINT("player", "Dismissing top overlay for %s",
-		inst->media_file);
+	pthread_mutex_lock(&inst->top_overlay_lock);
 
-	if (inst->top_overlay_text != NULL) {
-		free(inst->top_overlay_text);
+	if (inst->top_overlay_timer_id != 0) {
+		DEBUG_VPRINT("player", "Dismissing top overlay for %s",
+			inst->media_file);
+
+		if (inst->top_overlay_text != NULL) {
+			free(inst->top_overlay_text);
+		}
+
+		inst->top_overlay_text = NULL;
+		inst->top_overlay_timer_id = 0;
 	}
 
-	inst->top_overlay_text = NULL;
-	inst->top_overlay_timer_id = 0;
+	pthread_mutex_unlock(&inst->top_overlay_lock);
 
 	return MB_TIMER_CALLBACK_RESULT_CONTINUE; /* doesn't matter for ONESHOT timers */
+}
+
+
+/**
+ * mb_player_showoverlaytext() -- Shows overlay text on the top of the
+ * screen.
+ */
+void
+mb_player_showoverlaytext(struct mbp *inst,
+	const char *text, int duration, enum mbv_alignment alignment)
+{
+	struct timespec tv;
+
+	pthread_mutex_lock(&inst->top_overlay_lock);
+
+	/* if there's an overlay text being displayed then  dismiss it first */
+	if (inst->top_overlay_timer_id != 0) {
+		DEBUG_PRINT("player", "Cancelling existing overlay");
+		mbt_cancel(inst->top_overlay_timer_id);
+		if (inst->top_overlay_text != NULL) {
+			free(inst->top_overlay_text);
+		}
+		inst->top_overlay_timer_id = 0;
+		inst->top_overlay_text = NULL;
+	}
+
+	/* register the top overlay */
+	tv.tv_sec = duration;
+	tv.tv_nsec = 0;
+	inst->top_overlay_alignment = alignment;
+	inst->top_overlay_text = strdup(text);
+	inst->top_overlay_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT,
+		&mb_player_dismiss_top_overlay, inst);
+
+	pthread_mutex_unlock(&inst->top_overlay_lock);
+}
+
+
+/**
+ * mb_player_gettitle() -- Gets the title of the currently playing
+ * media file or NULL if nothing is playing. The result needs to be
+ * freed with free().
+ */
+char *
+mb_player_gettitle(struct mbp *inst)
+{
+	return strdup(inst->media_file);
 }
 
 
@@ -2183,7 +2247,6 @@ int
 mb_player_play(struct mbp *inst, const char * const path)
 {
 	int last_percent;
-	struct timespec tv;
 
 	assert(inst != NULL);
 	assert(inst->status == MB_PLAYER_STATUS_READY ||
@@ -2268,13 +2331,13 @@ mb_player_play(struct mbp *inst, const char * const path)
 	/* we're done buffering, set state to PLAYING */
 	mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
 
-	/* register the top overlay */
-	tv.tv_sec = 15;
-	tv.tv_nsec = 0;
-	inst->top_overlay_text = strdup(inst->media_file);
-	inst->top_overlay_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT,
-		&mb_player_dismiss_top_overlay, inst);
-
+	/* show title on top overlay */
+	char *title = mb_player_gettitle(inst);
+	if (title != NULL) {
+		mb_player_showoverlaytext(inst, title, 15,
+			MBV_ALIGN_CENTER);
+		free(title);
+	}
 
 	DEBUG_PRINT("player", "Firing rendering threads");
 
@@ -2528,7 +2591,8 @@ mb_player_new(struct mbv_window *window)
 		pthread_cond_init(&inst->audio_decoder_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->audio_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->video_output_signal, NULL) != 0 ||
-		pthread_cond_init(&inst->resume_signal, NULL) != 0) {
+		pthread_cond_init(&inst->resume_signal, NULL) != 0 ||
+		pthread_mutex_init(&inst->top_overlay_lock, NULL) != 0) {
 		fprintf(stderr, "player: pthreads initialization failed\n");
 		free(inst);
 		return NULL;
@@ -2537,19 +2601,6 @@ mb_player_new(struct mbv_window *window)
 	/* check if the framebuffer device is usable for
 	 * direct rendering */
 	mb_player_checkfbdev(inst);
-
-	#if 0
-	/* initialize pango layout for info text (top) */
-	if ((inst->top_overlay = pango_layout_new(pango_context)) == NULL) {
-		fprintf(stderr, "player: Could not create pango layout\n");
-		free(inst);
-		return NULL;
-	}
-
-	pango_layout_set_font_description(inst->top_overlay, pango_font_desc);
-	pango_layout_set_width(inst->top_overlay, inst->width * PANGO_SCALE);
-	pango_layout_set_height(inst->top_overlay, 400 * PANGO_SCALE);
-	#endif
 
 	return inst;
 }

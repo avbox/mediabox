@@ -27,6 +27,24 @@
 struct mbv_window;
 struct mbv_font;
 
+enum mbv_alignment
+{
+	MBV_ALIGN_LEFT = 1,
+	MBV_ALIGN_CENTER = 2,
+	MBV_ALIGN_RIGHT = 4
+};
+
+static inline PangoAlignment
+mbv_get_pango_alignment(enum mbv_alignment alignment)
+{
+	switch (alignment) {
+	case MBV_ALIGN_LEFT: return PANGO_ALIGN_LEFT;
+	case MBV_ALIGN_CENTER: return PANGO_ALIGN_CENTER;
+	case MBV_ALIGN_RIGHT: return PANGO_ALIGN_RIGHT;
+	default: return PANGO_ALIGN_CENTER;
+	}
+}
+
 
 cairo_t *
 mbv_window_cairo_begin(struct mbv_window *window);
