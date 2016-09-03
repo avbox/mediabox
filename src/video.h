@@ -138,14 +138,6 @@ void
 mbv_clear(void);
 
 
-int
-mbv_screen_width_get(void);
-
-
-int
-mbv_screen_height_get(void);
-
-
 void
 mbv_init(int argc, char **argv);
 

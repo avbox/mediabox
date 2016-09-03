@@ -58,14 +58,6 @@ int
 mbv_dfb_getdefaultfontheight(void);
 
 
-int
-mbv_dfb_screen_width_get(void);
-
-
-int
-mbv_dfb_screen_height_get(void);
-
-
 void
 mbv_dfb_window_clear(struct mbv_window *win, uint32_t color);
 
@@ -129,11 +121,6 @@ mbv_dfb_getrootwindow(void);
 void
 mbv_dfb_window_drawline(struct mbv_window *window,
         int x1, int y1, int x2, int y2);
-
-
-void
-mbv_dfb_window_drawstring(struct mbv_window *window,
-	char *str, int x, int y);
 
 
 /**

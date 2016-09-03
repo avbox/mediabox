@@ -248,20 +248,6 @@ mbv_clear(void)
 }
 
 
-int
-mbv_screen_height_get(void)
-{
-	return mbv_dfb_screen_height_get();
-}
-
-
-int
-mbv_screen_width_get(void)
-{
-	return mbv_dfb_screen_width_get();
-}
-
-
 void
 mbv_init(int argc, char **argv)
 {

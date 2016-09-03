@@ -53,11 +53,14 @@ mbs_clearscreen(void)
 static void
 mbs_welcomescreen(void)
 {
+	int w, h;
+
+	mbv_getscreensize(&w, &h);
+
 	/* show the root window */
 	mbv_window_clear(root_window, 0x000000ff);
 	mbv_window_setcolor(root_window, 0x8080ffff);
-	mbv_window_drawline(root_window, 0, mbv_screen_height_get() / 2,
-		mbv_screen_width_get() - 1, mbv_screen_height_get() / 2);
+	mbv_window_drawline(root_window, 0, h / 2, w - 1, h / 2);
         mbv_window_show(root_window);
 }
 

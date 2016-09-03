@@ -50,9 +50,6 @@ static uint8_t *screen_mask = NULL;
 IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
 static IDirectFBDisplayLayer *layer = NULL;
 static IDirectFBFont *font = NULL;
-#ifdef ENABLE_MULTIAPP
-static IDirectFBWindows *windows;
-#endif
 static int screen_width = 0;
 static int screen_height = 0;
 static int is_fbdev = 0;
@@ -125,22 +122,6 @@ mbv_dfb_clear(void)
 	DFBCHECK(primary->FillRectangle(primary, 0, 0, screen_width, screen_height));
 	DFBCHECK(primary->Flip(primary, NULL, 0));
 #endif
-}
-
-
-/* DEPRECATED */
-int
-mbv_dfb_screen_width_get(void)
-{
-	return screen_width;
-}
-
-
-/* DEPRECATED */
-int
-mbv_dfb_screen_height_get(void)
-{
-	return screen_height;
 }
 
 
@@ -664,18 +645,6 @@ mbv_dfb_window_drawline(struct mbv_window *window,
 
 
 void
-mbv_dfb_window_drawstring(struct mbv_window *window,
-	char *str, int x, int y)
-{
-	assert(window != NULL);
-	assert(str != NULL);
-
-	DFBCHECK(window->content->DrawString(window->content,
-		str, -1, x, y, DSTF_TOP | DSTF_CENTER));
-}
-
-
-void
 mbv_dfb_window_update(struct mbv_window *window)
 {
 	/* fprintf(stderr, "mbv: Updating window\n"); */
@@ -778,16 +747,6 @@ mbv_dfb_getrootwindow(void)
 }
 
 
-#ifdef MULTIAPP
-static void
-mbv_dfb_window_added(void *context, const DFBWindowInfo info)
-{
-	fprintf(stderr, "Window added: winid=%i resid=%lu procid=%i inst=%i\n",
-		info.window_id, info.resource_id, info.process_id, info.instance_id);
-}
-#endif
-
-
 static DFBEnumerationResult
 mbv_dfb_video_mode_callback(int width, int height, int bpp, void *arg)
 {
@@ -848,15 +807,6 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(screen->GetSize(screen, &screen_width, &screen_height));
 	DFBCHECK(screen->Release(screen));
 	#endif
-
-#ifdef ENABLE_MULTIAPP
-	/* register a window watcher */
-	DFBWindowsWatcher watcher;
-	memset(&watcher, 0, sizeof(DFBWindowsWatcher));
-	watcher.WindowAdd = (void*) mbv_dfb_window_added;
-	DFBCHECK(dfb->GetInterface(dfb, "IDirectFBWindows", NULL, NULL, (void**) &windows));
-	DFBCHECK(windows->RegisterWatcher(windows, &watcher, NULL));
-#endif
 
 	/* create root window */
 	root_window = mbv_dfb_window_new(
