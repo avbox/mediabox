@@ -1,3 +1,8 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+#define HAVE_MALLOC_TRIM	(1)	/* TODO: Check for this on configure */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
@@ -11,6 +16,10 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+
+#ifdef HAVE_MALLOC_TRIM
+#include <malloc.h>
+#endif
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -2110,6 +2119,13 @@ decoder_exit:
 	inst->stream_quit = 0;
 
 	mb_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
+
+	/* I don't think there's any benefit in doing this always
+	 * but it helps in debugging as all freed memory is returned to
+	 * the kernel so we get a better picture */
+#if !defined(NDEBUG) && defined(HAVE_MALLOC_TRIM)
+	malloc_trim(0);
+#endif
 
 	return NULL;
 }
