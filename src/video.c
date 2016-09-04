@@ -198,8 +198,8 @@ mbv_window_drawstring(struct mbv_window *window,
 
 		if ((layout = pango_cairo_create_layout(context)) != NULL) {
 
-			DEBUG_VPRINT("video", "Drawing string (x=%i,y=%i,w=%i,h=%i): '%s'",
-				x, y, window_width, window_height, str);
+			/* DEBUG_VPRINT("video", "Drawing string (x=%i,y=%i,w=%i,h=%i): '%s'",
+				x, y, window_width, window_height, str); */
 
 			pango_layout_set_font_description(layout, font_desc);
 			pango_layout_set_width(layout, window_width * PANGO_SCALE);
