@@ -69,7 +69,7 @@
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
 #define MB_DECODER_PRINT_FPS
-#define ENABLE_DOUBLE_BUFFERING (1)
+/* #define ENABLE_DOUBLE_BUFFERING (1) */
 
 /* render directly to fbdev */
 #define MB_FBDEV_RENDERER
