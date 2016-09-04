@@ -2317,6 +2317,18 @@ mb_player_showoverlaytext(struct mbp *inst,
 char *
 mb_player_gettitle(struct mbp *inst)
 {
+	AVDictionaryEntry *title_entry;
+
+	if (inst == NULL || inst->fmt_ctx == NULL || inst->fmt_ctx->metadata == NULL) {
+		return NULL;
+	}
+
+	if ((title_entry = av_dict_get(inst->fmt_ctx->metadata, "title", NULL, 0)) != NULL) {
+		if (title_entry->value != NULL) {
+			return strdup(title_entry->value);
+		}
+	}
+
 	return strdup(inst->media_file);
 }
 
