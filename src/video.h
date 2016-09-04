@@ -153,10 +153,6 @@ mbv_window_destroy(struct mbv_window *win);
 
 
 void
-mbv_clear(void);
-
-
-void
 mbv_init(int argc, char **argv);
 
 

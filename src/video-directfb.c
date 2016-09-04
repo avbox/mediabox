@@ -111,20 +111,6 @@ mbv_dfb_isfbdev(void)
 }
 
 
-/**
- * mb_video_clear()
- */
-void
-mbv_dfb_clear(void)
-{
-#if 0
-	DFBCHECK(primary->GetSize(primary, &screen_width, &screen_height));
-	DFBCHECK(primary->FillRectangle(primary, 0, 0, screen_width, screen_height));
-	DFBCHECK(primary->Flip(primary, NULL, 0));
-#endif
-}
-
-
 int
 mbv_dfb_getdefaultfontheight(void)
 {
@@ -640,7 +626,6 @@ mbv_dfb_window_drawline(struct mbv_window *window,
 void
 mbv_dfb_window_update(struct mbv_window *window)
 {
-	/* fprintf(stderr, "mbv: Updating window\n"); */
 	DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_BLIT));
 }
 
@@ -744,8 +729,7 @@ static DFBEnumerationResult
 mbv_dfb_video_mode_callback(int width, int height, int bpp, void *arg)
 {
 	(void) arg;
-	fprintf(stderr, "mbv: Video mode detected %ix%ix%i\n",
-		width, height, bpp);
+	DEBUG_VPRINT("video-dfb", "Video mode detected %ix%ix%i", width, height, bpp);
 	return DFENUM_OK;
 }
 
@@ -763,7 +747,6 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(dfb->EnumVideoModes(dfb, mbv_dfb_video_mode_callback, NULL));
 
 	/* IDirectFBScreen does not return the correct size on SDL */
-	#if 1
 	DFBSurfaceDescription dsc;
 	dsc.flags = DSDESC_CAPS;
 	dsc.caps  = DSCAPS_PRIMARY /*| DSCAPS_FLIPPING*/;
@@ -771,7 +754,6 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &primary));
 	DFBCHECK(primary->GetSize(primary, &screen_width, &screen_height));
 	primary->Release(primary);
-	#endif
 
 	/* enumerate display layers */
 	DFBCHECK(dfb->EnumDisplayLayers(dfb, enum_display_layers, NULL));
@@ -788,18 +770,11 @@ mbv_dfb_init(int argc, char **argv)
 	switch (screen_width) {
 	case 640:  default_font_height = 16; break;
 	case 1024: default_font_height = 20; break;
-	case 1280: default_font_height = 32; break;
-	case 1920: default_font_height = 24; break;
+	case 1280: default_font_height = 64; break;
+	case 1920: default_font_height = 64; break;
 	}
 	DFBFontDescription font_dsc = { .flags = DFDESC_HEIGHT, .height = default_font_height };
 	DFBCHECK(dfb->CreateFont(dfb, DEFAULT_FONT, &font_dsc, &font));
-
-	#if 0
-	IDirectFBScreen *screen;
-	DFBCHECK(layer->GetScreen(layer, &screen));
-	DFBCHECK(screen->GetSize(screen, &screen_width, &screen_height));
-	DFBCHECK(screen->Release(screen));
-	#endif
 
 	/* create root window */
 	root_window = mbv_dfb_window_new(
@@ -812,7 +787,7 @@ mbv_dfb_init(int argc, char **argv)
 	/* print the pixel format of the root window */
 	DFBSurfacePixelFormat pix_fmt;
 	DFBCHECK(root_window->content->GetPixelFormat(root_window->content, &pix_fmt));
-	fprintf(stderr, "mbv: Root window pixel format: %s\n", mbv_dfb_pixfmt_tostring(pix_fmt));
+	DEBUG_VPRINT("video-dfb", "Root window pixel format: %s", mbv_dfb_pixfmt_tostring(pix_fmt));
 
 	/* for now one byte per pixel */
 	screen_mask = malloc(screen_width * screen_height);

@@ -7,13 +7,6 @@
 struct mbv_window;
 
 
-/**
- * mb_video_clear()
- */
-void
-mbv_dfb_clear(void);
-
-
 int
 mbv_dfb_isfbdev(void);
 

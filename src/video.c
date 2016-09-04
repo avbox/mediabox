@@ -242,13 +242,6 @@ mbv_window_destroy(struct mbv_window *win)
 
 
 void
-mbv_clear(void)
-{
-	mbv_dfb_clear();
-}
-
-
-void
 mbv_init(int argc, char **argv)
 {
 	font_desc = pango_font_description_from_string("Sans Bold 36px");
