@@ -770,8 +770,8 @@ mbv_dfb_init(int argc, char **argv)
 	switch (screen_width) {
 	case 640:  default_font_height = 16; break;
 	case 1024: default_font_height = 20; break;
-	case 1280: default_font_height = 64; break;
-	case 1920: default_font_height = 64; break;
+	case 1280: default_font_height = 32; break;
+	case 1920: default_font_height = 32; break;
 	}
 	DFBFontDescription font_dsc = { .flags = DFDESC_HEIGHT, .height = default_font_height };
 	DFBCHECK(dfb->CreateFont(dfb, DEFAULT_FONT, &font_dsc, &font));
