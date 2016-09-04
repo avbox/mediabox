@@ -219,7 +219,6 @@ mbv_dfb_window_blit_buffer(
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
 	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
 	DFBCHECK(window->content->Blit(window->content, surface, NULL, x, y));
-	//DFBCHECK(window->content->Flip(window->content, NULL, DSFLIP_ONSYNC));
 	surface->Release(surface);
 #else
 	void *dst;
@@ -346,7 +345,7 @@ mbv_dfb_window_new(
 		.flags = DWDESC_POSX | DWDESC_POSY | DWDESC_WIDTH | DWDESC_HEIGHT |
 			 DWDESC_CAPS | DWDESC_SURFACE_CAPS,
 		.caps = /*DWCAPS_ALPHACHANNEL | |*/ /*DWCAPS_DOUBLEBUFFER | */DWCAPS_NODECORATION,
-		.surface_caps = DSCAPS_NONE,
+		.surface_caps = DSCAPS_NONE |  DSCAPS_FLIPPING,
 		.posx = posx,
 		.posy = posy,
 		.width = width,
@@ -405,13 +404,7 @@ mbv_dfb_window_new(
 	DFBCHECK(win->dfb_window->GetSurface(win->dfb_window, &win->surface));
 
 	/* set basic drawing flags */
-	//if (root_window != NULL) {
-	//	DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_BLEND_ALPHACHANNEL));
-	//} else {
-		DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_NOFX));
-	//}
-	//DFBCHECK(win->surface->SetPorterDuff(win->surface, DSPD_SRC_OVER));
-	//DFBCHECK(win->surface->SetDrawingFlags(win->surface, DSDRAW_BLEND));
+	DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_NOFX));
 
 	/* clear window */
 	DFBCHECK(win->surface->Clear(win->surface, DFBCOLOR(DEFAULT_BACKGROUND)));
@@ -648,8 +641,7 @@ void
 mbv_dfb_window_update(struct mbv_window *window)
 {
 	/* fprintf(stderr, "mbv: Updating window\n"); */
-	DFBCHECK(window->surface->Flip(window->surface, NULL,
-		DSFLIP_WAITFORSYNC |  DSFLIP_BLIT));
+	DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_BLIT));
 }
 
 
@@ -663,7 +655,7 @@ mbv_dfb_window_show(struct mbv_window *window)
 		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, window->opacity));
 	}
 
-	DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_WAITFORSYNC |  DSFLIP_BLIT));
+	mbv_dfb_window_update(window);
 }
 
 
@@ -674,7 +666,8 @@ mbv_dfb_window_hide(struct mbv_window *window)
 		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, 0x00));
 		window->visible = 0;
 	}
-	DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_WAITFORSYNC |  DSFLIP_BLIT ));
+
+	mbv_dfb_window_update(window);
 }
 
 
