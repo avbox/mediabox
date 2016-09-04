@@ -1129,6 +1129,8 @@ mb_player_update(struct mbp *inst)
 {
 	void *frame_data;
 
+	DEBUG_PRINT("player", "Updating surface");
+
 	if ((frame_data = av_malloc(inst->bufsz)) == NULL) {
 		return;
 	}
