@@ -1131,6 +1131,21 @@ mb_player_update(struct mbp *inst)
 
 	DEBUG_PRINT("player", "Updating surface");
 
+	assert(inst != NULL);
+
+	/* if the last frame buffer is NULL it means that we're not
+	 * currently playing
+	 *
+	 * FIXME: There is a race condition here. If the last frame
+	 * if freed after this check we may crash or at least get a video
+	 * glitch. Probably not worth fixing as once the DRM compositor
+	 * is working and the overlays move to the shell it won't be
+	 * necessary to cache the last frame here.
+	 */
+	if (inst->video_last_frame == NULL) {
+		return;
+	}
+
 	if ((frame_data = av_malloc(inst->bufsz)) == NULL) {
 		return;
 	}
