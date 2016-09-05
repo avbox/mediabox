@@ -12,34 +12,20 @@
 #include "video.h"
 
 /* #define DEBUG_MEMORY */
-#define DEFAULT_FONT        (MBV_DEFAULT_FONT)
-#define DEFAULT_FONT_HEIGHT (default_font_height)
-#define DEFAULT_FOREGROUND  (MBV_DEFAULT_FOREGROUND)
-#define DEFAULT_BACKGROUND  (MBV_DEFAULT_BACKGROUND)
 #define DEFAULT_OPACITY     (MBV_DEFAULT_OPACITY)
 
 
 /* window object structure */
-struct mbv_window
+struct mbv_dfb_window
 {
-	struct mbv_window *parent;
+	struct mbv_dfb_window *parent;
 	IDirectFBWindow *dfb_window;
 	IDirectFBSurface *surface;
-	IDirectFBSurface *title_surface;
 	IDirectFBSurface *content;
 	DFBRectangle rect;
 	cairo_t *cairo_context;
-	char *title;
 	int visible;
-	int font_height;
 	uint8_t opacity;
-};
-
-
-struct mbv_font
-{
-	IDirectFBFont *font;
-	int height;
 };
 
 
@@ -49,14 +35,12 @@ static uint8_t *screen_mask = NULL;
 
 IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
 static IDirectFBDisplayLayer *layer = NULL;
-static IDirectFBFont *font = NULL;
 static int screen_width = 0;
 static int screen_height = 0;
 static int is_fbdev = 0;
-static int default_font_height;
 
 
-static struct mbv_window *root_window = NULL;
+static struct mbv_dfb_window *root_window = NULL;
 static int root_window_flipper_exit = 0;
 static pthread_t root_window_flipper;
 static pthread_mutex_t root_window_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -111,13 +95,6 @@ mbv_dfb_isfbdev(void)
 }
 
 
-int
-mbv_dfb_getdefaultfontheight(void)
-{
-	return default_font_height;
-}
-
-
 /**
  * mbv_dfb_getscreensize() -- Gets the screen width and height
  */
@@ -169,20 +146,8 @@ mbv_dfb_regeneratemask(void)
 
 
 int
-mbv_dfb_window_getsize(struct mbv_window *window, int *width, int *height)
-{
-	if (window == NULL) {
-		return -1;
-	}
-	*width = window->rect.w;
-	*height = window->rect.h;
-	return 0;
-}
-
-
-int
 mbv_dfb_window_blit_buffer(
-	struct mbv_window *window,
+	struct mbv_dfb_window *window,
 	void *buf, int width, int height, int x, int y)
 {
 #if 1	
@@ -246,7 +211,7 @@ mbv_dfb_autofliproot(void *arg)
 
 #if 0
 void
-mbv_dfb_window_resize(struct mbv_window* window, int w, int h)
+mbv_dfb_window_resize(struct mbv_dfb_window* window, int w, int h)
 {
 	window->rect.w = w;
 	window->rect.h = h;
@@ -262,62 +227,11 @@ mbv_dfb_window_resize(struct mbv_window* window, int w, int h)
 }
 #endif
 
-void
-mbv_dfb_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int h)
-{
-	if (w && h) {
-		DFBCHECK(window->content->FillRectangle(window->content, x, y, w, h));
-	}
-}
-
-
-/**
- * mbv_dfb_font_new() -- Create a new font object.
- */
-struct mbv_font *
-mbv_dfb_font_new(char *file, int height)
-{
-	struct mbv_font *inst;
-	DFBFontDescription font_dsc = { .flags = DFDESC_HEIGHT, .height = height };
-
-	if ((inst = malloc(sizeof(struct mbv_font))) == NULL) {
-		fprintf(stderr, "mbv: Out of memory\n");
-		return NULL;
-	}
-
-	inst->height = height;
-
-	if (dfb->CreateFont(dfb, file, &font_dsc, &inst->font) != DFB_OK) {
-		fprintf(stderr, "mbv: Could not create font '%s'\n", file);
-		free(inst);
-		return NULL;
-	}
-	return inst;
-}
-
-
-/**
- * mbv_dfb_font_destroy() -- Destroys a font object.
- */
-void
-mbv_dfb_font_destroy(struct mbv_font *inst)
-{
-	inst->font->Release(inst->font);
-	free(inst);
-}
-
-
-int
-mbv_dfb_window_set_font(struct mbv_window *inst, struct mbv_font *font)
-{
-	abort(); /* not implemented */
-}
-
 
 /**
  * mbv_dfb_window_new() -- Creates a new window
  */
-struct mbv_window*
+struct mbv_dfb_window*
 mbv_dfb_window_new(
 	char *title,
 	int posx,
@@ -326,7 +240,7 @@ mbv_dfb_window_new(
 	int height)
 {
 	int i;
-	struct mbv_window *win;
+	struct mbv_dfb_window *win;
 	DFBWindowDescription window_desc = {
 		.flags = DWDESC_POSX | DWDESC_POSY | DWDESC_WIDTH | DWDESC_HEIGHT |
 			 DWDESC_CAPS | DWDESC_SURFACE_CAPS,
@@ -338,29 +252,20 @@ mbv_dfb_window_new(
 		.height = height
 	};
 
+	assert(title == NULL);
+
 	/* if this is the root window set as primary */
 	if (root_window == NULL) {
 		window_desc.surface_caps |= DSCAPS_PRIMARY;
 	}
 
 	/* first allocate the window structure */
-	win = malloc(sizeof(struct mbv_window));
+	win = malloc(sizeof(struct mbv_dfb_window));
 	if (win == NULL) {
 		fprintf(stderr, "mbv_dfb_window_new() failed -- out of memory\n");
 		return NULL;
 	}
 
-	/* if a window title was specified save a copy */
-	if (title != NULL) {
-		win->title = strdup(title);
-		if (win->title == NULL) {
-			fprintf(stderr, "mbv: Out of memory\n");
-			free(win);
-			return NULL;
-		}
-	} else {
-		win->title = NULL;
-	}
 
 	/* initialize window structure */
 	win->parent = NULL;
@@ -369,7 +274,6 @@ mbv_dfb_window_new(
 	win->rect.h = height;
 	win->rect.x = posx;
 	win->rect.y = posy;
-	win->font_height = DEFAULT_FONT_HEIGHT;
 	win->opacity = (uint8_t) ((0xFF * DEFAULT_OPACITY) / 100);
 	win->cairo_context = NULL;
 
@@ -392,37 +296,8 @@ mbv_dfb_window_new(
 	/* set basic drawing flags */
 	DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_NOFX));
 
-	/* clear window */
-	DFBCHECK(win->surface->Clear(win->surface, DFBCOLOR(DEFAULT_BACKGROUND)));
+	DFBCHECK(win->surface->GetSubSurface(win->surface, NULL, &win->content));
 
-	/* set default font as window font */
-	DFBCHECK(win->surface->SetFont(win->surface, font));
-
-	/* draw the window title */
-	if (win->title != NULL) {
-		int offset = win->font_height + 10;
-		DFBRectangle title_rect = { 0, 0, width, offset + 5 };
-		DFBRectangle rect = { 0, offset + 5, width, (height - (offset + 5)) };
-
-		DFBCHECK(win->surface->GetSubSurface(win->surface, &title_rect, &win->title_surface));
-		DFBCHECK(win->title_surface->SetFont(win->title_surface, font));
-		DFBCHECK(win->title_surface->SetColor(win->title_surface, DFBCOLOR(DEFAULT_FOREGROUND)));
-		DFBCHECK(win->title_surface->DrawString(win->title_surface, win->title, -1,
-			width / 2, 5, DSTF_TOPCENTER));
-		DFBCHECK(win->surface->DrawLine(win->title_surface, 5, offset,
-			width - 10, offset));
-
-		DFBCHECK(win->surface->GetSubSurface(win->surface, &rect, &win->content));
-		DFBCHECK(win->content->SetColor(win->content, DFBCOLOR(DEFAULT_FOREGROUND)));
-	} else {
-		win->title_surface = NULL;
-		DFBCHECK(win->surface->GetSubSurface(win->surface, NULL, &win->content));
-		DFBCHECK(win->content->SetColor(win->content, DFBCOLOR(DEFAULT_FOREGROUND)));
-	}
-
-	/* set the window font */
-	DFBCHECK(win->content->SetFont(win->content, font));
-	
 	/* add window to stack and regenerate mask */
 	for (i = 0; i < 10; i++) {
 		if (rects[i] == NULL) {
@@ -438,43 +313,12 @@ mbv_dfb_window_new(
 }
 
 
-int
-mbv_dfb_window_settitle(struct mbv_window *window, char *title)
-{
-	char *old_title;
-	int width, height;
-
-	assert(window != NULL);
-
-	old_title = window->title;
-	if ((window->title = strdup(title)) == NULL) {
-		window->title = old_title;
-		return -1;
-	}
-	if (old_title != NULL) {
-		free(old_title);
-	}
-
-	if (window->title_surface) {
-		DFBCHECK(window->title_surface->GetSize(window->title_surface, &width, &height));
-		DFBCHECK(window->title_surface->Clear(window->title_surface, DFBCOLOR(DEFAULT_BACKGROUND)));
-		DFBCHECK(window->surface->SetColor(window->title_surface, DFBCOLOR(DEFAULT_FOREGROUND)));
-		DFBCHECK(window->surface->DrawString(window->title_surface, window->title, -1,
-			width / 2, 5, DSTF_TOPCENTER));
-		DFBCHECK(window->surface->DrawLine(window->title_surface, 5, height - 5,
-			width - 10, height - 5));
-	}
-
-	return 0;
-}
-
-
 /**
  * mbv_dfb_window_cairo_begin() -- Gets a cairo context for drawing
  * to the window
  */
 cairo_t *
-mbv_dfb_window_cairo_begin(struct mbv_window *window)
+mbv_dfb_window_cairo_begin(struct mbv_dfb_window *window)
 {
 	cairo_surface_t *surface;
 	int pitch;
@@ -508,7 +352,7 @@ mbv_dfb_window_cairo_begin(struct mbv_window *window)
  * unlocks the surface
  */
 void
-mbv_dfb_window_cairo_end(struct mbv_window *window)
+mbv_dfb_window_cairo_end(struct mbv_dfb_window *window)
 {
 	assert(window != NULL);
 	assert(window->cairo_context != NULL);
@@ -521,57 +365,29 @@ mbv_dfb_window_cairo_end(struct mbv_window *window)
 
 
 /**
- * mbv_dfb_window_getcanvassize() -- Gets the width and height of
- * a window's drawing area.
- */
-void
-mbv_dfb_window_getcanvassize(struct mbv_window *window,
-	int *width, int *height)
-{
-	assert(window != NULL);
-	assert(width != NULL);
-	assert(height != NULL);
-
-	DFBCHECK(window->content->GetSize(window->content, width, height));
-}
-
-
-/**
  * mbv_dfb_window_getchildwindow() -- Creates a new child window
  */
-struct mbv_window*
-mbv_dfb_window_getchildwindow(struct mbv_window *window,
+struct mbv_dfb_window*
+mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
 	int x, int y, int width, int height)
 {
-	struct mbv_window *inst;
+	struct mbv_dfb_window *inst;
+
+	assert(window != NULL);
+	assert(width != -1);
+	assert(height != -1);
 
 	/* allocate memory for window object */
-	inst = malloc(sizeof(struct mbv_window));
+	inst = malloc(sizeof(struct mbv_dfb_window));
 	if (inst == NULL) {
 		fprintf(stderr, "mbv: Out of memory\n");
 		return NULL;
 	}
 
-	/* if width or height is -1 adjust it to the
-	 * size of the parent window */
-	if (width == -1 || height == -1) {
-		int w, h;
-		mbv_dfb_window_getcanvassize(window, &w, &h);
-		if (width == -1) {
-			width = w;
-		}
-		if (height == -1) {
-			height = h;
-		}
-	}
-
 	/* initialize new window object */
 	inst->parent = window;
 	inst->dfb_window = window->dfb_window;
-	inst->title = NULL;
-	inst->title_surface = NULL;
 	inst->visible = 0;
-	inst->font_height = window->font_height;
 	inst->cairo_context = NULL;
 	inst->rect.w = width;
 	inst->rect.h = height;
@@ -583,55 +399,19 @@ mbv_dfb_window_getchildwindow(struct mbv_window *window,
 	DFBCHECK(window->content->GetSubSurface(window->content, &rect, &inst->surface));
 	DFBCHECK(inst->surface->GetSubSurface(inst->surface, NULL, &inst->content));
 
-	/* set the default surface properties */
-	/* TODO: This shoulld be inherited from the parent window */
-	DFBCHECK(inst->content->SetFont(inst->content, font));
-	DFBCHECK(inst->content->SetColor(inst->content, DFBCOLOR(DEFAULT_FOREGROUND)));
-
 	return inst;
 }
 
 
 void
-mbv_dfb_window_clear(struct mbv_window *win, uint32_t color)
-{
-	DFBCHECK(win->content->Clear(win->content, DFBCOLOR(color)));
-}
-
-
-/**
- * mbv_dfb_window_setcolor() -- Set color for future operations
- */
-void
-mbv_dfb_window_setcolor(struct mbv_window *window, uint32_t color)
-{
-	DFBCHECK(window->content->SetColor(window->content, DFBCOLOR(color)));
-}
-
-
-/**
- * mbv_dfb_window_drawline() -- Draw a line on a window
- */
-void
-mbv_dfb_window_drawline(struct mbv_window *window,
-	int x1, int y1, int x2, int y2)
-{
-	assert(window != NULL);
-
-	DFBCHECK(window->content->DrawLine(window->content,
-		x1, y1, x2, y2));
-}
-
-
-void
-mbv_dfb_window_update(struct mbv_window *window)
+mbv_dfb_window_update(struct mbv_dfb_window *window)
 {
 	DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_BLIT));
 }
 
 
 void
-mbv_dfb_window_show(struct mbv_window *window)
+mbv_dfb_window_show(struct mbv_dfb_window *window)
 {
 	assert(window != NULL);
 
@@ -645,7 +425,7 @@ mbv_dfb_window_show(struct mbv_window *window)
 
 
 void
-mbv_dfb_window_hide(struct mbv_window *window)
+mbv_dfb_window_hide(struct mbv_dfb_window *window)
 {
 	if (window->visible) {
 		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, 0x00));
@@ -660,7 +440,7 @@ mbv_dfb_window_hide(struct mbv_window *window)
  * mbv_dfb_window_destroy() -- Destroy a window
  */
 void
-mbv_dfb_window_destroy(struct mbv_window *window)
+mbv_dfb_window_destroy(struct mbv_dfb_window *window)
 {
 	int i;
 
@@ -677,18 +457,10 @@ mbv_dfb_window_destroy(struct mbv_window *window)
 	window->content->Release(window->content);
 	window->surface->Release(window->surface);
 
-	if (window->title != NULL) {
-		free(window->title);
-	}
-
 	/* if this is not a subwindow then destroy the directfb
 	 * window object as well */
 	if (window->parent == NULL) {
 		window->dfb_window->Release(window->dfb_window);
-	}
-
-	if (window->title_surface != NULL) {
-		window->title_surface->Release(window->title_surface);
 	}
 
 	for (i = 0; i < 10; i++) {
@@ -718,7 +490,7 @@ enum_display_layers(DFBDisplayLayerID id, DFBDisplayLayerDescription desc, void 
 /**
  * Gets a pointer to the root window
  */
-struct mbv_window*
+struct mbv_dfb_window*
 mbv_dfb_getrootwindow(void)
 {
 	return root_window;
@@ -737,7 +509,7 @@ mbv_dfb_video_mode_callback(int width, int height, int bpp, void *arg)
 /**
  * mbv_init() -- Initialize video device
  */
-void
+struct mbv_dfb_window *
 mbv_dfb_init(int argc, char **argv)
 {
 	int i;
@@ -749,7 +521,7 @@ mbv_dfb_init(int argc, char **argv)
 	/* IDirectFBScreen does not return the correct size on SDL */
 	DFBSurfaceDescription dsc;
 	dsc.flags = DSDESC_CAPS;
-	dsc.caps  = DSCAPS_PRIMARY /*| DSCAPS_FLIPPING*/;
+	dsc.caps  = DSCAPS_PRIMARY;
 	IDirectFBSurface *primary;
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &primary));
 	DFBCHECK(primary->GetSize(primary, &screen_width, &screen_height));
@@ -765,17 +537,6 @@ mbv_dfb_init(int argc, char **argv)
 	DFBCHECK(layer->EnableCursor(layer, 0));
 	DFBCHECK(layer->SetCooperativeLevel(layer, DLSCL_ADMINISTRATIVE));
 	
-	/* load default font */
-	default_font_height = 16;
-	switch (screen_width) {
-	case 640:  default_font_height = 16; break;
-	case 1024: default_font_height = 20; break;
-	case 1280: default_font_height = 32; break;
-	case 1920: default_font_height = 32; break;
-	}
-	DFBFontDescription font_dsc = { .flags = DFDESC_HEIGHT, .height = default_font_height };
-	DFBCHECK(dfb->CreateFont(dfb, DEFAULT_FONT, &font_dsc, &font));
-
 	/* create root window */
 	root_window = mbv_dfb_window_new(
 		NULL, 0, 0, screen_width, screen_height);
@@ -811,6 +572,7 @@ mbv_dfb_init(int argc, char **argv)
 			abort();
 		}
 	}
+	return root_window;
 }
 
 /**
@@ -825,11 +587,7 @@ mbv_dfb_destroy()
 	}
 
 	mbv_dfb_window_destroy(root_window);
-#ifdef ENABLE_MULTIAPP
-	DFBCHECK(windows->Release(windows));
-#endif
 	layer->Release(layer);
-	font->Release(font);
 	dfb->Release(dfb);
 	free(screen_mask);
 }

@@ -4,19 +4,11 @@
 #include <stdint.h>
 #include <cairo/cairo.h>
 
-struct mbv_window;
+struct mbv_dfb_window;
 
 
 int
 mbv_dfb_isfbdev(void);
-
-
-int
-mbv_dfb_window_settitle(struct mbv_window *window, char *title);
-
-
-struct mbv_font *
-mbv_dfb_font_new(char *file, int height);
 
 
 /**
@@ -24,7 +16,7 @@ mbv_dfb_font_new(char *file, int height);
  * to the window
  */
 cairo_t *
-mbv_dfb_window_cairo_begin(struct mbv_window *window);
+mbv_dfb_window_cairo_begin(struct mbv_dfb_window *window);
 
 
 /**
@@ -32,44 +24,24 @@ mbv_dfb_window_cairo_begin(struct mbv_window *window);
  * unlocks the surface
  */
 void
-mbv_dfb_window_cairo_end(struct mbv_window *window);
-
-
-void
-mbv_dfb_font_destroy(struct mbv_font *inst);
-
-
-void
-mbv_dfb_window_fillrectangle(struct mbv_window *window, int x, int y, int w, int h);
+mbv_dfb_window_cairo_end(struct mbv_dfb_window *window);
 
 
 void
 mbv_dfb_getscreensize(int *width, int *height);
 
 
-int
-mbv_dfb_getdefaultfontheight(void);
-
-
 void
-mbv_dfb_window_clear(struct mbv_window *win, uint32_t color);
-
-
-void
-mbv_dfb_window_update(struct mbv_window *window);
-
-
-int
-mbv_dfb_window_getsize(struct mbv_window *window, int *width, int *height);
+mbv_dfb_window_update(struct mbv_dfb_window *window);
 
 
 int
 mbv_dfb_window_blit_buffer(
-	struct mbv_window *window, void *buf, int width, int height,
+	struct mbv_dfb_window *window, void *buf, int width, int height,
 	int x, int y);
 
 
-struct mbv_window*
+struct mbv_dfb_window*
 mbv_dfb_window_new(
         char *title,
         int x,
@@ -78,48 +50,29 @@ mbv_dfb_window_new(
         int height);
 
 
-struct mbv_window*
-mbv_dfb_window_getchildwindow(struct mbv_window *window,
+struct mbv_dfb_window*
+mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
 	int x, int y, int width, int height);
 
 
 void
-mbv_dfb_window_show(struct mbv_window *win);
+mbv_dfb_window_show(struct mbv_dfb_window *win);
 
 void
-mbv_dfb_window_hide(struct mbv_window *win);
+mbv_dfb_window_hide(struct mbv_dfb_window *win);
 
 void
-mbv_dfb_window_destroy(struct mbv_window *win);
-
-/**
- * mbv_dfb_window_setcolor() -- Set color for future operations
- */
-void
-mbv_dfb_window_setcolor(struct mbv_window *window, uint32_t color);
+mbv_dfb_window_destroy(struct mbv_dfb_window *win);
 
 
-void
-mbv_dfb_window_getcanvassize(struct mbv_window *window,
-	int *width, int *height);
-
-
-struct mbv_window*
+struct mbv_dfb_window*
 mbv_dfb_getrootwindow(void);
-
-
-/**
- * mbv_dfb_window_drawline() -- Draw a line on a window
- */
-void
-mbv_dfb_window_drawline(struct mbv_window *window,
-        int x1, int y1, int x2, int y2);
 
 
 /**
  * mbv_init() -- Initialize video device
  */
-void
+struct mbv_dfb_window *
 mbv_dfb_init(int argc, char **argv);
 
 void

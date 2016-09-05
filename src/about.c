@@ -75,6 +75,8 @@ mb_about_showdialog(void)
 
 	PangoLayout *layout;
 
+	mbv_window_clear(window, MBV_DEFAULT_BACKGROUND);
+
 	if ((context = mbv_window_cairo_begin(window)) != NULL) {
 
 		cairo_translate(context, 0, 20);
