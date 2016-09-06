@@ -145,6 +145,45 @@ mbv_dfb_regeneratemask(void)
 }
 
 
+static void
+mbv_dfb_addwindowmask(struct mbv_dfb_window *window)
+{
+	int i;
+
+	if (window == root_window) {
+		return;
+	}
+
+	for (i = 0; i < 10; i++) {
+		if (rects[i] == NULL) {
+			rects[i] = &window->rect;
+			break;
+		}
+	}
+	mbv_dfb_regeneratemask();
+}
+
+
+static void
+mbv_dfb_removewindowmask(struct mbv_dfb_window *window)
+{
+	int i;
+
+	if (window == root_window) {
+		return;
+	}
+
+	for (i = 0; i < 10; i++) {
+		if (rects[i] == &window->rect) {
+			rects[i] = NULL;
+			break;
+		}
+	}
+
+	mbv_dfb_regeneratemask();
+}
+
+
 int
 mbv_dfb_window_blit_buffer(
 	struct mbv_dfb_window *window,
@@ -239,7 +278,6 @@ mbv_dfb_window_new(
 	int width,
 	int height)
 {
-	int i;
 	struct mbv_dfb_window *win;
 	DFBWindowDescription window_desc = {
 		.flags = DWDESC_POSX | DWDESC_POSY | DWDESC_WIDTH | DWDESC_HEIGHT |
@@ -297,17 +335,6 @@ mbv_dfb_window_new(
 	DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_NOFX));
 
 	DFBCHECK(win->surface->GetSubSurface(win->surface, NULL, &win->content));
-
-	/* add window to stack and regenerate mask */
-	for (i = 0; i < 10; i++) {
-		if (rects[i] == NULL) {
-			rects[i] = &win->rect;
-			break;
-		}
-	}
-	if (root_window != NULL) {
-		mbv_dfb_regeneratemask();
-	}
 
 	return win;
 }
@@ -413,11 +440,20 @@ mbv_dfb_window_update(struct mbv_dfb_window *window)
 void
 mbv_dfb_window_show(struct mbv_dfb_window *window)
 {
+	int visible_changed = 0;
+
 	assert(window != NULL);
 
-	if (!window->visible) {
-		window->visible = 1;
-		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, window->opacity));
+	if (window != root_window) {
+		if (!window->visible) {
+			window->visible = 1;
+			DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, window->opacity));
+			visible_changed = 1;
+		}
+	}
+
+	if (visible_changed) {
+		mbv_dfb_addwindowmask(window);
 	}
 
 	mbv_dfb_window_update(window);
@@ -427,12 +463,18 @@ mbv_dfb_window_show(struct mbv_dfb_window *window)
 void
 mbv_dfb_window_hide(struct mbv_dfb_window *window)
 {
+	int visible_changed = 0;
 	if (window->visible) {
 		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, 0x00));
 		window->visible = 0;
+		visible_changed = 1;
+	}
+	if (visible_changed) {
+		mbv_dfb_removewindowmask(window);
 	}
 
 	mbv_dfb_window_update(window);
+
 }
 
 
@@ -442,15 +484,9 @@ mbv_dfb_window_hide(struct mbv_dfb_window *window)
 void
 mbv_dfb_window_destroy(struct mbv_dfb_window *window)
 {
-	int i;
-
 	assert(window != NULL);
 
-#ifdef DEBUG_MEMORY
-	fprintf(stderr, "mbv: Destroying window (0x%lx)\n",
-		(unsigned long) window);
-#endif
-
+	/* hide the window first */
 	mbv_dfb_window_hide(window);
 
 	/* release window surfaces */
@@ -462,14 +498,6 @@ mbv_dfb_window_destroy(struct mbv_dfb_window *window)
 	if (window->parent == NULL) {
 		window->dfb_window->Release(window->dfb_window);
 	}
-
-	for (i = 0; i < 10; i++) {
-		if (rects[i] == &window->rect) {
-			rects[i] = NULL;
-		}
-	}
-
-	mbv_dfb_regeneratemask();
 
 	/* free window object */
 	free(window);
@@ -574,6 +602,7 @@ mbv_dfb_init(int argc, char **argv)
 	}
 	return root_window;
 }
+
 
 /**
  * mbv_dfb_destroy() -- Destroy the directfb video driver
