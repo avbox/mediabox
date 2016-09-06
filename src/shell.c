@@ -24,6 +24,7 @@ static struct mbv_window *progress = NULL;
 static struct mbp *player = NULL;
 static int input_fd = -1;
 static int clock_timer_id = 0;
+static pthread_mutex_t screen_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 /**
@@ -33,21 +34,6 @@ struct mbp *
 mbs_get_active_player(void)
 {
 	return player;
-}
-
-
-/**
- * mbs_clearscreen() -- Clears the screen and displas a blue line
- * accross it. In the future we'll do something nicer.
- */
-static void
-mbs_clearscreen(void)
-{
-	DEBUG_PRINT("shell", "Clear screen");
-
-	/* show the root window */
-	mbv_window_clear(root_window, 0x000000FF);
-        mbv_window_update(root_window);
 }
 
 
@@ -65,9 +51,11 @@ mbs_welcomescreen(int id, void *data)
 	(void) id;
 	(void) data;
 
-	mbv_getscreensize(&w, &h);
+	/* mbv_getscreensize(&w, &h); */
+	mbv_window_getcanvassize(root_window, &w, &h);
 
-	/* show the root window */
+	pthread_mutex_lock(&screen_lock);
+
 	mbv_window_clear(root_window, 0x000000ff);
 	mbv_window_setcolor(root_window, 0x8080ffff);
 	mbv_window_drawline(root_window, 0, h / 2, w - 1, h / 2);
@@ -118,6 +106,8 @@ mbs_welcomescreen(int id, void *data)
 
         mbv_window_show(root_window);
 
+	pthread_mutex_unlock(&screen_lock);
+
 	return MB_TIMER_CALLBACK_RESULT_CONTINUE;
 }
 
@@ -133,6 +123,7 @@ mbs_start_clock()
 	tv.tv_nsec = 0;
 	clock_timer_id = mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, mbs_welcomescreen, NULL);
 }
+
 
 /**
  * mbs_playerstatuschanged() -- Handle player state change events
@@ -154,6 +145,7 @@ mbs_playerstatuschanged(struct mbp *inst,
 
 		if (clock_timer_id != 0 && status != MB_PLAYER_STATUS_READY) {
 			mbt_cancel(clock_timer_id);
+			clock_timer_id = 0;
 		}
 
 		switch (status) {
@@ -173,7 +165,9 @@ mbs_playerstatuschanged(struct mbp *inst,
 
 				DEBUG_PRINT("shell", "Initializing progress bar");
 
-				mbs_clearscreen();
+				pthread_mutex_lock(&screen_lock);
+
+				mbv_window_clear(root_window, 0x000000ff);
 				mbv_window_getsize(root_window, &sw, &sh);
 
 				pw = (sw * 70) / 100;
@@ -184,16 +178,21 @@ mbs_playerstatuschanged(struct mbp *inst,
 				progress = mbv_window_new(NULL, px, py, pw, ph);
 				assert(progress != NULL);
 
-				mbv_window_show(progress);
+				mbv_window_update(progress);
+				mbv_window_update(root_window);
+
+				pthread_mutex_unlock(&screen_lock);
 
 			} else {
 				int donewidth = (pw * mb_player_bufferstate(inst)) / 100;
 
 				assert(progress != NULL);
 
+				mbv_window_clear(root_window, 0x000000ff);
 				mbv_window_clear(progress, MBV_DEFAULT_BACKGROUND);
 				mbv_window_fillrectangle(progress, 0, 0, donewidth, ph);
 				mbv_window_update(progress);
+				mbv_window_update(root_window);
 			}
 			break;
 
@@ -237,6 +236,7 @@ mbs_init(void)
 
 	/* register for status updates */
 	mb_player_add_status_callback(player, mbs_playerstatuschanged);
+	mbv_window_show(root_window);
 
 	return 0;
 }
