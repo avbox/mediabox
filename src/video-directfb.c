@@ -24,6 +24,7 @@ struct mbv_dfb_window
 	IDirectFBSurface *content;
 	DFBRectangle rect;
 	cairo_t *cairo_context;
+	pthread_mutex_t cairo_lock;
 	int visible;
 	uint8_t opacity;
 };
@@ -315,6 +316,12 @@ mbv_dfb_window_new(
 	win->opacity = (uint8_t) ((0xFF * DEFAULT_OPACITY) / 100);
 	win->cairo_context = NULL;
 
+	if (pthread_mutex_init(&win->cairo_lock, NULL) != 0) {
+		fprintf(stderr, "video-dfb: Could not initialize mutex\n");
+		free(win);
+		return NULL;
+	}
+
 	if (0 && root_window == NULL) {
 		DFBCHECK(layer->GetWindow(layer, 1, &win->dfb_window));
 	} else {
@@ -352,6 +359,9 @@ mbv_dfb_window_cairo_begin(struct mbv_dfb_window *window)
 	void *buf;
 
 	assert(window != NULL);
+
+	pthread_mutex_lock(&window->cairo_lock);
+
 	assert(window->cairo_context == NULL);
 
 	DFBCHECK(window->content->Lock(window->content, DSLF_READ | DSLF_WRITE, &buf, &pitch));
@@ -388,6 +398,8 @@ mbv_dfb_window_cairo_end(struct mbv_dfb_window *window)
 	window->cairo_context = NULL;
 
 	DFBCHECK(window->content->Unlock(window->content));
+
+	pthread_mutex_unlock(&window->cairo_lock);
 }
 
 
@@ -420,6 +432,12 @@ mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
 	inst->rect.h = height;
 	inst->rect.x = x;
 	inst->rect.y = y;
+
+	if (pthread_mutex_init(&inst->cairo_lock, NULL) != 0) {
+		fprintf(stderr, "video-dfb: Could not initialize mutex\n");
+		free(window);
+		return NULL;
+	}
 
 	/* create the sub-window surface */
 	DFBRectangle rect = { x, y, width, height };
