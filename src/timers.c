@@ -141,7 +141,7 @@ mbt_cancel(int timer_id)
 		if (tmr->id == timer_id) {
 			LIST_REMOVE(tmr);
 			free(tmr);
-			ret = 1;
+			ret = 0;
 			break;
 		}
 	});
