@@ -116,6 +116,8 @@ static void
 mbs_start_clock()
 {
 	struct timespec tv;
+	
+	DEBUG_PRINT("shell", "Starting clock");
 
 	mbs_welcomescreen(0, NULL);
 
@@ -143,16 +145,25 @@ mbs_playerstatuschanged(struct mbp *inst,
 				MBV_ALIGN_LEFT);
 		}
 
+		/* if we're out of the READY state then cancel the clock
+		 * timer */
 		if (clock_timer_id != 0 && status != MB_PLAYER_STATUS_READY) {
-			mbt_cancel(clock_timer_id);
-			clock_timer_id = 0;
+			DEBUG_PRINT("shell", "Stoping clock timer");
+			if (mbt_cancel(clock_timer_id) == 0) {
+				DEBUG_PRINT("shell", "Cancelled clock timer");
+				clock_timer_id = 0;
+			} else {
+				DEBUG_VPRINT("shell", "Could not cancel clock timer (id=%i)",
+					clock_timer_id);
+			}
 		}
 
 		switch (status) {
 		case MB_PLAYER_STATUS_READY:
 			DEBUG_PRINT("shell", "Player state changed to READY");
-			/* mbs_welcomescreen(); */
-			mbs_start_clock();
+			if (clock_timer_id == 0) {
+				mbs_start_clock();
+			}
 			break;
 
 		case MB_PLAYER_STATUS_BUFFERING:
