@@ -62,6 +62,7 @@ public class RemoteActivity extends AppCompatActivity
                 PrintWriter out = new PrintWriter(new BufferedWriter(
                         new OutputStreamWriter(socket.getOutputStream())), true);
                 out.println(msg);
+                out.flush();
             }
         } catch (UnknownHostException e) {
             e.printStackTrace();
