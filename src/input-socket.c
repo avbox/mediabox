@@ -96,6 +96,10 @@ mbi_socket_connection(void *arg)
 			mbi_event_send(MBI_EVENT_NEXT);
 		} else if (!memcmp("INFO", buffer, 4)) {
 			mbi_event_send(MBI_EVENT_INFO);
+		} else if (!memcmp("VOLUP", buffer, 5)) {
+			mbi_event_send(MBI_EVENT_VOLUME_UP);
+		} else if (!memcmp("VOLDOWN", buffer, 7)) {
+			mbi_event_send(MBI_EVENT_VOLUME_DOWN);
 		} else if (!memcmp("KEY:", buffer, 4)) {
 #define ELIF_KEY(x) \
 	else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \

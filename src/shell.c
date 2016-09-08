@@ -13,6 +13,7 @@
 #include "su.h"
 #include "timers.h"
 #include "debug.h"
+#include "alsa-volume.h"
 
 
 #define MEDIA_FILE "/mov.mp4"
@@ -127,6 +128,13 @@ mbs_start_clock()
 }
 
 
+void
+mbs_volumechanged(int volume)
+{
+	DEBUG_VPRINT("shell", "Volume changed to: %i", volume);
+}
+
+
 /**
  * mbs_playerstatuschanged() -- Handle player state change events
  */
@@ -235,6 +243,12 @@ mbs_init(void)
         root_window = mbv_getrootwindow();
 	if (root_window == NULL) {
 		fprintf(stderr, "Could not create root window\n");
+		return -1;
+	}
+
+	/* initialize the volume control */
+	if (mb_alsa_volume_init(mbs_volumechanged) != 0) {
+		fprintf(stderr, "shell: Could not initialize volume control");
 		return -1;
 	}
 
@@ -367,6 +381,29 @@ mbs_show_dialog(void)
 					MBV_ALIGN_CENTER);
 				free(title);
 			}
+			break;
+		}
+		case MBI_EVENT_VOLUME_UP:
+		{
+			int volume;
+			volume = mb_alsa_volume_get();
+			volume += 10;
+			if (volume > 100) {
+				volume = 100;
+			}
+			mb_alsa_volume_set(volume);
+			break;
+		}
+		case MBI_EVENT_VOLUME_DOWN:
+		{
+			int volume;
+			volume = mb_alsa_volume_get();
+			volume -= 10;
+			if (volume < 0) {
+				volume = 0;
+			}
+			mb_alsa_volume_set(volume);
+			break;
 		}
 		default:
 			fprintf(stderr, "mbs: Received event %i\n", (int) e);
