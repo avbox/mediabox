@@ -130,7 +130,7 @@ mb_library_loadlist(const char *path)
 
 		/* do not show subtitles */
 		if (ext != NULL) {
-			if (!strcasecmp("srt", ext) || !strcasecmp("sub", ext)) {
+			if (!strcasecmp("srt", ext) || !strcasecmp("sub", ext) || !strcasecmp("idx", ext)) {
 				free(title);
 				continue;
 			}
