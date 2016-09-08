@@ -227,6 +227,14 @@ public class RemoteActivity extends AppCompatActivity
         {
             sendMessage("FF");
         }
+        else if (view == this.findViewById(R.id.btnVolUp))
+        {
+            sendMessage("VOLUP");
+        }
+        else if (view == this.findViewById(R.id.btnVolDown))
+        {
+            sendMessage("VOLDOWN");
+        }
     }
     class ClientThread implements Runnable {
         @Override

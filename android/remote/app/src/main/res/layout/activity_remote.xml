@@ -208,4 +208,28 @@
         android:layout_toRightOf="@+id/btnFF"
         android:layout_toEndOf="@+id/btnFF"
         android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Vol Up"
+        android:id="@+id/btnVolUp"
+        android:layout_alignTop="@+id/btnUp"
+        android:layout_alignParentLeft="true"
+        android:layout_alignParentStart="true"
+        android:background="@android:color/holo_purple"
+        android:textColor="#ffffff"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Vol Down"
+        android:id="@+id/btnVolDown"
+        android:layout_alignTop="@+id/btnDown"
+        android:layout_alignParentLeft="true"
+        android:layout_alignParentStart="true"
+        android:background="@android:color/holo_purple"
+        android:textColor="#ffffff"
+        android:onClick="onButtonPressed"/>
 </RelativeLayout>
