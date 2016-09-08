@@ -80,6 +80,12 @@ AC_MSG_ERROR('Unable to find libavfilter. Please make sure library and header fi
 CFLAGS="$CFLAGS $LIBAVFILTER_CFLAGS"
 LDFLAGS="$LDFLAGS $LIBAVFILTER_LIBS"
 
+PKG_CHECK_MODULES(BLUEZ, [bluez], ,
+	AC_MSG_ERROR('Unable to find bluez. Please make sure library and header files are installed.'))
+CFLAGS="$CFLAGS $BLUEZ_CFLAGS"
+LDFLAGS="$LDFLAGS $BLUEZ_LIBS"
+
+
 #
 # libcurl
 #
