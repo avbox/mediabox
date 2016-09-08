@@ -16,6 +16,7 @@
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/sdp.h>
 #include <bluetooth/sdp_lib.h>
+#include <bluetooth/rfcomm.h>
 
 #include "input.h"
 #include "input-socket.h"
@@ -42,10 +43,9 @@ mbi_bluetooth_socket_closed(struct conn_state *state)
 
 
 static sdp_session_t *
-mbi_bluetooth_register_service()
+mbi_bluetooth_register_service(uint8_t rfcomm_channel)
 {
 	uint32_t service_uuid_int[] = { 0, 0, 0, 0xABCD };
-	uint8_t rfcomm_channel = 11;
 	const char *service_name = PACKAGE_NAME " Input Service";
 	const char *service_dsc = PACKAGE_NAME " Remote Control Interface";
 	const char *service_prov = PACKAGE_NAME;;
@@ -108,9 +108,9 @@ mbi_bluetooth_register_service()
 static void *
 mbi_bluetooth_server(void *arg)
 {
-	int portno;
+	int channelno = 1;
 	unsigned int clilen;
-	struct sockaddr_in serv_addr, cli_addr;
+	struct sockaddr_rc serv_addr, cli_addr;
 	struct timeval tv;
 	struct conn_state *state = NULL;
 	fd_set fds;
@@ -119,25 +119,27 @@ mbi_bluetooth_server(void *arg)
 	MB_DEBUG_SET_THREAD_NAME("input-bluetooth");
 	DEBUG_PRINT("input-bluetooth", "Bluetooth input server starting");
 
-	mbi_bluetooth_register_service();
-
 	while (!server_quit) {
-
-		sockfd = socket(AF_INET, SOCK_STREAM, 0);
+		sockfd = socket(AF_BLUETOOTH, SOCK_STREAM, 0);
 		if (sockfd < 0) {
 			fprintf(stderr, "mbi_bluetooth: Could not open socket\n");
 			sleep(1);
 			continue;
 		}
-
+rebind:
 		bzero((char *) &serv_addr, sizeof(serv_addr));
-		portno = 2048;
-		serv_addr.sin_family = AF_INET;
-		serv_addr.sin_addr.s_addr = INADDR_ANY;
-		serv_addr.sin_port = htons(portno);
+		serv_addr.rc_family = AF_BLUETOOTH;
+		serv_addr.rc_channel = 1;
+
 		if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-			fprintf(stderr, "mbi_bluetooth: Could not bind to socket\n");
+			fprintf(stderr, "mbi_bluetooth: Could not bind to socket (channel=%i)\n",
+				channelno);
+			if (channelno < 30) {
+				channelno++;
+				goto rebind;
+			}
 			close(sockfd);
+			channelno = 1;
 			sockfd = -1;
 			sleep(5);
 			continue;
@@ -146,7 +148,10 @@ mbi_bluetooth_server(void *arg)
 		listen(sockfd, 1);
 		clilen = sizeof(cli_addr);
 
-		DEBUG_VPRINT("input-bluetooth", "Listening for connections on RFCOMM channel %i", portno);
+		/* mbi_bluetooth_register_service(channelno); */
+
+		DEBUG_VPRINT("input-bluetooth", "Listening for connections on RFCOMM channel %i",
+			channelno);
 
 		while(!server_quit) {
 

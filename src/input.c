@@ -8,6 +8,7 @@
 #include "input.h"
 #include "input-directfb.h"
 #include "input-tcp.h"
+#include "input-bluetooth.h"
 #include "linkedlist.h"
 
 LISTABLE_TYPE(mbi_sink,
@@ -195,6 +196,11 @@ mbi_init(void)
 		fprintf(stderr, "!!! mbi_tcp_init() failed\n");
 	}
 
+	/* initialize the bluetooth input provider */
+	if (mbi_bluetooth_init() == -1) {
+		fprintf(stderr, "!!! mbi_bluetooth_init() failed\n");
+	}
+
 	if (pthread_create(&input_loop_thread, NULL, mbi_loop, NULL) != 0) {
 		fprintf(stderr, "pthread_create() failed\n");
 		return -1;
@@ -203,12 +209,13 @@ mbi_init(void)
 	return 0;
 }
 
+
 void
 mbi_destroy(void)
 {
 	mbi_directfb_destroy();
 	mbi_tcp_destroy();
-	/* mbi_tcp_destroy(); */
+	mbi_bluetooth_destroy();
 	mbi_event_send(MBI_EVENT_EXIT);
 	pthread_join(input_loop_thread, NULL);
 	close(writefd);
