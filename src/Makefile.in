@@ -32,6 +32,7 @@ SOURCES=main.o \
 	video-directfb.o \
 	input.o \
 	input-directfb.o \
+	input-socket.o \
 	input-tcp.o \
 	pipe_util.o \
 	player.o \

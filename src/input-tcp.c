@@ -14,20 +14,10 @@
 #include <fcntl.h>
 
 
-
 #include "input.h"
+#include "input-socket.h"
+#include "linkedlist.h"
 #include "debug.h"
-
-
-#define STRINGIZE2(x) #x
-#define STRINGIZE(x) STRINGIZE2(x)
-
-
-struct conn_state
-{
-	int fd;
-	pthread_t thread;
-};
 
 
 static int sockfd = -1;
@@ -36,128 +26,15 @@ static int server_quit = 0;
 static pthread_t thread;
 
 
-static void *
-mbi_tcp_connection(void *arg)
+LIST_DECLARE_STATIC(sockets);
+
+
+static void
+mbi_tcp_socket_closed(struct conn_state *state)
 {
-	int fd = (int) ((struct conn_state*) arg)->fd;
-	int n;
-	struct timeval tv;
-	char buffer[256];
-	fd_set fds;
-
-	assert(arg != NULL);
-	assert(((struct conn_state*) arg)->fd > 0);
-
-	MB_DEBUG_SET_THREAD_NAME("input-tcp-conn");
-	DEBUG_PRINT("input-tcp-conn", "Connection handler running");
-	pthread_detach(pthread_self());
-
-	bzero(buffer,256);
-
-	while (!server_quit) {
-
-		FD_ZERO(&fds);
-		FD_SET(fd, &fds);
-
-		if (fcntl(fd, F_GETFD) == -1) {
-			fprintf(stderr, "input-tcp: Connection broken (fd=%i)\n",
-				fd);
-			break;
-		}
-
-		tv.tv_sec = 1;
-		tv.tv_usec = 0;
-		if ((n = select(fd + 1, &fds, NULL, NULL, &tv)) == 0) {
-			continue;
-		} else if (n < 0) {
-			if (errno == EINTR) {
-				continue;
-			}
-			fprintf(stderr, "input-tcp: select() returned %i\n", n);
-			break;
-		}
-
-		if (!FD_ISSET(fd, &fds)) {
-			continue;
-		}
-
-		if ((n = read(fd, buffer, 255)) <= 0) {
-			break;
-		}
-
-		if (!memcmp("MENU", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_MENU);
-		} else if (!memcmp("LEFT", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_ARROW_LEFT);
-		} else if (!memcmp("RIGHT", buffer, 5)) {
-			mbi_event_send(MBI_EVENT_ARROW_RIGHT);
-		} else if (!memcmp("UP", buffer, 2)) {
-			mbi_event_send(MBI_EVENT_ARROW_UP);
-		} else if (!memcmp("DOWN", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_ARROW_DOWN);
-		} else if (!memcmp("ENTER", buffer, 5)) {
-			mbi_event_send(MBI_EVENT_ENTER);
-		} else if (!memcmp("BACK", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_BACK);
-		} else if (!memcmp("PLAY", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_PLAY);
-		} else if (!memcmp("STOP", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_STOP);
-		} else if (!memcmp("CLEAR", buffer, 5)) {
-			mbi_event_send(MBI_EVENT_CLEAR);
-		} else if (!memcmp("PREV", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_PREV);
-		} else if (!memcmp("NEXT", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_NEXT);
-		} else if (!memcmp("INFO", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_INFO);
-		} else if (!memcmp("KEY:", buffer, 4)) {
-#define ELIF_KEY(x) \
-	else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \
-		mbi_event_send(MBI_EVENT_KBD_ ##x ); \
-	}
-
-			if (!memcmp(buffer + 4, " ", 1)) {
-				mbi_event_send(MBI_EVENT_KBD_SPACE);
-			}
-			ELIF_KEY(A)
-			ELIF_KEY(B)
-			ELIF_KEY(C)
-			ELIF_KEY(D)
-			ELIF_KEY(E)
-			ELIF_KEY(F)
-			ELIF_KEY(G)
-			ELIF_KEY(H)
-			ELIF_KEY(I)
-			ELIF_KEY(J)
-			ELIF_KEY(K)
-			ELIF_KEY(L)
-			ELIF_KEY(M)
-			ELIF_KEY(N)
-			ELIF_KEY(O)
-			ELIF_KEY(P)
-			ELIF_KEY(Q)
-			ELIF_KEY(R)
-			ELIF_KEY(S)
-			ELIF_KEY(T)
-			ELIF_KEY(U)
-			ELIF_KEY(V)
-			ELIF_KEY(W)
-			ELIF_KEY(X)
-			ELIF_KEY(Y)
-			ELIF_KEY(Z)
-#undef ELIF_KEY
-		} else {
-			DEBUG_VPRINT("input-tcp-conn", "Unknown command '%s'", buffer);
-		}
-	}
-
-	DEBUG_VPRINT("input-tcp", "Closing connection (fd=%i)", fd);
-
-	close(fd);
-	free(arg); /* free conn state */
-
-	return NULL;
+	DEBUG_VPRINT("input-tcp", "Connection closed (fd=%i)", state->fd);
+	LIST_REMOVE(state);
+	free(state);
 }
 
 
@@ -240,8 +117,12 @@ mbi_tcp_server(void *arg)
 			}
 
 			state->fd = newsockfd;
+			state->quit = 0;
+			state->closed_callback = mbi_tcp_socket_closed;
 
-			if (pthread_create(&state->thread, NULL, &mbi_tcp_connection, state) != 0) {
+			LIST_ADD(&sockets, state);
+
+			if (pthread_create(&state->thread, NULL, &mbi_socket_connection, state) != 0) {
 				fprintf(stderr, "input-tcp: Could not launch connection thread\n");
 				close(newsockfd);
 				free(state);
@@ -264,6 +145,8 @@ mbi_tcp_server(void *arg)
 int
 mbi_tcp_init(void)
 {
+	LIST_INIT(&sockets);
+
 	if (pthread_create(&thread, NULL, mbi_tcp_server, NULL) != 0) {
 		fprintf(stderr, "Could not create TCP server thread\n");
 		return -1;
@@ -275,7 +158,16 @@ mbi_tcp_init(void)
 void
 mbi_tcp_destroy(void)
 {
+	struct conn_state *socket;
+
 	DEBUG_PRINT("input-tcp", "Exiting (give me 2 secs)");
+
+	/* Close all connections */
+	DEBUG_PRINT("input-tcp", "Closing all open sockets");
+	LIST_FOREACH(struct conn_state*, socket, &sockets) {
+		socket->quit = 1;
+		pthread_join(socket->thread, NULL);
+	}
 
 	server_quit = 1;
 	if (newsockfd != -1) {
