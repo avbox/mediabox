@@ -18,16 +18,25 @@
 #include <bluetooth/sdp_lib.h>
 #include <bluetooth/rfcomm.h>
 
+#include <glib.h>
+#include <gio/gio.h>
+
 #include "input.h"
 #include "input-socket.h"
 #include "linkedlist.h"
 #include "debug.h"
 
 
+#define BLUEZ_BUS_NAME "org.bluez"
+#define BLUEZ_INTF_ADAPTER "org.bluez.Adapter"
+
+
 static int sockfd = -1;
 static int newsockfd = -1;
 static int server_quit = 0;
 static pthread_t thread;
+static GMainLoop *main_loop = NULL;
+static GDBusConnection *dbus_conn = NULL;
 
 
 LIST_DECLARE_STATIC(sockets);
@@ -89,6 +98,11 @@ mbi_bluetooth_register_service(uint8_t rfcomm_channel)
 	/* connect to the local SDP server, register the service record, and
 	 * disconnect */
 	session = sdp_connect(BDADDR_ANY, BDADDR_LOCAL, SDP_RETRY_IF_BUSY);
+	if (session == NULL) {
+		DEBUG_VPRINT("input-bluetooth", "sdp_connect() returned NULL (errno=%i)\n",
+			errno);
+		return NULL;
+	}
 	if ((err = sdp_record_register(session, record, 0)) != 0) {
 		DEBUG_VPRINT("input-bluetooth", "sdp_record_register() returned %i", err);
 		return NULL;
@@ -105,10 +119,17 @@ mbi_bluetooth_register_service(uint8_t rfcomm_channel)
 }
 
 
+static void
+mbi_bluetooth_poweron()
+{
+	return;
+}
+
+
 static void *
 mbi_bluetooth_server(void *arg)
 {
-	int channelno = 1;
+	int channelno;
 	unsigned int clilen;
 	struct sockaddr_rc serv_addr, cli_addr;
 	struct timeval tv;
@@ -120,7 +141,8 @@ mbi_bluetooth_server(void *arg)
 	DEBUG_PRINT("input-bluetooth", "Bluetooth input server starting");
 
 	while (!server_quit) {
-		sockfd = socket(AF_BLUETOOTH, SOCK_STREAM, 0);
+		channelno = 1;
+		sockfd = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
 		if (sockfd < 0) {
 			fprintf(stderr, "mbi_bluetooth: Could not open socket\n");
 			sleep(1);
@@ -129,7 +151,8 @@ mbi_bluetooth_server(void *arg)
 rebind:
 		bzero((char *) &serv_addr, sizeof(serv_addr));
 		serv_addr.rc_family = AF_BLUETOOTH;
-		serv_addr.rc_channel = 1;
+		serv_addr.rc_channel = channelno;
+		serv_addr.rc_bdaddr = *BDADDR_ANY;
 
 		if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
 			fprintf(stderr, "mbi_bluetooth: Could not bind to socket (channel=%i)\n",
@@ -139,16 +162,20 @@ rebind:
 				goto rebind;
 			}
 			close(sockfd);
-			channelno = 1;
-			sockfd = -1;
 			sleep(5);
 			continue;
 		}
 
-		listen(sockfd, 1);
+		if (listen(sockfd, 1) == -1) {
+			fprintf(stderr, "input-bluetooth: listen() failed\n");
+			close(sockfd);
+			sleep(5);
+			continue;
+		}
 		clilen = sizeof(cli_addr);
 
-		/* mbi_bluetooth_register_service(channelno); */
+		/* register the bluetooth service */
+		mbi_bluetooth_register_service(channelno);
 
 		DEBUG_VPRINT("input-bluetooth", "Listening for connections on RFCOMM channel %i",
 			channelno);
@@ -219,10 +246,28 @@ rebind:
 int
 mbi_bluetooth_init(void)
 {
+	GError *error = NULL;
+
 	LIST_INIT(&sockets);
 
+	main_loop = g_main_loop_new(NULL, FALSE);
+	if (main_loop == NULL) {
+		fprintf(stderr, "input-bluetooth: Could not get new main loop\n");
+		return -1;
+	}
+
+	/* connect to dbus system instance */
+	dbus_conn = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, &error);
+	if (error) {
+		fprintf(stderr, "input-bluetooth: Unable to get dbus connection\n");
+		return -1;
+	}
+
+	/* power on bluetooth device */
+	mbi_bluetooth_poweron();
+
 	if (pthread_create(&thread, NULL, mbi_bluetooth_server, NULL) != 0) {
-		fprintf(stderr, "Could not create TCP server thread\n");
+		fprintf(stderr, "input-bluetooth: Could not create bluetooth server thread\n");
 		return -1;
 	}
 	return 0;
@@ -235,6 +280,16 @@ mbi_bluetooth_destroy(void)
 	struct conn_state *socket;
 
 	DEBUG_PRINT("input-bluetooth", "Exiting (give me 2 secs)");
+
+	if (main_loop != NULL) {
+		DEBUG_PRINT("input-bluetooth:", "TODO: Destroy main loop");
+	}
+
+	/* close the dbus connection */
+	if (dbus_conn != NULL) {
+		g_dbus_connection_close(dbus_conn, NULL, NULL, NULL);
+		dbus_conn = NULL;
+	}
 
 	/* Close all connections */
 	DEBUG_PRINT("input-bluetooth", "Closing all open sockets");

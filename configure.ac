@@ -85,6 +85,16 @@ PKG_CHECK_MODULES(BLUEZ, [bluez], ,
 CFLAGS="$CFLAGS $BLUEZ_CFLAGS"
 LDFLAGS="$LDFLAGS $BLUEZ_LIBS"
 
+PKG_CHECK_MODULES(GLIB, [glib-2.0], ,
+	AC_MSG_ERROR('Unable to find glib. Please make sure library and header files are installed.'))
+CFLAGS="$CFLAGS $GLIB_CFLAGS"
+LDFLAGS="$LDFLAGS $GLIB_LIBS"
+PKG_CHECK_MODULES(GIO, [gio-2.0], ,
+	AC_MSG_ERROR('Unable to find gio. Please make sure library and header files are installed.'))
+CFLAGS="$CFLAGS $GIO_CFLAGS"
+LDFLAGS="$LDFLAGS $GIO_LIBS"
+
+
 
 #
 # libcurl
