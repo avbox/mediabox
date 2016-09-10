@@ -1,6 +1,7 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
+#ifdef ENABLE_BLUETOOTH
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -406,3 +407,4 @@ mbi_bluetooth_destroy(void)
 	pthread_join(thread, NULL);
 }
 
+#endif

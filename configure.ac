@@ -30,6 +30,12 @@ if test x"$enable_ionice" = xyes; then
 	AC_DEFINE([ENABLE_IONICE], 1, [Define to 1 to enable ionice])
 fi
 
+AC_ARG_ENABLE([bluetooth], [Define to 1 to enable Bluetooth support])
+if test x"$enable_bluetooth" = xyes; then
+	AC_DEFINE([ENABLE_BLUETOOTH], 1, [Define to 1 to enable Bluetooth support])
+fi
+
+
 
 #AC_SUBST(DAEMON_ARGS)
 
@@ -80,19 +86,26 @@ AC_MSG_ERROR('Unable to find libavfilter. Please make sure library and header fi
 CFLAGS="$CFLAGS $LIBAVFILTER_CFLAGS"
 LDFLAGS="$LDFLAGS $LIBAVFILTER_LIBS"
 
-PKG_CHECK_MODULES(BLUEZ, [bluez], ,
-	AC_MSG_ERROR('Unable to find bluez. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $BLUEZ_CFLAGS"
-LDFLAGS="$LDFLAGS $BLUEZ_LIBS"
 
-PKG_CHECK_MODULES(GLIB, [glib-2.0], ,
-	AC_MSG_ERROR('Unable to find glib. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $GLIB_CFLAGS"
-LDFLAGS="$LDFLAGS $GLIB_LIBS"
-PKG_CHECK_MODULES(GIO, [gio-2.0], ,
-	AC_MSG_ERROR('Unable to find gio. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $GIO_CFLAGS"
-LDFLAGS="$LDFLAGS $GIO_LIBS"
+#
+# Bluetooth support
+#
+if test x"$enable_bluetooth" = xyes; then
+	PKG_CHECK_MODULES(BLUEZ, [bluez], ,
+		AC_MSG_ERROR('Unable to find bluez. Please make sure library and header files are installed.'))
+	CFLAGS="$CFLAGS $BLUEZ_CFLAGS"
+	LDFLAGS="$LDFLAGS $BLUEZ_LIBS"
+
+	PKG_CHECK_MODULES(GLIB, [glib-2.0], ,
+		AC_MSG_ERROR('Unable to find glib. Please make sure library and header files are installed.'))
+	CFLAGS="$CFLAGS $GLIB_CFLAGS"
+	LDFLAGS="$LDFLAGS $GLIB_LIBS"
+
+	PKG_CHECK_MODULES(GIO, [gio-2.0], ,
+		AC_MSG_ERROR('Unable to find gio. Please make sure library and header files are installed.'))
+	CFLAGS="$CFLAGS $GIO_CFLAGS"
+	LDFLAGS="$LDFLAGS $GIO_LIBS"
+fi
 
 
 

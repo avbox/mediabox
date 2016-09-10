@@ -1,3 +1,6 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
@@ -196,10 +199,12 @@ mbi_init(void)
 		fprintf(stderr, "!!! mbi_tcp_init() failed\n");
 	}
 
+#ifdef ENABLE_BLUETOOTH
 	/* initialize the bluetooth input provider */
 	if (mbi_bluetooth_init() == -1) {
 		fprintf(stderr, "!!! mbi_bluetooth_init() failed\n");
 	}
+#endif
 
 	if (pthread_create(&input_loop_thread, NULL, mbi_loop, NULL) != 0) {
 		fprintf(stderr, "pthread_create() failed\n");
@@ -215,7 +220,9 @@ mbi_destroy(void)
 {
 	mbi_directfb_destroy();
 	mbi_tcp_destroy();
+#ifdef ENABLE_BLUETOOTH
 	mbi_bluetooth_destroy();
+#endif
 	mbi_event_send(MBI_EVENT_EXIT);
 	pthread_join(input_loop_thread, NULL);
 	close(writefd);
