@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <fcntl.h>
 
@@ -54,7 +55,7 @@ mbi_bluetooth_socket_closed(struct conn_state *state)
 static sdp_session_t *
 mbi_bluetooth_register_service(uint8_t rfcomm_channel)
 {
-	uint32_t service_uuid_int[] = { 0, 0, 0, 0xABCD };
+	uint32_t service_uuid_int[] = { 0x01120000, 0x00100000, 0x80000080, 0xfb349b5f };
 	const char *service_name = PACKAGE_NAME " Input Service";
 	const char *service_dsc = PACKAGE_NAME " Remote Control Interface";
 	const char *service_prov = PACKAGE_NAME;;
@@ -119,10 +120,109 @@ mbi_bluetooth_register_service(uint8_t rfcomm_channel)
 }
 
 
-static void
+static int
+mbi_bluetooth_devinit()
+{
+	pid_t pid;
+	int pipefd[2];
+	int ret, exit_code;
+
+	if (pipe(pipefd) == -1) {
+		return -1;
+	}
+
+	if ((pid = fork()) == -1) {
+		return -1;
+	} else if (pid == 0) { /* child */
+		close(pipefd[1]);
+		close(STDIN_FILENO);
+		dup2(pipefd[0], STDIN_FILENO);
+		execv("/usr/bin/bluetoothctl", (char * const[]) {
+			strdup("bluetoothctl"),
+			NULL });
+		exit(EXIT_FAILURE);
+
+	} else { /* parent */
+		close(pipefd[0]);
+		ret = write(pipefd[1], "power on\n", 9 * sizeof(char));
+		ret = write(pipefd[1], "discoverable on\n", 16 * sizeof(char));
+		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
+		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
+		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
+		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
+		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
+		close(pipefd[1]);
+
+		while ((ret = waitpid(pid, &exit_code, 0)) == -1) {
+			if (errno == EINTR) {
+				continue;
+			}
+			break;
+		}
+		return (exit_code == 0);
+	}
+}
+
+static int
 mbi_bluetooth_poweron()
 {
-	return;
+	#if 0
+	GVariant *reply = NULL;
+	GError *error = NULL;
+	gboolean res;
+
+	#if 0
+	char *adapter_object = NULL;
+
+	/* Get the default BT adapter. Needed to start device discovery */
+	reply = g_dbus_connection_call_sync(dbus_conn,
+		BLUEZ_BUS_NAME,
+		"/",
+		"org.bluez.Manager",
+		"DefaultAdapter",
+		NULL, 
+		G_VARIANT_TYPE("(o)"),
+		G_DBUS_CALL_FLAGS_NONE,
+		-1,
+		NULL,
+		&error);
+
+	if (error) {
+		fprintf(stderr, "input-bluetooth: Unable to get managed objects: %s\n",
+			error->message);
+		return -1;
+	}
+
+	g_variant_get(reply, "(&o)", &adapter_object);
+	#endif
+
+	reply = g_dbus_connection_call_sync(
+		dbus_conn,
+		BLUEZ_BUS_NAME,
+		"/org/bluez/hci0",
+		"org.bluez.Adapter1",
+		"org.freedesktop.DBus.Properties.Set",
+		g_variant_new("(ssv)", "org.bluez.Adapter1", "Powered", g_variant_new("b", TRUE)),
+		NULL,
+		G_DBUS_CALL_FLAGS_NONE,
+		-1,
+		NULL,
+		&error);
+	if (error != NULL) {
+		fprintf(stderr, "input-bluetooth: Error: %s\n",
+			error->message);
+		return -1;
+	}
+
+	g_variant_get(reply, "(&b)", &res);
+	DEBUG_VPRINT("input-bluetooth", "Powered result = %i", res);
+
+	g_main_loop_run(main_loop);
+
+	return 0;
+	#else
+	return mbi_bluetooth_devinit();
+	#endif
 }
 
 
