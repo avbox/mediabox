@@ -20,6 +20,7 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -28,19 +29,21 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.UnknownHostException;
-import java.util.Set;
 
 public class RemoteActivity extends AppCompatActivity
 {
+    private static final int SERVER_PORT = 2048;
+    private static final String BT_ADDRESS = "00:02:72:13:75:93";
+
     private Socket socket = null;
     private BluetoothSocket btsocket = null;
-    private static final int SERVER_PORT = 2048;
-    private static BluetoothAdapter btdev = BluetoothAdapter.getDefaultAdapter();
+    private BluetoothAdapter btdev = BluetoothAdapter.getDefaultAdapter();
 
     private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
         public void onReceive(Context context, Intent intent)
@@ -61,6 +64,36 @@ public class RemoteActivity extends AppCompatActivity
             }
         }
     };
+
+
+    private BluetoothSocket createRfcommSocket(BluetoothDevice dev, int channel)
+    {
+        BluetoothSocket tmp;
+
+        try
+        {
+            Method m = dev.getClass().getMethod(
+                    "createRfcommSocket", new Class[]{int.class});
+            tmp = (BluetoothSocket) m.invoke(dev, channel);
+        }
+        catch (InvocationTargetException ex)
+        {
+            ex.printStackTrace();
+            tmp = null;
+        }
+        catch (IllegalAccessException ex)
+        {
+            ex.printStackTrace();
+            tmp = null;
+        }
+        catch (NoSuchMethodException ex)
+        {
+            ex.printStackTrace();
+            tmp = null;
+        }
+        return tmp;
+    }
+
 
     private void closeSocket()
     {
@@ -88,8 +121,8 @@ public class RemoteActivity extends AppCompatActivity
                 e.printStackTrace();
             }
         }
-
     }
+
 
     private void openSocket()
     {
@@ -97,9 +130,11 @@ public class RemoteActivity extends AppCompatActivity
         new Thread(new ClientThread()).start();
     }
 
+
     private void sendMessage(String msg)
     {
-        try {
+        try
+        {
             PrintWriter out;
             if (this.socket != null)
             {
@@ -120,12 +155,34 @@ public class RemoteActivity extends AppCompatActivity
             out.println(msg);
             out.flush();
 
-        } catch (UnknownHostException e) {
+        }
+        catch (UnknownHostException e)
+        {
             e.printStackTrace();
-        } catch (IOException e) {
+        }
+        catch (IOException e)
+        {
             e.printStackTrace();
-        } catch (Exception e) {
+        }
+        catch (Exception e)
+        {
             e.printStackTrace();
+        }
+    }
+
+
+    private void waitForDiscovery()
+    {
+        while (btdev != null && btdev.isDiscovering())
+        {
+            try
+            {
+                Thread.sleep(500);
+            }
+            catch (InterruptedException ex)
+            {
+                ex.printStackTrace();
+            }
         }
     }
 
@@ -135,9 +192,30 @@ public class RemoteActivity extends AppCompatActivity
     {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_remote);
+
+        /* Start the discovery service */
         startService(new Intent(this, DiscoveryService.class));
+
+        /* Keep the screen on */
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
+        /* Enable the action bar even on devices with a menu key */
+        try
+        {
+            ViewConfiguration config = ViewConfiguration.get(this);
+            Field menuKeyField = ViewConfiguration.class.getDeclaredField("sHasPermanentMenuKey");
+            if (menuKeyField != null)
+            {
+                menuKeyField.setAccessible(true);
+                menuKeyField.setBoolean(config, false);
+            }
+        }
+        catch (Exception ex)
+        {
+            /* Nothing */
+        }
+
+        /* Capture keyboard input */
         this.findViewById(R.id.btnKeyboard).setOnKeyListener(new View.OnKeyListener()
         {
             @Override
@@ -158,16 +236,21 @@ public class RemoteActivity extends AppCompatActivity
                 return true;
             }
         });
+
+        /* Register broadcast receiver to get SDP discovery results */
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_UUID);
         registerReceiver(mReceiver, filter);
     }
 
+
     public boolean onCreateOptionsMenu(Menu menu)
     {
+        Log.d("RemoteActivity", "Inflating menu");
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.main_menu, menu);
         return true;
     }
+
 
     public boolean onOptionsItemSelected(MenuItem item)
     {
@@ -181,7 +264,7 @@ public class RemoteActivity extends AppCompatActivity
         {
             SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
             SharedPreferences.Editor editor = prefs.edit();
-            editor.putString("device", "00:02:72:13:75:93");
+            editor.putString("device", BT_ADDRESS);
             editor.apply();
             openSocket();
         }
@@ -193,6 +276,7 @@ public class RemoteActivity extends AppCompatActivity
         return false;
     }
 
+
     @Override
     protected void onDestroy()
     {
@@ -201,6 +285,7 @@ public class RemoteActivity extends AppCompatActivity
         stopService(new Intent(this, DiscoveryService.class));
         super.onDestroy();
     }
+
 
     @Override
     protected void onStart()
@@ -222,6 +307,7 @@ public class RemoteActivity extends AppCompatActivity
         ((Button) this.findViewById(R.id.btnNext)).setWidth(width);
     }
 
+
     @Override
     protected void onStop()
     {
@@ -231,14 +317,20 @@ public class RemoteActivity extends AppCompatActivity
                 .hideSoftInputFromWindow(findViewById(R.id.btnKeyboard).getWindowToken(), 0);
     }
 
-    public void onKeyboard(View view) {
+
+    /* Handles KEYBOARD button onClick event */
+    public void onKeyboard(View view)
+    {
         InputMethodManager im = (InputMethodManager) view.getContext()
                 .getSystemService(Context.INPUT_METHOD_SERVICE);
         im.showSoftInput(view, InputMethodManager.SHOW_FORCED);
     }
 
+
     public void onButtonPressed(View view)
     {
+        Log.d("RemoteActivity", "Button pressed");
+
         if (view == this.findViewById(R.id.btnMenu))
         {
             sendMessage("MENU");
@@ -314,71 +406,35 @@ public class RemoteActivity extends AppCompatActivity
             {
                 SharedPreferences prefs = PreferenceManager.
                         getDefaultSharedPreferences(RemoteActivity.this);
-                if (prefs.getString("device", "").equals("00:02:72:13:75:93"))
+                if (prefs.getString("device", "").equals(BT_ADDRESS))
                 {
                     Log.d("RemoteActivity", "Opening Bluetooth socket");
 
                     if (btdev != null)
                     {
-                        btdev.cancelDiscovery();
+                        BluetoothDevice dev = btdev.getRemoteDevice(BT_ADDRESS);
 
-                        Set<BluetoothDevice> devices = btdev.getBondedDevices();
-                        if (devices.size() > 0) {
-                            for (BluetoothDevice dev : devices)
+                        if (dev != null) {
+                            Log.d("RemoteActivity", String.format("Connecting to %s",
+                                    dev.getName()));
+
+                            waitForDiscovery();
+
+                            /* Discover services via SDP */
+                            if (!dev.fetchUuidsWithSdp())
                             {
-                                if (dev.getAddress().equals("00:02:72:13:75:93"))
-                                {
-                                    Log.d("RemoteActivity", String.format("Connecting to %s",
-                                            dev.getName()));
-
-                                    /* Discover services via SDP */
-                                    if (!dev.fetchUuidsWithSdp())
-                                    {
-                                        Log.d("RemoteActivity", "fetchUuidsWithSdp() failed");
-                                    }
-
-                                    /*
-                                    btsocket = dev.createRfcommSocketToServiceRecord(
-                                            UUID.fromString("00000000-0000-0000-0000-0000cdab0000"));
-                                    */
-
-                                    try
-                                    {
-                                        Method m = dev.getClass().getMethod(
-                                                "createRfcommSocket", new Class[]{int.class});
-                                        btsocket = (BluetoothSocket) m.invoke(dev, 1);
-                                    }
-                                    catch (InvocationTargetException ex)
-                                    {
-                                        ex.printStackTrace();
-                                        btsocket = null;
-                                    }
-                                    catch (IllegalAccessException ex)
-                                    {
-                                        ex.printStackTrace();
-                                        btsocket = null;
-                                    }
-                                    catch (NoSuchMethodException ex)
-                                    {
-                                        ex.printStackTrace();
-                                        btsocket = null;
-                                    }
-
-                                    while (btdev.isDiscovering())
-                                    {
-                                        try
-                                        {
-                                            Thread.sleep(500);
-                                        }
-                                        catch (InterruptedException ex)
-                                        {
-                                            ex.printStackTrace();
-                                        }
-                                    }
-
-                                    btsocket.connect();
-                                }
+                                Log.d("RemoteActivity", "fetchUuidsWithSdp() failed");
                             }
+
+                            /*
+                            btsocket = dev.createRfcommSocketToServiceRecord(
+                                    UUID.fromString("00000000-0000-0000-0000-0000cdab0000"));
+                            waitForDiscovery();
+                            btsocket.connect();
+                            */
+
+                            btsocket = createRfcommSocket(dev, 1);
+                            btsocket.connect();
                         }
                     }
                     else
