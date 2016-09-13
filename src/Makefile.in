@@ -51,7 +51,8 @@ SOURCES=main.o \
 	iface_util.o \
 	library.o \
 	timers.o \
-	alsa-volume.o
+	alsa-volume.o \
+	process.o
 
 all: mediabox
 

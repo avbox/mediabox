@@ -15,6 +15,7 @@
 #include "timers.h"
 #include "player.h"
 #include "shell.h"
+#include "process.h"
 #include "su.h"
 #include "downloads-backend.h"
 #include "announce.h"
@@ -75,6 +76,12 @@ main (int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
+	/* initialize daemon launcher */
+	if (mb_process_init() != 0) {
+		fprintf(stderr, "Could not initialize daemons launcher. Exiting.\n");
+		exit(EXIT_FAILURE);
+	}
+
 	/* initialize the shell */
 	if (mbs_init() != 0) {
 		fprintf(stderr, "Could not initialize shell\n");
@@ -100,6 +107,7 @@ main (int argc, char **argv)
 	mb_downloadmanager_destroy();
 	mbs_destroy();
 
+	mb_process_shutdown();
 	mbt_shutdown();
 	mbi_destroy();
 	mbv_destroy();
