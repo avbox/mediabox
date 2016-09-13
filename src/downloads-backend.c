@@ -8,24 +8,22 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <pthread.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/sendfile.h>
 
 #ifdef ENABLE_IONICE
 #include "ionice.h"
-#include "su.h"
 #endif
+#include "process.h"
+#include "debug.h"
 
 #define DELUGE_BIN "/usr/bin/deluge-console"
 #define DELUGED_BIN "/usr/bin/deluged"
 #define PREFIX "/usr/local"
 
 
-static int deluge_quit = 0;
-static pthread_t deluge_monitor;
-static pid_t deluge_pid;
+int daemon_id = -1;
 
 
 static int
@@ -56,60 +54,12 @@ cp(const char *src, const char *dst)
 }
 
 
-static void *
-mb_downloadmanager_deluged(void *data)
-{
-	pid_t pid;
-
-	while (!deluge_quit) {
-
-		if ((pid = fork()) == -1) {
-			fprintf(stderr, "download-backend: fork() failed\n");
-			return NULL;
-		} else if (pid == 0) { /* child */
-			if (nice(5) == -1) {
-				fprintf(stderr, "downloads-backend: I'm trying to be nice but I can't. (errno=%i)\n",
-					errno);
-			}
-#ifdef ENABLE_IONICE
-			(void) mb_su_gainroot();
-			if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)) == -1) {
-				fprintf(stderr, "downloads-backend: WARNING: Could not set deluged IO priority to idle!!\n");
-			}
-			(void) mb_su_droproot();
-#endif
-
-			execv(DELUGED_BIN, (char * const[]) {
-				strdup("deluged"),
-				strdup("-d"),
-				strdup("-p"),
-				strdup("58846"),
-				strdup("-c"),
-				strdup("/var/lib/mediabox/deluge/"),
-				NULL });
-			exit(EXIT_FAILURE);
-		} else {
-			int ret;
-			deluge_pid = pid;
-			while (waitpid(deluge_pid, &ret, 0) == -1) {
-				if (errno == EINTR) {
-					continue;
-				} else {
-					fprintf(stderr, "download-backend: waitpid() returned -1 errno=%i\n", errno);
-				}
-			}
-			fprintf(stderr, "download-backend: deluged exited with %i\n", ret);
-			deluge_pid = -1;
-		}
-	}
-	return NULL;
-}
-
-
 int
 mb_downloadmanager_addurl(char *url)
 {
 	pid_t pid;
+
+	DEBUG_PRINT("download-backend", "Addind download url");
 
 	if ((pid = fork()) == -1) {
 		fprintf(stderr, "downloads-backend: fork() failed\n");
@@ -152,34 +102,55 @@ mb_downloadmanager_addurl(char *url)
 }
 
 
+/**
+ * mb_downloadmanager_init() -- Initialize the download manager.
+ */
 int
 mb_downloadmanager_init(void)
 {
+	char * const args[] =
+	{
+		"deluged",
+		"-d",
+		"-p",
+		"58846",
+		"-c",
+		"/var/lib/mediabox/deluge/",
+		NULL
+	};
+
+	DEBUG_PRINT("download-backend", "Initializing download manager");
+
+	/* create all config files for deluged */
 	umask(000);
 	mkdir("/var/lib/mediabox", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 	mkdir("/var/lib/mediabox/deluge", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 	mkdir("/var/lib/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-
 	cp("/usr/local/share/mediabox/deluge-core.conf", "/var/lib/mediabox/deluge/core.conf");
 	cp("/usr/local/share/mediabox/deluge-auth", "/var/lib/mediabox/deluge/auth");
 	unlink("/var/lib/mediabox/deluge/deluged.pid");
 
-
-	deluge_quit = 0;
-	if (pthread_create(&deluge_monitor, NULL, mb_downloadmanager_deluged, NULL) != 0) {
-		fprintf(stderr, "download-backend: pthread_create() failed\n");
+	/* launch the deluged process */
+	if ((daemon_id = mb_process_start(DELUGED_BIN, args,
+		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE,
+		"Deluge Daemon", NULL)) == -1) {
+		fprintf(stderr, "download-backend: Could not start deluge daemon\n");
 		return -1;
 	}
+
 	return 0;
 }
 
 
+/**
+ * mb_downloadmanager_destroy() -- Shutdown the download manager.
+ */
 void
 mb_downloadmanager_destroy(void)
 {
-	deluge_quit = 1;
-	if (kill(deluge_pid, SIGKILL) == -1) {
-		fprintf(stderr, "download-backend: kill() failed. errno=%i\n", errno);
+	DEBUG_PRINT("download-backend", "Shutting down download manager");
+
+	if (daemon_id != -1) {
+		mb_process_stop(daemon_id);
 	}
-	pthread_join(deluge_monitor, NULL);
 }
