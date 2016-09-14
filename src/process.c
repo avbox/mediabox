@@ -24,16 +24,21 @@
 #endif
 
 
+#define MAX(a, b) ((a > b) ? a : b)
+
 
 LISTABLE_STRUCT(mb_process,
 	int id;
-	int stopping;
 	pid_t pid;
+	int stdin;
+	int stdout;
+	int stderr;
 	enum mb_process_flags flags;
 	const char *name;
 	const char *binary;
 	char * const * args;
 	mb_process_exit exit_callback;
+	int stopping;
 );
 
 
@@ -42,7 +47,30 @@ static pthread_mutex_t process_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int nextid = 1;
 static pthread_t monitor_thread;
+static pthread_t io_thread;
 static int quit = 0;
+
+
+/**
+ * mb_process_checkflagsoneof() -- Checks that only one of the specified
+ * flags is set
+ */
+static int
+mb_process_checkflagsoneof(enum mb_process_flags proc_flags, enum mb_process_flags flags)
+{
+	int i;
+	if (proc_flags & flags) {
+		proc_flags &= flags;
+		for (i = 0; i < sizeof(enum mb_process_flags) * CHAR_BIT; i++) {
+			if ((proc_flags & 1) && proc_flags != 1) {
+				errno = EINVAL;
+				return -1;
+			}
+			proc_flags >>= 1;
+		}
+	}
+	return 0;
+}
 
 
 /**
@@ -74,16 +102,45 @@ mb_process_getbyid(int id)
 static pid_t
 mb_process_fork(struct mb_process *proc)
 {
+	int ret = -1;
+	int in[2] = { -1, -1 }, out[2] = { -1, -1 }, err[2] = { -1, -1 };
+
+	if (pipe(in) == -1 || pipe(out) == -1 || pipe(err) == -1) {
+		fprintf(stderr, "process: pipe() failed\n");
+		goto end;
+	}
+
 	if ((proc->pid = fork()) == -1) {
 		fprintf(stderr, "process: fork() failed\n");
-		return -1;
+		goto end;
 
 	} else if (proc->pid != 0) {
+		/* close child end of pipes */
+		close(in[0]);
+		close(out[1]);
+		close(err[1]);
+
+		proc->stdin = in[1];
+		proc->stdout = out[0];
+		proc->stderr = err[0];
+
 		/* fork() succeeded so return the pid of the new process */
 		return proc->pid;
 	}
 
 	/**** Child process falls through ****/
+
+	/* close parent end of pipes */
+	close(in[1]);
+	close(out[0]);
+	close(err[0]);
+
+	/* duplicate standard file descriptors */
+	if (dup2(in[0], STDIN_FILENO) == -1 ||
+		dup2(out[1], STDOUT_FILENO) == -1 ||
+		dup2(err[1], STDERR_FILENO) == -1) {
+		fprintf(stderr, "process: dup2() failed\n");
+	}
 
 	/* set the process niceness */
 	if (proc->flags & MB_PROCESS_NICE) {
@@ -120,6 +177,15 @@ mb_process_fork(struct mb_process *proc)
 
 	/* if execv() failed then exit with error status */
 	exit(EXIT_FAILURE);
+
+end:
+	if (in[0] != -1) close(in[0]);
+	if (in[1] != -1) close(in[1]);
+	if (out[0] != -1) close(out[0]);
+	if (out[1] != -1) close(out[1]);
+	if (err[0] != -1) close(err[0]);
+	if (err[1] != -1) close(err[1]);
+	return ret;
 }
 
 
@@ -244,6 +310,90 @@ mb_process_force_kill(int id, void *data)
 
 
 /**
+ * mb_process_io_thread() -- Runs on it's own thread and handles standard IO
+ * to/from processes.
+ */
+static void *
+mb_process_io_thread(void *arg)
+{
+	fd_set fds;
+	int fd_max, res;
+	char buf[1024];
+	struct mb_process *proc;
+	struct timeval tv;
+
+	while (!quit) {
+
+		fd_max = 0;
+		FD_ZERO(&fds);
+
+		/* build a file descriptor set to select() */
+		pthread_mutex_lock(&process_list_lock);
+		LIST_FOREACH(struct mb_process*, proc, &process_list) {
+			if (proc->stdout != -1) {
+				FD_SET(proc->stdout, &fds);
+				fd_max = MAX(fd_max, proc->stdout);
+			}
+			if (proc->stderr != -1) {
+				FD_SET(proc->stderr, &fds);
+				fd_max = MAX(fd_max, proc->stderr);
+			}
+		}
+		pthread_mutex_unlock(&process_list_lock);
+
+		/* select the output file descriptors of all processes */
+		tv.tv_sec = 0;
+		tv.tv_usec = 500 * 1000L;
+		if ((res = select(fd_max + 1, &fds, NULL, NULL, &tv)) == 0) {
+			continue;
+		} else if (res < 0) {
+			if (errno == EINTR) {
+				continue;
+			}
+			fprintf(stderr, "process: select() returned -1 (errno=%i)\n",
+				errno);
+			usleep(500 * 1000L * 1000L);
+			continue;
+		}
+
+		/* process all pending output */
+		pthread_mutex_lock(&process_list_lock);
+		LIST_FOREACH(struct mb_process*, proc, &process_list) {
+			if (proc->stdout != -1 && FD_ISSET(proc->stdout, &fds)) {
+				if (!(proc->flags & MB_PROCESS_STDOUT_PIPE)) {
+					if ((res = read(proc->stdout, buf, sizeof(buf))) == -1) {
+						fprintf(stderr, "process: read() returned -1 (errno=%i)\n",
+							errno);
+					}
+					if (proc->flags & MB_PROCESS_STDOUT_LOG) {
+						/* TODO: We need to break the output in lines */
+						fprintf(stderr, "process: %s: TODO: Log STDOUT output\n",
+							proc->name);
+					}
+				}
+			}
+			if (proc->stderr != -1 && FD_ISSET(proc->stderr, &fds)) {
+				if (!(proc->flags & MB_PROCESS_STDERR_PIPE)) {
+					if ((res = read(proc->stdout, buf, sizeof(buf))) == -1) {
+						fprintf(stderr, "process: read() returned -1 (errno=%i)\n",
+							errno);
+					}
+					if (proc->flags & MB_PROCESS_STDERR_LOG) {
+						/* TODO: We need to break the output in lines */
+						fprintf(stderr, "process: %s: TODO: Log STDERR output\n",
+							proc->name);
+					}
+				}
+			}
+		}
+		pthread_mutex_unlock(&process_list_lock);
+
+	}
+	return NULL;
+}
+
+
+/**
  * mb_process_monitor_thread() -- This function runs on it's own thread and
  * waits for processes to exit and then handles the event appropriately.
  */
@@ -275,7 +425,16 @@ mb_process_monitor_thread(void *arg)
 		LIST_FOREACH_SAFE(struct mb_process*, proc, &process_list, {
 			if (proc->pid == pid) {
 
+				/* close file descriptors */
+				if (proc->stdin != -1) close(proc->stdin);
+				if (proc->stdout != -1) close(proc->stdout);
+				if (proc->stderr != -1) close(proc->stderr);
+
+				/* clear file descriptors and PID */
 				proc->pid = -1;
+				proc->stdin = -1;
+				proc->stdout = -1;
+				proc->stderr = -1;
 
 				/* if the process terminated abnormally then log
 				 * an error message */
@@ -336,6 +495,53 @@ mb_process_getpid(int id)
 
 
 /**
+ * mb_process_openfd() -- Opens one of the standard file descriptors for
+ * the process.
+ *
+ * NOTE: After opening a file descriptor with this function the process
+ * manager stops managing the file descriptor so you must call close()
+ * on it when you're done using it.
+ */
+int
+mb_process_openfd(int id, int std_fileno)
+{
+	int result = -1;
+	struct mb_process *proc;
+
+	assert(std_fileno == STDIN_FILENO ||
+		std_fileno == STDOUT_FILENO ||
+		std_fileno == STDERR_FILENO);
+
+	/* get the process object */
+	if ((proc = mb_process_getbyid(id)) == NULL) {
+		DEBUG_VPRINT("process", "Process id %i not found", id);
+		errno = ENOENT;
+		return -1;
+	}
+
+	/* Clear the file descriptor from the process object and
+	 * return it */
+	switch (std_fileno) {
+	case STDIN_FILENO:
+		result = proc->stdin;
+		proc->stdin = -1;
+		break;
+	case STDOUT_FILENO:
+		result = proc->stdout;
+		proc->stdout = -1;
+		break;
+	case STDERR_FILENO:
+		result = proc->stderr;
+		proc->stderr = -1;
+		break;
+	default:
+		result = -1;
+	}
+	return result;
+}
+
+
+/**
  * mb_process_start() -- Starts and monitors a child process.
  */
 int
@@ -350,16 +556,21 @@ mb_process_start(const char *binary, char * const argv[],
 	assert(name != NULL);
 
 	/* check for conflicting IO priority flags */
-	if (flags & MB_PROCESS_IONICE) {
-		int flags_copy, i;
-		flags_copy = flags & MB_PROCESS_IONICE;
-		for (i = 0; i < sizeof(enum mb_process_flags) * CHAR_BIT; i++) {
-			if ((flags_copy & 1) && flags_copy != 1) {
-				fprintf(stderr, "process: Multiple IO priorities set!\n");
-				errno = EINVAL;
-				return -1;
-			}
-		}
+	if (mb_process_checkflagsoneof(flags, MB_PROCESS_IONICE) == -1) {
+		fprintf(stderr, "process: Multiple IO priorities set!\n");
+		return -1;
+	}
+
+	/* check for conflicting STDOUT flags */
+	if (mb_process_checkflagsoneof(flags, MB_PROCESS_STDOUT) == -1) {
+		fprintf(stderr, "process: Multiple STDOUT flags set!\n");
+		return -1;
+	}
+
+	/* check for conflicting STDERR flags */
+	if (mb_process_checkflagsoneof(flags, MB_PROCESS_STDERR) == -1) {
+		fprintf(stderr, "process: Multiple STDERR flags set!\n");
+		return -1;
 	}
 
 	/* allocate memory for process structure */
@@ -370,6 +581,9 @@ mb_process_start(const char *binary, char * const argv[],
 
 	/* initialize process structure and add it to list */
 	proc->id = mb_process_get_next_id();
+	proc->stdin = -1;
+	proc->stdout = -1;
+	proc->stderr = -1;
 	proc->stopping = 0;
 	proc->flags = flags;
 	proc->args = mb_process_clone_args(argv);
@@ -378,7 +592,7 @@ mb_process_start(const char *binary, char * const argv[],
 	proc->exit_callback = exit_callback;
 
 	/* check that all memory allocations succeeded */
-	if (proc->binary == NULL || proc->args == NULL) {
+	if (proc->binary == NULL || proc->args == NULL || proc->name == NULL) {
 		fprintf(stderr, "process: Out of memory\n");
 		mb_process_free(proc);
 		return -1;
@@ -469,6 +683,14 @@ mb_process_init(void)
 		fprintf(stderr, "process: Could not start thread\n");
 		return -1;
 	}
+
+	if (pthread_create(&io_thread, NULL, mb_process_io_thread, NULL) != 0) {
+		fprintf(stderr, "process: Could not start IO thread\n");
+		quit = 1;
+		pthread_join(io_thread, 0);
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -489,4 +711,5 @@ mb_process_shutdown(void)
 
 	quit = 1;
 	pthread_join(monitor_thread, 0);
+	pthread_join(io_thread, 0);
 }
