@@ -3,9 +3,15 @@
 
 #include "video.h"
 #include "input.h"
+#include "linkedlist.h"
 
 
 struct mbp;
+
+
+LISTABLE_STRUCT(mb_playlist_item,
+	const char *filepath;
+);
 
 
 /**
@@ -23,6 +29,13 @@ enum mb_player_status
 /* status changed callback function */
 typedef void (*mb_player_status_callback)(struct mbp *inst,
 	enum mb_player_status status, enum mb_player_status last_status);
+
+
+/**
+ * mb_player_playlist() -- Plays a list of items
+ */
+int
+mb_player_playlist(struct mbp* inst, LIST *playlist, struct mb_playlist_item* item);
 
 
 /**

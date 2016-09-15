@@ -14,6 +14,7 @@
 #include "timers.h"
 #include "debug.h"
 #include "alsa-volume.h"
+#include "library.h"
 
 
 #define MEDIA_FILE "/mov.mp4"
@@ -128,7 +129,7 @@ mbs_start_clock()
 }
 
 
-void
+static void
 mbs_volumechanged(int volume)
 {
 	DEBUG_VPRINT("shell", "Volume changed to: %i", volume);

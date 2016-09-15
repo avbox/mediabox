@@ -49,6 +49,7 @@
 #include "su.h"
 #include "time_util.h"
 #include "timers.h"
+#include "linkedlist.h"
 
 
 /*
@@ -93,6 +94,7 @@ struct mbp
 	int have_audio;
 	int have_video;
 	int stream_quit;
+	int stopping;
 	int64_t seek_to;
 	int seek_result;
 	uint8_t *buf;
@@ -176,15 +178,45 @@ struct mbp
 
 	int stream_percent;
 
+	/* overlay stuff */
 	int top_overlay_timer_id;
 	char *top_overlay_text;
 	enum mbv_alignment top_overlay_alignment;
 	pthread_mutex_t top_overlay_lock;
+
+	/* playlist stuff */
+	LIST_DECLARE(playlist);
+	struct mb_playlist_item *playlist_item;
 };
 
 
 /* Pango global context */
 PangoFontDescription *pango_font_desc = NULL;
+
+
+/**
+ * mb_player_freeplaylist() -- Free the internal playlist
+ */
+static void
+mb_player_freeplaylist(struct mbp* inst)
+{
+	struct mb_playlist_item *item;
+
+	assert(inst != NULL);
+
+	inst->playlist_item = NULL;
+
+	LIST_FOREACH_SAFE(struct mb_playlist_item*, item, &inst->playlist, {
+
+		LIST_REMOVE(item);
+
+		if (item->filepath != NULL) {
+			free((void*) item->filepath);
+		}
+
+		free(item);
+	});
+}
 
 
 /**
@@ -2144,6 +2176,18 @@ decoder_exit:
 	malloc_trim(0);
 #endif
 
+	/* if we're playing a playlist try to play the next
+	 * item unless stop() has been called */
+	if (!inst->stopping && inst->playlist_item != NULL) {
+		inst->playlist_item = LIST_NEXT(struct mb_playlist_item*,
+			inst->playlist_item);
+		if (inst->playlist_item != NULL) {
+			mb_player_play(inst, inst->playlist_item->filepath);
+		}
+	}
+
+	inst->stopping = 0;
+
 	return NULL;
 }
 
@@ -2481,6 +2525,46 @@ mb_player_play(struct mbp *inst, const char * const path)
 
 
 /**
+ * mb_player_playlist() -- Plays a playlist.
+ */
+int
+mb_player_playlist(struct mbp* inst, LIST *playlist, struct mb_playlist_item* selected_item)
+{
+	struct mb_playlist_item *item, *item_copy;
+
+	/* if our local list is not empty then free it first */
+	if (!LIST_EMPTY(&inst->playlist)) {
+		mb_player_freeplaylist(inst);
+	}
+
+	/* copy the playlist */
+	LIST_FOREACH(struct mb_playlist_item*, item, playlist) {
+		if ((item_copy = malloc(sizeof(struct mb_playlist_item))) == NULL) {
+			mb_player_freeplaylist(inst);
+			errno = ENOMEM;
+			return -1;
+		}
+		if ((item_copy->filepath = strdup(item->filepath)) == NULL) {
+			mb_player_freeplaylist(inst);
+			errno = ENOMEM;
+			return -1;
+		}
+
+		LIST_ADD(&inst->playlist, item_copy);
+
+		if (item == selected_item) {
+			inst->playlist_item = item_copy;
+		}
+	}
+
+	/* play the selected item */
+	mb_player_play(inst, inst->playlist_item->filepath);
+
+	return 0;
+}
+
+
+/**
  * mb_player_pause() -- Pause the stream.
  */
 int
@@ -2514,6 +2598,8 @@ mb_player_pause(struct mbp* inst)
 int
 mb_player_stop(struct mbp* inst)
 {
+	assert(inst != NULL);
+
 	/* if the video is paused then unpause it first. */
 	if (inst->status == MB_PLAYER_STATUS_PAUSED) {
 		fprintf(stderr, "player: Unpausing stream\n");
@@ -2527,6 +2613,7 @@ mb_player_stop(struct mbp* inst)
 	}
 
 	if (inst->status != MB_PLAYER_STATUS_READY) {
+		inst->stopping = 1;
 		inst->stream_quit = 1;
 		pthread_cond_broadcast(&inst->audio_decoder_signal);
 		pthread_cond_broadcast(&inst->video_decoder_signal);
@@ -2673,6 +2760,8 @@ mb_player_new(struct mbv_window *window)
 	inst->video_stream_index = -1;
 	inst->status = MB_PLAYER_STATUS_READY;
 
+	LIST_INIT(&inst->playlist);
+
 	/* get the size of the window */
 	if (mbv_window_getsize(inst->window, &inst->width, &inst->height) == -1) {
 		fprintf(stderr, "player: Could not get window size\n");
@@ -2717,6 +2806,8 @@ mb_player_destroy(struct mbp *inst)
 
 	/* this just fails if we're not playing */
 	(void) mb_player_stop(inst);
+
+	mb_player_freeplaylist(inst);
 
 	if (inst->media_file != NULL) {
 		free((void*) inst->media_file);

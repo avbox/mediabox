@@ -15,13 +15,87 @@
 #include "ui-menu.h"
 #include "shell.h"
 #include "player.h"
+#include "debug.h"
+#include "log.h"
+#include "library.h"
 
+
+struct mb_library_playlist_item
+{
+	int isdir;
+	union
+	{
+		const char *filepath;
+		struct mb_playlist_item *playlist_item;
+	} data;
+};
+
+
+LIST_DECLARE_STATIC(playlist);
 
 static struct mbv_window *window = NULL;
 static struct mb_ui_menu *menu = NULL;
 static char *dotdot = NULL;
 
 #define LIBRARY_ROOT "/media/UPnP"
+
+
+static struct mb_playlist_item *
+mb_library_addtoplaylist(const char *file)
+{
+	struct mb_playlist_item *item;
+
+	/* check that the file is valid */
+	if (file == NULL || strlen(file) == 0) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "library",
+			"Could not add to playlist. Invalid arguments");
+		errno = ENOENT;
+		return NULL;
+	}
+
+	/* allocate memory */
+	if ((item = malloc(sizeof(struct mb_playlist_item))) == NULL) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "library", "Could not add to playlist. Out of memory");
+		return NULL;
+	}
+
+	/* copy filepath */
+	if ((item->filepath = strdup(file)) == NULL) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "library",
+			"Could not add to playlist. Out of memory (2)");
+		free(item);
+		return NULL;
+	}
+
+	LIST_ADD(&playlist, item);
+
+	return item;
+}
+
+
+static void
+mb_library_freeplaylistitem(struct mb_playlist_item *item)
+{
+	assert(item != NULL);
+
+	if (item->filepath != NULL) {
+		free((void*) item->filepath);
+	}
+
+	free(item);
+}
+
+
+static void
+mb_library_freeplaylist(void)
+{
+	struct mb_playlist_item *item;
+
+	LIST_FOREACH_SAFE(struct mb_playlist_item*, item, &playlist, {
+		LIST_REMOVE(item);
+		mb_library_freeplaylistitem(item);
+	});
+}
 
 
 /**
@@ -67,6 +141,10 @@ mb_library_loadlist(const char *path)
 
 	assert(path != NULL);
 
+	/* first free the playlist */
+	mb_library_freeplaylist();
+
+	/* allocate memory for item path */
 	rpath = malloc(sizeof(LIBRARY_ROOT) + path_len + 2);
 	if (rpath == NULL) {
 		fprintf(stderr, "mb_library: Out of memory\n");
@@ -173,8 +251,41 @@ mb_library_loadlist(const char *path)
 		if (!strcmp(ent->d_name, "..")) {
 			dotdot = filepathrel;
 		} else {
+			struct mb_library_playlist_item *library_item;
+
+			if ((library_item = malloc(sizeof(struct mb_library_playlist_item))) == NULL) {
+				LOG_PRINT(MB_LOGLEVEL_ERR, "library", "Add to playlist failed");
+				free(filepathrel);
+				free(filepath);
+				free(title);
+				closedir(dir);
+				return -1;
+			}
+
+			if (S_ISDIR(st.st_mode)) {
+				library_item->isdir = 1;
+				library_item->data.filepath = filepathrel;
+			} else {
+				library_item->isdir = 0;
+
+				/* add item to playlist */
+				if ((library_item->data.playlist_item = mb_library_addtoplaylist(filepathrel)) == NULL) {
+					LOG_PRINT(MB_LOGLEVEL_ERR, "library", "Add to playlist failed");
+					free(library_item);
+					free(filepathrel);
+					free(filepath);
+					free(title);
+					closedir(dir);
+					return -1;
+				}
+
+				free(filepathrel);
+			}
+
+			assert(library_item != NULL);
+
 			/* add item to menu */
-			mb_ui_menu_additem(menu, title, filepathrel);
+			mb_ui_menu_additem(menu, title, library_item);
 		}
 
 		free(filepath);
@@ -192,7 +303,25 @@ mb_library_loadlist(const char *path)
 static int
 mb_library_freeitems(void *item, void *data)
 {
-	(void) data;
+	struct mb_library_playlist_item *playlist_item =
+		(struct mb_library_playlist_item*) item;
+
+	if (playlist_item->isdir) {
+		if (playlist_item->data.filepath != NULL) {
+			free((void*) playlist_item->data.filepath);
+		}
+	} else {
+		/* NOTE: We don't need to free the playlist item because
+		 * it belongs to the global playlist and it will be freed
+		 * once the list gets reloaded or the library object gets
+		 * destroyed */
+
+		/*
+		if (playlist_item->data.playlist_item != NULL) {
+			mb_library_freeplaylistitem(playlist_item->data.playlist_item);
+		}
+		*/
+	}
 	free(item);
 	return 0;
 }
@@ -206,6 +335,8 @@ mb_library_init(void)
 {
 	int resx, resy, width;
 	const int height = 450;
+
+	LIST_INIT(&playlist);
 
 	mbv_getscreensize(&resx, &resy);
 
@@ -253,13 +384,14 @@ mb_library_showdialog(void)
 	/* show the menu widget and run it's input loop */
 	while (!quit) {
 		while (mb_ui_menu_showdialog(menu) == 0) {
-			char *selected = mb_ui_menu_getselected(menu);
+			struct mb_library_playlist_item *selected =
+				mb_ui_menu_getselected(menu);
 
 			assert(selected != NULL);
 
-			if (selected[strlen(selected) - 1] == '/') {
+			if (selected->isdir) {
 
-				char *selected_copy = strdup(selected);
+				char *selected_copy = strdup(selected->data.filepath);
 				if (selected_copy == NULL) {
 					abort(); /* for now */
 				}
@@ -272,11 +404,16 @@ mb_library_showdialog(void)
 				free(selected_copy);
 
 			} else {
-
 				struct mbp* player;
+				struct mb_playlist_item *playlist_item;
 
-				fprintf(stderr, "mb_library: Selected %s\n",
-					selected);
+				playlist_item = selected->data.playlist_item;
+				assert(selected->data.playlist_item != NULL);
+
+				DEBUG_VPRINT("library", "Selected %s",
+					selected->data.playlist_item->filepath);
+
+				assert(LIST_SIZE(&playlist) > 0);
 
 				/* get the active player instance */
 				player = mbs_get_active_player();
@@ -287,7 +424,7 @@ mb_library_showdialog(void)
 
 				mbv_window_hide(window);
 
-				if (mb_player_play(player, selected) == 0) {
+				if (mb_player_playlist(player, &playlist, playlist_item) == 0) {
 					ret = 0;
 					quit = 1;
 					break;
@@ -326,6 +463,7 @@ mb_library_destroy(void)
 		dotdot = NULL;
 	}
 
+	mb_library_freeplaylist();
 	mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);
