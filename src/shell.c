@@ -13,8 +13,10 @@
 #include "su.h"
 #include "timers.h"
 #include "debug.h"
+#include "log.h"
 #include "alsa-volume.h"
 #include "library.h"
+#include "ui-progressbar.h"
 
 
 #define MEDIA_FILE "/mov.mp4"
@@ -24,9 +26,13 @@ static int pw = 0, ph = 0;
 static struct mbv_window *root_window = NULL;
 static struct mbv_window *progress = NULL;
 static struct mbp *player = NULL;
+static struct mbv_window *volumebar_window = NULL;
+static struct mb_ui_progressbar *volumebar = NULL;
+static int volumebar_timer_id = -1;
 static int input_fd = -1;
 static int clock_timer_id = 0;
 static pthread_mutex_t screen_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t volume_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 /**
@@ -129,10 +135,109 @@ mbs_start_clock()
 }
 
 
+static enum mbt_result
+mbs_dismissvolumebar(int id, void *data)
+{
+	pthread_mutex_lock(&volume_lock);
+
+	if (id == volumebar_timer_id) {
+		DEBUG_VPRINT("shell", "Dismissing volume indicator (id=%i)",
+			id);
+
+		mbv_window_hide(volumebar_window);
+		mb_ui_progressbar_destroy(volumebar);
+		mbv_window_destroy(volumebar_window);
+		volumebar = NULL;
+		volumebar_window = NULL;
+		volumebar_timer_id = -1;
+
+	} else {
+		DEBUG_VPRINT("shell", "Too late to dismiss volume bar (timer id=%i)",
+			id);
+	}
+
+	pthread_mutex_unlock(&volume_lock);
+
+	return MB_TIMER_CALLBACK_RESULT_STOP;
+}
+
+
 static void
 mbs_volumechanged(int volume)
 {
-	DEBUG_VPRINT("shell", "Volume changed to: %i", volume);
+	int x, y, w, h;
+	int new_timer_id;
+	struct timespec tv;
+	const int bar_width = 800;
+
+	pthread_mutex_lock(&volume_lock);
+
+	if (volumebar_timer_id == -1) {
+
+		assert(volumebar == NULL);
+		assert(volumebar_window == NULL);
+
+		/* calculate volumebar size and location */
+		mbv_window_getcanvassize(root_window, &w, &h);
+		x = (w / 2) - (bar_width / 2);
+		y = h - 150;
+
+		/* create a new window with a progressbar widget */
+		volumebar_window = mbv_window_new(NULL, x, y, bar_width, 60);
+		if (volumebar_window == NULL) {
+			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
+				"Could not create volume indicator window");
+			pthread_mutex_unlock(&volume_lock);
+			return;
+		}
+		volumebar = mb_ui_progressbar_new(volumebar_window, 0, 0, bar_width, 60, 0, 100, volume);
+		if (volumebar == NULL) {
+			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
+				"Could not create volume indicator");
+			mbv_window_destroy(volumebar_window);
+			pthread_mutex_unlock(&volume_lock);
+			return;
+		}
+
+		mbv_window_show(volumebar_window);
+
+	} else {
+		mb_ui_progressbar_setvalue(volumebar, volume);
+	}
+
+	mb_ui_progressbar_update(volumebar);
+
+	/* Register timer to dismiss volume bar */
+	tv.tv_sec = 5;
+	tv.tv_nsec = 0;
+	new_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT, mbs_dismissvolumebar, NULL);
+	if (new_timer_id == -1) {
+		pthread_mutex_unlock(&volume_lock);
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "shell", "Could not register volume bar timer");
+
+		/* Hide the window only if there's not a timer already
+		 * running. Otherwise it'll get hidden when the timer
+		 * expires */
+		if (volumebar_timer_id == -1) {
+			mbv_window_hide(volumebar_window);
+			mb_ui_progressbar_destroy(volumebar);
+			mbv_window_destroy(volumebar_window);
+			volumebar = NULL;
+			volumebar_window = NULL;
+			return;
+		}
+	}
+
+	DEBUG_VPRINT("shell", "Registered volumebar timer (id=%i)", new_timer_id);
+
+	/* if there is a timer running already cancel it */
+	if (volumebar_timer_id != -1) {
+		mbt_cancel(volumebar_timer_id);
+	}
+
+	volumebar_timer_id = new_timer_id;
+
+	pthread_mutex_unlock(&volume_lock);
 }
 
 

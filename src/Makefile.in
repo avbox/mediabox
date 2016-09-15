@@ -40,6 +40,7 @@ SOURCES=main.o \
 	shell.o \
 	su.o \
 	ui-menu.o \
+	ui-progressbar.o \
 	mainmenu.o \
 	downloads.o \
 	downloads-backend.o \
