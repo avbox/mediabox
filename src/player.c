@@ -2404,9 +2404,6 @@ mb_player_play(struct mbp *inst, const char * const path)
 	int last_percent;
 
 	assert(inst != NULL);
-	assert(inst->status == MB_PLAYER_STATUS_READY ||
-		inst->status == MB_PLAYER_STATUS_PLAYING ||
-		inst->status == MB_PLAYER_STATUS_PAUSED);
 
 	/* if no path argument was provided but we're already
 	 * playing a file and we're paused then just resume
