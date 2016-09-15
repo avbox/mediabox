@@ -14,6 +14,7 @@
 
 
 #include "debug.h"
+#include "log.h"
 #include "linkedlist.h"
 #include "timers.h"
 #include "su.h"
@@ -106,12 +107,12 @@ mb_process_fork(struct mb_process *proc)
 	int in[2] = { -1, -1 }, out[2] = { -1, -1 }, err[2] = { -1, -1 };
 
 	if (pipe(in) == -1 || pipe(out) == -1 || pipe(err) == -1) {
-		fprintf(stderr, "process: pipe() failed\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "process", "pipe() failed");
 		goto end;
 	}
 
 	if ((proc->pid = fork()) == -1) {
-		fprintf(stderr, "process: fork() failed\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "process", "fork() failed");
 		goto end;
 
 	} else if (proc->pid != 0) {
@@ -139,14 +140,15 @@ mb_process_fork(struct mb_process *proc)
 	if (dup2(in[0], STDIN_FILENO) == -1 ||
 		dup2(out[1], STDOUT_FILENO) == -1 ||
 		dup2(err[1], STDERR_FILENO) == -1) {
-		fprintf(stderr, "process: dup2() failed\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "process", "dup2() failed");
+		exit(EXIT_FAILURE);
 	}
 
 	/* set the process niceness */
 	if (proc->flags & MB_PROCESS_NICE) {
 		if (nice(5) == -1) {
-			fprintf(stderr, "process: I'm trying to be nice but I can't. (errno=%i)\n",
-				errno);
+			LOG_VPRINT(MB_LOGLEVEL_WARN, "process",
+				"I'm trying to be nice but I can't. (errno=%i)", errno);
 		}
 	}
 
@@ -292,7 +294,7 @@ mb_process_force_kill(int id, void *data)
 	LIST_FOREACH(struct mb_process*, proc, &process_list) {
 		if (proc->id == proc_id) {
 			if (kill(proc->pid, SIGKILL) == -1) {
-				fprintf(stderr, "process: kill() regurned -1\n");
+				LOG_PRINT(MB_LOGLEVEL_ERROR, "process", "kill() regurned -1");
 			}
 
 			pthread_mutex_unlock(&process_list_lock);
@@ -350,7 +352,7 @@ mb_process_io_thread(void *arg)
 			if (errno == EINTR) {
 				continue;
 			}
-			fprintf(stderr, "process: select() returned -1 (errno=%i)\n",
+			LOG_VPRINT(MB_LOGLEVEL_ERROR, "process", "select() returned -1 (errno=%i)",
 				errno);
 			usleep(500 * 1000L * 1000L);
 			continue;
@@ -362,26 +364,26 @@ mb_process_io_thread(void *arg)
 			if (proc->stdout != -1 && FD_ISSET(proc->stdout, &fds)) {
 				if (!(proc->flags & MB_PROCESS_STDOUT_PIPE)) {
 					if ((res = read(proc->stdout, buf, sizeof(buf))) == -1) {
-						fprintf(stderr, "process: read() returned -1 (errno=%i)\n",
-							errno);
+						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
+							"read() returned -1 (errno=%i)", errno);
 					}
 					if (proc->flags & MB_PROCESS_STDOUT_LOG) {
 						/* TODO: We need to break the output in lines */
-						fprintf(stderr, "process: %s: TODO: Log STDOUT output\n",
-							proc->name);
+						LOG_VPRINT(MB_LOGLEVEL_WARN, "process",
+							"%s: TODO: Log STDOUT output!!", proc->name);
 					}
 				}
 			}
 			if (proc->stderr != -1 && FD_ISSET(proc->stderr, &fds)) {
 				if (!(proc->flags & MB_PROCESS_STDERR_PIPE)) {
 					if ((res = read(proc->stdout, buf, sizeof(buf))) == -1) {
-						fprintf(stderr, "process: read() returned -1 (errno=%i)\n",
-							errno);
+						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
+							"read() returned -1 (errno=%i)", errno);
 					}
 					if (proc->flags & MB_PROCESS_STDERR_LOG) {
 						/* TODO: We need to break the output in lines */
-						fprintf(stderr, "process: %s: TODO: Log STDERR output\n",
-							proc->name);
+						LOG_VPRINT(MB_LOGLEVEL_WARN, "process",
+							"%s: TODO: Log STDERR output", proc->name);
 					}
 				}
 			}
@@ -412,7 +414,7 @@ mb_process_monitor_thread(void *arg)
 			if (errno == EINTR) {
 				continue;
 			} else if (errno == ECHILD) {
-				usleep(500 * 1000L);
+				usleep(500 * 1000L * 1000L);
 				continue;
 			}
 			fprintf(stderr, "process: wait() returned -1 (errno=%i)\n",
@@ -439,7 +441,8 @@ mb_process_monitor_thread(void *arg)
 				/* if the process terminated abnormally then log
 				 * an error message */
 				if (WEXITSTATUS(status)) {
-					fprintf(stderr, "process: Process '%s' exitted with status %i (id=%i,pid=%i)\n",
+					LOG_VPRINT(MB_LOGLEVEL_WARN, "process",
+						"Process '%s' exitted with status %i (id=%i,pid=%i)",
 						proc->name, WEXITSTATUS(status), proc->id, pid);
 				}
 
@@ -447,7 +450,8 @@ mb_process_monitor_thread(void *arg)
 				 * set then restart the process */
 				if (WEXITSTATUS(status) != 0 && (proc->flags & MB_PROCESS_AUTORESTART)) {
 					if (!proc->stopping) {
-						fprintf(stderr, "process: Auto restarting process '%s' (id=%i,pid=%i)\n",
+						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
+							"Auto restarting process '%s' (id=%i,pid=%i)",
 							proc->name, proc->id, pid);
 						proc->pid = mb_process_fork(proc);
 						continue;
@@ -557,25 +561,28 @@ mb_process_start(const char *binary, char * const argv[],
 
 	/* check for conflicting IO priority flags */
 	if (mb_process_checkflagsoneof(flags, MB_PROCESS_IONICE) == -1) {
-		fprintf(stderr, "process: Multiple IO priorities set!\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
+			"Multiple IO priorities set!");
 		return -1;
 	}
 
 	/* check for conflicting STDOUT flags */
 	if (mb_process_checkflagsoneof(flags, MB_PROCESS_STDOUT) == -1) {
-		fprintf(stderr, "process: Multiple STDOUT flags set!\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR,  "process",
+			"Multiple STDOUT flags set!");
 		return -1;
 	}
 
 	/* check for conflicting STDERR flags */
 	if (mb_process_checkflagsoneof(flags, MB_PROCESS_STDERR) == -1) {
-		fprintf(stderr, "process: Multiple STDERR flags set!\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR,  "process",
+			"Multiple STDERR flags set!");
 		return -1;
 	}
 
 	/* allocate memory for process structure */
 	if ((proc = malloc(sizeof(struct mb_process))) == NULL) {
-		fprintf(stderr, "process: Out of memory\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR,  "process", "Out of memory");
 		return -1;
 	}
 
@@ -593,7 +600,7 @@ mb_process_start(const char *binary, char * const argv[],
 
 	/* check that all memory allocations succeeded */
 	if (proc->binary == NULL || proc->args == NULL || proc->name == NULL) {
-		fprintf(stderr, "process: Out of memory\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR,  "process", "Out of memory");
 		mb_process_free(proc);
 		return -1;
 	}
@@ -628,8 +635,8 @@ mb_process_stop(int id)
 			if (kill(proc->pid, SIGKILL) == -1) {
 				/* TODO: Is this guaranteed to succeed?
 				 * Should we abort() here? */
-				fprintf(stderr, "process: kill(pid, SIGKILL) returned -1 (errno=%i)\n",
-					errno);
+				LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
+					"kill(pid, SIGKILL) returned -1 (errno=%i)", errno);
 				return -1;
 			}
 		} else {
@@ -638,14 +645,15 @@ mb_process_stop(int id)
 
 			/* allocate heap memory for a copy of the id */
 			if ((id_copy = malloc(sizeof(int))) == NULL) {
-				fprintf(stderr, "process: Cannot kill service: Out of memory\n");
+				LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
+					"Cannot kill service: Out of memory");
 				return -1;
 			}
 
 			/* send SIGTERM to the process */
 			if (kill(proc->pid, SIGTERM) == -1) {
-				fprintf(stderr, "process: kill(pid, SIGTERM) returned -1 (errno=%i)\n",
-					errno);
+				LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
+					"kill(pid, SIGTERM) returned -1 (errno=%i)", errno);
 				return -1;
 			}
 
@@ -655,7 +663,8 @@ mb_process_stop(int id)
 			tv.tv_nsec = 0;
 			*id_copy = id;
 			if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, mb_process_force_kill, id_copy) == -1) {
-				fprintf(stderr, "process: Could not register force stop timer\n");
+				LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
+					"Could not register force stop timer");
 				free(id_copy);
 				return -1;
 			}
