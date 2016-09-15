@@ -52,6 +52,12 @@ main (int argc, char **argv)
 		}
 	}
 
+	/* initialize process manager */
+	if (mb_process_init() != 0) {
+		fprintf(stderr, "Could not initialize daemons launcher. Exiting.\n");
+		exit(EXIT_FAILURE);
+	}
+
 	/* initialize video device */
 	mbv_init(argc, argv);
 
@@ -73,12 +79,6 @@ main (int argc, char **argv)
 	/* initialize timers system */
 	if (mbt_init() != 0) {
 		fprintf(stderr, "Could not initialize timers system. Exiting.\n");
-		exit(EXIT_FAILURE);
-	}
-
-	/* initialize daemon launcher */
-	if (mb_process_init() != 0) {
-		fprintf(stderr, "Could not initialize daemons launcher. Exiting.\n");
 		exit(EXIT_FAILURE);
 	}
 

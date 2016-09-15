@@ -27,8 +27,11 @@
 #include "input-socket.h"
 #include "linkedlist.h"
 #include "debug.h"
+#include "log.h"
+#include "process.h"
 
 
+#define BLUETOOTHD_BIN "/usr/libexec/bluetooth/bluetoothd"
 #define BLUEZ_BUS_NAME "org.bluez"
 #define BLUEZ_INTF_ADAPTER "org.bluez.Adapter"
 
@@ -36,6 +39,7 @@
 static int sockfd = -1;
 static int newsockfd = -1;
 static int server_quit = 0;
+static int bluetooth_daemon_id = -1;
 static pthread_t thread;
 static GMainLoop *main_loop = NULL;
 static GDBusConnection *dbus_conn = NULL;
@@ -348,8 +352,24 @@ int
 mbi_bluetooth_init(void)
 {
 	GError *error = NULL;
+	char * const bluetoothd_args[] =
+	{
+		BLUETOOTHD_BIN,
+		"--compat",
+		NULL
+	};
+
 
 	LIST_INIT(&sockets);
+
+	/* launch the bluetoothd process */
+	if ((bluetooth_daemon_id = mb_process_start(BLUETOOTHD_BIN, bluetoothd_args,
+		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE | MB_PROCESS_SUPERUSER,
+		"bluetoothd", NULL)) == -1) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input-bluetooth", "Could not start bluetooth daemon");
+		return -1;
+	}
+
 
 	main_loop = g_main_loop_new(NULL, FALSE);
 	if (main_loop == NULL) {
@@ -381,6 +401,10 @@ mbi_bluetooth_destroy(void)
 	struct conn_state *socket;
 
 	DEBUG_PRINT("input-bluetooth", "Exiting (give me 2 secs)");
+
+	if (bluetooth_daemon_id != -1) {
+		mb_process_stop(bluetooth_daemon_id);
+	}
 
 	if (main_loop != NULL) {
 		DEBUG_PRINT("input-bluetooth:", "TODO: Destroy main loop");
