@@ -38,7 +38,7 @@ genid(void)
 {
 	int i, j;
 	static char id[13];
-	const char const charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 	static int gen = 0;
 	if (gen == 1) {
 		return id;
