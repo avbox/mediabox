@@ -2225,6 +2225,8 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 
 	assert(inst != NULL);
 
+	DEBUG_VPRINT("player", "Seeking (incr=%i)", incr);
+
 	if (inst->status != MB_PLAYER_STATUS_PLAYING &&
 		inst->status != MB_PLAYER_STATUS_PAUSED) {
 		return -1;
@@ -2235,11 +2237,60 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 
 	pos = inst->getmastertime(inst);
 
+	/* find the current chapter */
 	for (i = 0; i < inst->fmt_ctx->nb_chapters; i++) {
 		AVChapter *ch = inst->fmt_ctx->chapters[i];
 		if (av_compare_ts(pos, AV_TIME_BASE_Q, ch->start, ch->time_base) < 0) {
 			i--;
 			break;
+		}
+	}
+
+	/* if we're seeking past the current playlist iten find the
+	 * next/prev item and play it */
+	if (inst->playlist_item != NULL) {
+		if (incr > 0 && (inst->fmt_ctx->nb_chapters == 0 || i == (inst->fmt_ctx->nb_chapters - 1))) {
+			/* seek to next playlist item */
+			struct mb_playlist_item *next_item =
+				inst->playlist_item;
+
+			while (incr--) {
+				struct mb_playlist_item *next =
+					LIST_NEXT(struct mb_playlist_item*,
+					inst->playlist_item);
+				if (next == NULL) {
+					break;
+				}
+				next_item = next;
+			}
+
+			if (next_item != inst->playlist_item) {
+				inst->playlist_item = next_item;
+				return mb_player_play(inst, inst->playlist_item->filepath);
+			} else {
+				return -1;
+			}
+		} else if (incr < 0 && i == 0) {
+			/* seek to previous playlist item */
+			struct mb_playlist_item *next_item =
+				inst->playlist_item;
+
+			while (incr++) {
+				struct mb_playlist_item *next =
+					LIST_PREV(struct mb_playlist_item*,
+					inst->playlist_item);
+				if (next == NULL) {
+					break;
+				}
+				next_item = next;
+			}
+
+			if (next_item != inst->playlist_item) {
+				inst->playlist_item = next_item;
+				return mb_player_play(inst, inst->playlist_item->filepath);
+			} else {
+				return -1;
+			}
 		}
 	}
 
@@ -2592,6 +2643,9 @@ mb_player_pause(struct mbp* inst)
 }
 
 
+/**
+ * mb_player_stop() -- Stop playback.
+ */
 int
 mb_player_stop(struct mbp* inst)
 {
