@@ -19,6 +19,7 @@
 #include "downloads.h"
 #include "mediasearch.h"
 #include "debug.h"
+#include "log.h"
 
 
 static struct mbv_window *window = NULL;
@@ -36,9 +37,11 @@ mb_mainmenu_init(void)
 	int window_height, window_width;
 	int n_entries = 8;
 
+#ifdef ENABLE_REBOOT
 	if (mb_su_canroot()) {
 		n_entries++;
 	}
+#endif
 
 	/* set height according to font size */
 	mbv_getscreensize(&xres, &yres);
@@ -62,14 +65,16 @@ mb_mainmenu_init(void)
 		(yres / 2) - (window_height / 2),
 		window_width, window_height);
 	if (window == NULL) {
-		fprintf(stderr, "mainmenu: Could not create new window!\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "mainmenu",
+			"Could not create new window!");
 		return -1;
 	}
 
 	/* create a new menu widget inside main window */
 	menu = mb_ui_menu_new(window);
 	if (menu == NULL) {
-		fprintf(stderr, "mainmenu: Could not create menu\n");
+		LOG_VPRINT(MB_LOGLEVEL_ERROR, "mainmenu",
+			"Could not create menu widget (errno=%i)", errno);
 		return -1;
 	}
 
@@ -83,9 +88,11 @@ mb_mainmenu_init(void)
 	mb_ui_menu_additem(menu, "SETTINGS", "SETTINGS");
 	mb_ui_menu_additem(menu, "ABOUT MEDIABOX", "ABOUT");
 
+#ifdef ENABLE_REBOOT
 	if (mb_su_canroot()) {
 		mb_ui_menu_additem(menu, "REBOOT", "REBOOT");
 	}
+#endif
 
 	return 0;
 }
