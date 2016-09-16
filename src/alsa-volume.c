@@ -17,42 +17,6 @@
 static mb_alsa_volumechanged volume_callback = NULL;
 
 
-#if 0
-static int
-mbexec(const char *command, char * const argv[])
-{
-	pid_t pid;
-	int exit_code, ret;
-
-	if ((pid = fork()) == -1) {
-		fprintf(stderr, "alsa-volume: fork() failed\n");
-		return -1;
-
-	} else if (pid != 0) { /* parent */
-		while ((ret = waitpid(pid, &exit_code, 0)) != 0) {
-			if (ret == EINTR) {
-				continue;
-			} else {
-				fprintf(stderr, "alsa-volume: waitpid() returned %i\n",
-					ret);
-			}
-		}
-		if (WEXITSTATUS(exit_code) != 0) {
-			fprintf(stderr, "alsa-volume: amixer exited with code %i\n",
-				WEXITSTATUS(exit_code));
-			return -1;
-		}
-
-		return WEXITSTATUS(exit_code);
-
-	} else { /* child */
-		execv(command, argv);
-		exit(EXIT_FAILURE);
-	}
-}
-#endif
-
-
 int
 mb_alsa_volume_get(void)
 {
@@ -118,28 +82,6 @@ end:
 int
 mb_alsa_volume_set(int volume)
 {
-#if 0
-	char volume_string[5];
-
-	/* TODO: Implement this using alsa lib */
-
-	if (volume < 0 || volume > 100) {
-		return -1;
-	}
-
-	snprintf(volume_string, 5, "%i%%", volume);
-
-	DEBUG_VPRINT("alsa-volume", "Setting volume to %s",
-		volume_string);
-
-	return mbexec(AMIXER_BIN, (char * const[]) {
-			strdup("amixer"),
-			strdup("set"),
-			strdup("Master"),
-			strdup(volume_string),
-			NULL });
-#endif
-
 	long min, max;
 	snd_mixer_t *handle;
 	snd_mixer_selem_id_t *sid;
