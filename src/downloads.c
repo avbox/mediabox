@@ -16,6 +16,8 @@
 #include "input.h"
 #include "ui-menu.h"
 #include "linkedlist.h"
+#include "timers.h"
+#include "debug.h"
 
 #ifdef ENABLE_IONICE
 #include "ionice.h"
@@ -41,7 +43,6 @@ struct finditemdata
 
 static struct mbv_window *window = NULL;
 static struct mb_ui_menu *menu = NULL;
-static int mb_updater_quit = 0;
 
 LIST_DECLARE_STATIC(downloads);
 
@@ -109,20 +110,23 @@ mb_downloads_freeitems(void *item, void *data)
 /**
  * mb_downloads_populatelist() -- Populates the downloads list
  */
-static int
-mb_downloads_populatelist(void)
+static enum mbt_result
+mb_downloads_populatelist(int id, void *data)
 {
 	pid_t pid;
 	int pipefd[2];
 
+	(void) id;
+	(void) data;
+
 	if (pipe(pipefd) == -1) {
 		fprintf(stderr, "downloads: pipe() failed\n");
-		return -1;
+		return MB_TIMER_CALLBACK_RESULT_STOP;
 	}
 
 	if ((pid = fork()) == -1) {
 		fprintf(stderr, "downloads: fork() failed\n");
-		return -1;
+		return MB_TIMER_CALLBACK_RESULT_STOP;
 
 	} else if (pid != 0) { /* parent */
 		int ret;
@@ -241,7 +245,7 @@ mb_downloads_populatelist(void)
 		close(pipefd[0]);
 
 		mbv_window_update(window);
-		return 0;
+		return MB_TIMER_CALLBACK_RESULT_CONTINUE;
 
 	} else { /* child */
 
@@ -278,17 +282,6 @@ mb_downloads_populatelist(void)
 }
 
 
-static void *
-mb_downloads_listupdater(void * arg)
-{
-	(void) arg;
-	fprintf(stderr, "downloads: Worker thread running\n");
-	while (!mb_updater_quit) {
-		mb_downloads_populatelist();
-	}
-	return NULL;
-}
-
 /**
  * mb_downloads_init() -- Initialize the MediaBox downloads list
  */
@@ -301,7 +294,6 @@ mb_downloads_init(void)
 	int n_entries = 10;
 
 	LIST_INIT(&downloads);
-	mb_updater_quit = 0;
 
 	/* set height according to font size */
 	mbv_getscreensize(&xres, &yres);
@@ -341,21 +333,21 @@ mb_downloads_init(void)
 int
 mb_downloads_showdialog(void)
 {
-	pthread_t thread;
+	struct timespec tv;
+	int update_timer_id = -1;
 
 	/* show the menu window */
         mbv_window_show(window);
 
-	#if 0
-	/* populate the downloads list */
-	if (mb_downloads_populatelist() == -1) {
-		fprintf(stderr, "downloads: populatelist() failed\n");
-		return -1;
-	}
-	#endif
+	/* populate the list */
+	mb_downloads_populatelist(0, NULL);
 
-	if (pthread_create(&thread, NULL, mb_downloads_listupdater, NULL) != 0) {
-		fprintf(stderr, "downloads: Could not start updater thread\n");
+	/* register the update timer */
+	tv.tv_sec = 2;
+	tv.tv_nsec = 0;
+	update_timer_id = mbt_register(&tv,
+		MB_TIMER_TYPE_AUTORELOAD, mb_downloads_populatelist, NULL);
+	if (update_timer_id == -1) {
 		mbv_window_hide(window);
 		return -1;
 	}
@@ -370,8 +362,8 @@ mb_downloads_showdialog(void)
 			selected);
 	}
 
-	mb_updater_quit = 1;
-	pthread_join(thread, NULL);
+	/* cancel the update timer */
+	mbt_cancel(update_timer_id);
 
 	/* hide the mainmenu window */
 	mbv_window_hide(window);
