@@ -7,9 +7,6 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 
 
 #include "video.h"
@@ -17,7 +14,9 @@
 #include "ui-menu.h"
 #include "linkedlist.h"
 #include "timers.h"
+#include "process.h"
 #include "debug.h"
+#include "log.h"
 
 #ifdef ENABLE_IONICE
 #include "ionice.h"
@@ -111,174 +110,140 @@ mb_downloads_freeitems(void *item, void *data)
  * mb_downloads_populatelist() -- Populates the downloads list
  */
 static enum mbt_result
-mb_downloads_populatelist(int id, void *data)
+mb_downloads_populatelist(int _id, void *data)
 {
-	pid_t pid;
-	int pipefd[2];
+	int process_id;
+	FILE *f;
+	size_t n = 0;;
+	char *str = NULL, *name = NULL, *id = NULL, *progress = NULL, *progressbar = NULL;
+	char buf[512];
+	char * const deluge_args[] =
+	{
+		"deluge-console",
+		"connect",
+		"127.0.0.1",
+		"mediabox",
+		"mediabox;",
+		"info",
+		NULL
+	};
 
-	(void) id;
+
+	(void) _id;
 	(void) data;
 
-	if (pipe(pipefd) == -1) {
-		fprintf(stderr, "downloads: pipe() failed\n");
+	/* run the deluge-console process */
+	if ((process_id = mb_process_start(DELUGE_BIN, deluge_args,
+		MB_PROCESS_NICE | MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_PIPE,
+		"deluge-console", NULL, NULL)) == -1) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "downloads", "Could not execute deluge-console");
 		return MB_TIMER_CALLBACK_RESULT_STOP;
 	}
 
-	if ((pid = fork()) == -1) {
-		fprintf(stderr, "downloads: fork() failed\n");
+	f = fdopen(mb_process_openfd(process_id, STDOUT_FILENO), "r");
+	if (f == NULL) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "download", "Could not open stream");
 		return MB_TIMER_CALLBACK_RESULT_STOP;
+	} else {
+		while (getline(&str, &n, f) != -1) {
+			if (str != NULL) {
+				if (!memcmp(str, "Name: ", 6)) {
+					str[strlen(str) - 1] = '\0';
+					name = strdup(str + 6);
+					if (name == NULL) {
+						fprintf(stderr, "downloads: Out of memory\n");
+					}
+					/* fprintf(stderr, "Name: %s\n", name); */
 
-	} else if (pid != 0) { /* parent */
-		int ret;
-		FILE *f;
-		size_t n = 0;;
-		char *str = NULL, *name = NULL, *id = NULL, *progress = NULL, *progressbar = NULL;
-		char buf[512];
-
-		close(pipefd[1]);
-		/* fprintf(stderr, "downloads: waiting for deluge-console...\n"); */
-
-		f = fdopen(pipefd[0], "r");
-		if (f == NULL) {
-			fprintf(stderr, "download: Could not open stream.\n");
-		} else {
-			while (getline(&str, &n, f) != -1) {
-				if (str != NULL) {
-					if (!memcmp(str, "Name: ", 6)) {
+				} else if (!memcmp("ID: ", str, 4)) {
+					if (name != NULL) {
 						str[strlen(str) - 1] = '\0';
-						name = strdup(str + 6);
-						if (name == NULL) {
+						id = strdup(str + 4);
+						if (id == NULL) {
 							fprintf(stderr, "downloads: Out of memory\n");
-						}
-						/* fprintf(stderr, "Name: %s\n", name); */
-
-					} else if (!memcmp("ID: ", str, 4)) {
-						if (name != NULL) {
-							str[strlen(str) - 1] = '\0';
-							id = strdup(str + 4);
-							if (id == NULL) {
-								fprintf(stderr, "downloads: Out of memory\n");
-								free(name);
-								name = NULL;
-							} else {
-								/* fprintf(stderr, "ID: %s\n", id); */
-							}
-						}
-
-					} else if (!memcmp("Progress: ", str, 10)) {
-						if (id != NULL) {
-							progress = str + 10;
-							progressbar = progress;
-
-							while (*progressbar != ' ') {
-								progressbar++;
-							}
-							*progressbar++ = '\0';
-							progressbar[strlen(progressbar) -1] = '\0';
-
-							if ((progress = strdup(progress)) == NULL) {
-								fprintf(stderr, "downloads: Out of memory\n");
-								free(id);
-								free(name);
-								id = NULL;
-								name = NULL;
-							} else if ((progressbar = strdup(progressbar)) == NULL) {
-								fprintf(stderr, "downloads: Out of memory\n");
-								free(progress);
-								free(id);
-								free(name);
-								progress = NULL;
-								id = NULL;
-								name = NULL;
-							} else {
-								snprintf(buf, 512, "%s (%s)",
-									name, progress);
-
-								mb_downloads_updateentry(id, buf);
-
-								free(name);
-								free(progress);
-								free(progressbar);
-								free(id);
-								name = NULL;
-								progress = NULL;
-								progressbar = NULL;
-								id = NULL;
-							}
+							free(name);
+							name = NULL;
+						} else {
+							/* fprintf(stderr, "ID: %s\n", id); */
 						}
 					}
-					free(str);
-					str = NULL;
-					n = 0;
-				}
-			}
-			fclose(f);
 
-			if (str != NULL) {
+				} else if (!memcmp("Progress: ", str, 10)) {
+					if (id != NULL) {
+						progress = str + 10;
+						progressbar = progress;
+
+						while (*progressbar != ' ') {
+							progressbar++;
+						}
+						*progressbar++ = '\0';
+						progressbar[strlen(progressbar) -1] = '\0';
+
+						if ((progress = strdup(progress)) == NULL) {
+							fprintf(stderr, "downloads: Out of memory\n");
+							free(id);
+							free(name);
+							id = NULL;
+							name = NULL;
+						} else if ((progressbar = strdup(progressbar)) == NULL) {
+							fprintf(stderr, "downloads: Out of memory\n");
+							free(progress);
+							free(id);
+							free(name);
+							progress = NULL;
+							id = NULL;
+							name = NULL;
+						} else {
+							snprintf(buf, 512, "%s (%s)",
+								name, progress);
+
+							mb_downloads_updateentry(id, buf);
+
+							free(name);
+							free(progress);
+							free(progressbar);
+							free(id);
+							name = NULL;
+							progress = NULL;
+							progressbar = NULL;
+							id = NULL;
+						}
+					}
+				}
 				free(str);
-			}
-
-			mb_download *dl;
-			LIST_FOREACH_SAFE(mb_download*, dl, &downloads, {
-				if (!dl->updated) {
-					mb_ui_menu_removeitem(menu, dl->id);
-					mbv_window_update(window);
-					LIST_REMOVE(dl);
-					free(dl->id);
-					free(dl->name);
-					free(dl);
-				} else {
-					dl->updated = 0;
-				}
-			});
-
-
-		}
-
-		while (waitpid(pid, &ret, 0) == -1) {
-			if (errno == EINTR) {
-				continue;
+				str = NULL;
+				n = 0;
 			}
 		}
+		fclose(f);
 
-		/* fprintf(stderr, "downloads: deluge-console info returned %i\n", ret); */
-		close(pipefd[0]);
-
-		mbv_window_update(window);
-		return MB_TIMER_CALLBACK_RESULT_CONTINUE;
-
-	} else { /* child */
-
-		if (nice(5) == -1) {
-			fprintf(stderr, "downloads: I'm trying to be nice but I can't. (errno=%i)\n",
-				errno);
+		if (str != NULL) {
+			free(str);
 		}
 
-#ifdef ENABLE_IONICE
-		(void) mb_su_gainroot();
-		if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 0)) == -1) {
-			fprintf(stderr, "downloads: WARNING: Could not set deluge-console IO priority to best-effort!!\n");
-		}
-		(void) mb_su_droproot();
-#endif
+		mb_download *dl;
+		LIST_FOREACH_SAFE(mb_download*, dl, &downloads, {
+			if (!dl->updated) {
+				mb_ui_menu_removeitem(menu, dl->id);
+				mbv_window_update(window);
+				LIST_REMOVE(dl);
+				free(dl->id);
+				free(dl->name);
+				free(dl);
+			} else {
+				dl->updated = 0;
+			}
+		});
 
-		close(pipefd[0]);
-		if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
-			fprintf(stderr, "downloads[child]: dup2() failed\n");
-			exit(EXIT_FAILURE);
-		}
 
-		//10.10.0.130 fernan test; $@
-		execv(DELUGE_BIN, (char * const[]) {
-			strdup("deluge-console"),
-			strdup("connect"),
-			strdup("127.0.0.1"),
-			strdup("mediabox"),
-			strdup("mediabox;"),
-			strdup("info"), NULL });
-		exit(EXIT_FAILURE);
 	}
-	return 0;
+
+	/* wait for process to exit */
+	mb_process_wait(process_id);
+
+	mbv_window_update(window);
+
+	return MB_TIMER_CALLBACK_RESULT_CONTINUE;
 }
 
 
