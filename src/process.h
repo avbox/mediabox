@@ -29,6 +29,13 @@ typedef int (*mb_process_exit)(int id, int exit_status);
 
 
 /**
+ * mb_process_wait() -- Wait for a process to exit.
+ */
+int
+mb_process_wait(int id);
+
+
+/**
  * mb_process_openfd() -- Opens one of the standard file descriptors for
  * the process.
  *

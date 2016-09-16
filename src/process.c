@@ -40,6 +40,8 @@ LISTABLE_STRUCT(mb_process,
 	char * const * args;
 	mb_process_exit exit_callback;
 	int stopping;
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
 );
 
 
@@ -467,6 +469,9 @@ mb_process_monitor_thread(void *arg)
 						WEXITSTATUS(status));
 				}
 
+				/* wake any threads waiting for this process */
+				pthread_cond_broadcast(&proc->cond);
+
 				/* cleanup */
 				mb_process_free(proc);
 
@@ -598,6 +603,14 @@ mb_process_start(const char *binary, char * const argv[],
 	proc->binary = strdup(binary);
 	proc->exit_callback = exit_callback;
 
+	/* initialize pthread primitives */
+	if (pthread_mutex_init(&proc->mutex, NULL) != 0 ||
+		pthread_cond_init(&proc->cond, NULL) != 0) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
+			"Failed to initialize pthread primitives");
+		mb_process_free(proc);
+	}
+
 	/* check that all memory allocations succeeded */
 	if (proc->binary == NULL || proc->args == NULL || proc->name == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR,  "process", "Out of memory");
@@ -615,6 +628,31 @@ mb_process_start(const char *binary, char * const argv[],
 	pthread_mutex_unlock(&process_list_lock);
 
 	return ret;
+}
+
+
+/**
+ * mb_process_wait() -- Wait for a process to exit.
+ */
+int
+mb_process_wait(int id)
+{
+	struct mb_process *proc;
+
+	/* find the process to wait for */
+	if ((proc = mb_process_getbyid(id)) == NULL) {
+		LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
+			"Cannot wait for process id %i (no such process)", id);
+		errno = ENOENT;
+		return -1;
+	}
+
+	/* wait for process to exit */
+	pthread_mutex_lock(&proc->mutex);
+	pthread_cond_wait(&proc->cond, &proc->mutex);
+	pthread_mutex_unlock(&proc->mutex);
+
+	return 0;
 }
 
 
