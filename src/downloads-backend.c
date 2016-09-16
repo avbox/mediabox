@@ -17,6 +17,7 @@
 #endif
 #include "process.h"
 #include "debug.h"
+#include "log.h"
 
 #define DELUGE_BIN "/usr/bin/deluge-console"
 #define DELUGED_BIN "/usr/bin/deluged"
@@ -31,7 +32,6 @@ cp(const char *src, const char *dst)
 {
 	int fdr, fdw, ret = -1;
 	struct stat st;
-
 
 	if (stat(src, &st) == 0) {
 		if ((fdr = open(src, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) != -1) {
@@ -54,51 +54,50 @@ cp(const char *src, const char *dst)
 }
 
 
+/**
+ * mb_downloadmanager_onprocexit() -- Called back when the deluge-console
+ * process exits. Saves the exit status
+ */
+static void
+mb_downloadmanager_onprocexit(int id, int exit_status, void *data)
+{
+	*((int*)data) = exit_status;
+}
+
+
+/**
+ * mb_downloadmanager_addurl() -- Adds a URL to the download queue.
+ */
 int
 mb_downloadmanager_addurl(char *url)
 {
-	pid_t pid;
+	int process_id, exit_status = -1;
 
-	DEBUG_PRINT("download-backend", "Addind download url");
+	char * const args[] =
+	{
+		"deluge-console",
+		"connect",
+		"127.0.0.1",
+		"mediabox",
+		"mediabox;",
+		"add",
+		url,
+		NULL
+	};
 
-	if ((pid = fork()) == -1) {
-		fprintf(stderr, "downloads-backend: fork() failed\n");
+	/* launch the deluged process */
+	if ((process_id = mb_process_start(DELUGED_BIN, args,
+		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE | MB_PROCESS_SUPERUSER,
+		"deluge-console", mb_downloadmanager_onprocexit, &exit_status)) == -1) {
+		LOG_VPRINT(MB_LOGLEVEL_ERROR, "download-backend",
+			"Could not execute deluge-console (errno=%i)", errno);
 		return -1;
-
-	} else if (pid == 0) { /* child */
-		if (nice(5) == -1) {
-			fprintf(stderr, "downloads-backend: I'm trying to be nice but I can't. (errno=%i)\n",
-				errno);
-		}
-#ifdef ENABLE_IONICE
-		if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 0)) == -1) {
-			fprintf(stderr, "downloads-backend: WARNING: Could not set deluge-console IO priority to best-effort!!\n");
-		}
-#endif
-
-		execv(DELUGE_BIN, (char * const[]) {
-			strdup("deluge-console"),
-			strdup("connect"),
-			strdup("127.0.0.1"),
-			strdup("mediabox"),
-			strdup("mediabox;"),
-			strdup("add"),
-			strdup(url),
-			NULL });
-		exit(EXIT_FAILURE);
-
-	} else { /* parent */
-		int ret;
-		while (waitpid(pid, &ret, 0) == -1) {
-			if (errno == EINTR) {
-				continue;
-			} else {
-				fprintf(stderr, "downloads-backend: waitpid() failed\n");
-				break;
-			}
-		}
-		return ret;
 	}
+
+	/* wait for process to exit */
+	mb_process_wait(process_id);
+
+	return exit_status;
 }
 
 
@@ -132,8 +131,8 @@ mb_downloadmanager_init(void)
 
 	/* launch the deluged process */
 	if ((daemon_id = mb_process_start(DELUGED_BIN, args,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE,
-		"Deluge Daemon", NULL)) == -1) {
+		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE | MB_PROCESS_SUPERUSER,
+		"Deluge Daemon", NULL, NULL)) == -1) {
 		fprintf(stderr, "download-backend: Could not start deluge daemon\n");
 		return -1;
 	}

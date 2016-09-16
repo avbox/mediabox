@@ -365,7 +365,7 @@ mbi_bluetooth_init(void)
 	/* launch the bluetoothd process */
 	if ((bluetooth_daemon_id = mb_process_start(BLUETOOTHD_BIN, bluetoothd_args,
 		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE | MB_PROCESS_SUPERUSER,
-		"bluetoothd", NULL)) == -1) {
+		"bluetoothd", NULL, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "input-bluetooth", "Could not start bluetooth daemon");
 		return -1;
 	}

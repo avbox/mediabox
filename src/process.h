@@ -25,7 +25,8 @@ enum mb_process_flags
 
 
 /* Process exit callback function */
-typedef int (*mb_process_exit)(int id, int exit_status);
+typedef void (*mb_process_exit)(int id, int exit_status,
+	void *data);
 
 
 /**
@@ -49,7 +50,7 @@ mb_process_openfd(int id, int std_fileno);
 
 int
 mb_process_start(const char *binary, char * const argv[], enum mb_process_flags flags,
-	const char *name, mb_process_exit exit_callback);
+	const char *name, mb_process_exit exit_callback, void *exit_callback_data);
 
 
 int

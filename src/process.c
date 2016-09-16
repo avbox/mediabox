@@ -39,6 +39,7 @@ LISTABLE_STRUCT(mb_process,
 	const char *binary;
 	char * const * args;
 	mb_process_exit exit_callback;
+	void *exit_callback_data;
 	int stopping;
 	pthread_mutex_t mutex;
 	pthread_cond_t cond;
@@ -466,7 +467,7 @@ mb_process_monitor_thread(void *arg)
 				/* invoke the process exit callback */
 				if (proc->exit_callback != NULL) {
 					proc->exit_callback(proc->id,
-						WEXITSTATUS(status));
+						WEXITSTATUS(status), proc->exit_callback_data);
 				}
 
 				/* wake any threads waiting for this process */
@@ -555,7 +556,8 @@ mb_process_openfd(int id, int std_fileno)
  */
 int
 mb_process_start(const char *binary, char * const argv[],
-	enum mb_process_flags flags, const char *name, mb_process_exit exit_callback)
+	enum mb_process_flags flags, const char *name, mb_process_exit exit_callback,
+	void *callback_data)
 {
 	int ret = -1;
 	struct mb_process *proc;
@@ -602,6 +604,7 @@ mb_process_start(const char *binary, char * const argv[],
 	proc->name = strdup(name);
 	proc->binary = strdup(binary);
 	proc->exit_callback = exit_callback;
+	proc->exit_callback_data = callback_data;
 
 	/* initialize pthread primitives */
 	if (pthread_mutex_init(&proc->mutex, NULL) != 0 ||
