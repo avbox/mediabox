@@ -19,13 +19,11 @@
 #include "timers.h"
 #include "su.h"
 #include "process.h"
+#include "math.h"
 
 #ifdef ENABLE_IONICE
 #include "ionice.h"
 #endif
-
-
-#define MAX(a, b) ((a > b) ? a : b)
 
 
 LISTABLE_STRUCT(mb_process,
