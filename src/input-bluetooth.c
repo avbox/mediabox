@@ -31,6 +31,7 @@
 #include "process.h"
 
 
+#define BLUETOOTHCTL_BIN "/usr/bin/bluetoothctl"
 #define BLUETOOTHD_BIN "/usr/libexec/bluetooth/bluetoothd"
 #define BLUEZ_BUS_NAME "org.bluez"
 #define BLUEZ_INTF_ADAPTER "org.bluez.Adapter"
@@ -125,48 +126,55 @@ mbi_bluetooth_register_service(uint8_t rfcomm_channel)
 }
 
 
+static void
+mbi_bluetooth_onprocexit(int id, int status, void *data)
+{
+	*((int*) data) = status;
+}
+
+
 static int
 mbi_bluetooth_devinit()
 {
-	pid_t pid;
-	int pipefd[2];
-	int ret, exit_code;
+	int process_id, fd, exit_code;
+	char * const btctl_args[] = { "bluetoothctl", NULL };
 
-	if (pipe(pipefd) == -1) {
+	/* run the bluetoothctl process */
+	if ((process_id = mb_process_start(BLUETOOTHCTL_BIN, btctl_args,
+		MB_PROCESS_NICE | MB_PROCESS_STDOUT_PIPE,
+		"bluetoothctl", mbi_bluetooth_onprocexit, &exit_code)) == -1) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input-bluetooth", "Could not execute bluetoothctl");
 		return -1;
 	}
 
-	if ((pid = fork()) == -1) {
+	/* get the process' standard input */
+	fd = mb_process_openfd(process_id, STDIN_FILENO);
+	if (fd == -1) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input-bluetooth",
+			"Could not open STDIN file descriptor for process");
 		return -1;
-	} else if (pid == 0) { /* child */
-		close(pipefd[1]);
-		close(STDIN_FILENO);
-		dup2(pipefd[0], STDIN_FILENO);
-		execv("/usr/bin/bluetoothctl", (char * const[]) {
-			strdup("bluetoothctl"),
-			NULL });
-		exit(EXIT_FAILURE);
-
-	} else { /* parent */
-		close(pipefd[0]);
-		ret = write(pipefd[1], "power on\n", 9 * sizeof(char));
-		ret = write(pipefd[1], "discoverable on\n", 16 * sizeof(char));
-		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
-		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
-		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
-		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
-		ret = write(pipefd[1], "quit\n", 5 * sizeof(char));
-		close(pipefd[1]);
-
-		while ((ret = waitpid(pid, &exit_code, 0)) == -1) {
-			if (errno == EINTR) {
-				continue;
-			}
-			break;
-		}
-		return (exit_code == 0);
 	}
+
+	/* write commands to stdin */
+	if (write(fd, "power on\n", 9 * sizeof(char)) == -1 ||
+		write(fd, "discoverable on\n", 16 * sizeof(char)) == -1 ||
+		write(fd, "quit\n", 5 * sizeof(char)) == -1) {
+		LOG_PRINT(MB_LOGLEVEL_WARN, "input-bluetooth",
+			"write() failed");
+	}
+
+	/* close pipe */
+	close(fd);
+
+	/* wait for process to exit */
+	if (mb_process_wait(process_id) == -1) {
+		LOG_PRINT(MB_LOGLEVEL_WARN, "input-bluetooth",
+			"mb_process_wait() returned -1");
+	}
+
+	return (exit_code == 0) ? 0 : -1;
 }
+
 
 static int
 mbi_bluetooth_poweron()
