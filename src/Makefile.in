@@ -50,6 +50,7 @@ SOURCES=main.o \
 	about.o \
 	announce.o \
 	iface_util.o \
+	library-backend.o \
 	library.o \
 	timers.o \
 	alsa-volume.o \

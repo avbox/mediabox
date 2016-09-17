@@ -17,6 +17,7 @@
 #include "shell.h"
 #include "process.h"
 #include "su.h"
+#include "library-backend.h"
 #include "downloads-backend.h"
 #include "announce.h"
 #include "debug.h"
@@ -85,6 +86,12 @@ main (int argc, char **argv)
 	/* initialize the shell */
 	if (mbs_init() != 0) {
 		fprintf(stderr, "Could not initialize shell\n");
+		exit(EXIT_FAILURE);
+	}
+
+	/* initialize the library backend */
+	if (mb_library_backend_init() == -1) {
+		fprintf(stderr, "Could not initialize library backend\n");
 		exit(EXIT_FAILURE);
 	}
 
