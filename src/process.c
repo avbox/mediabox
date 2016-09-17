@@ -32,6 +32,8 @@ LISTABLE_STRUCT(mb_process,
 	int stdin;
 	int stdout;
 	int stderr;
+	int exit_status;
+	int exitted;
 	enum mb_process_flags flags;
 	const char *name;
 	const char *binary;
@@ -39,7 +41,6 @@ LISTABLE_STRUCT(mb_process,
 	mb_process_exit exit_callback;
 	void *exit_callback_data;
 	int stopping;
-	pthread_mutex_t mutex;
 	pthread_cond_t cond;
 );
 
@@ -79,11 +80,13 @@ mb_process_checkflagsoneof(enum mb_process_flags proc_flags, enum mb_process_fla
  * mb_process_getbyid() -- Gets a process from the list by it's id.
  */
 static struct mb_process*
-mb_process_getbyid(int id)
+mb_process_getbyid(const int id, const int locked)
 {
 	struct mb_process *proc, *ret = NULL;
 
-	pthread_mutex_lock(&process_list_lock);
+	if (!locked) {
+		pthread_mutex_lock(&process_list_lock);
+	}
 
 	LIST_FOREACH(struct mb_process*, proc, &process_list) {
 		if (proc->id == id) {
@@ -92,7 +95,9 @@ mb_process_getbyid(int id)
 		}
 	}
 
-	pthread_mutex_unlock(&process_list_lock);
+	if (!locked) {
+		pthread_mutex_unlock(&process_list_lock);
+	}
 
 	return ret;
 }
@@ -415,7 +420,7 @@ mb_process_monitor_thread(void *arg)
 			if (errno == EINTR) {
 				continue;
 			} else if (errno == ECHILD) {
-				usleep(500 * 1000L * 1000L);
+				usleep(500 * 1000L);
 				continue;
 			}
 			fprintf(stderr, "process: wait() returned -1 (errno=%i)\n",
@@ -423,10 +428,14 @@ mb_process_monitor_thread(void *arg)
 			break;
 		}
 
+		DEBUG_VPRINT("process", "Process with pid %i exitted", pid);
+
 		pthread_mutex_lock(&process_list_lock);
 
 		LIST_FOREACH_SAFE(struct mb_process*, proc, &process_list, {
 			if (proc->pid == pid) {
+				DEBUG_VPRINT("process", "Process %i exitted with status %i",
+					proc->id, WEXITSTATUS(status));
 
 				/* close file descriptors */
 				if (proc->stdin != -1) close(proc->stdin);
@@ -459,20 +468,25 @@ mb_process_monitor_thread(void *arg)
 					}
 				}
 
-				/* remove process from list */
-				LIST_REMOVE(proc);
-
 				/* invoke the process exit callback */
 				if (proc->exit_callback != NULL) {
 					proc->exit_callback(proc->id,
 						WEXITSTATUS(status), proc->exit_callback_data);
 				}
 
-				/* wake any threads waiting for this process */
-				pthread_cond_broadcast(&proc->cond);
-
-				/* cleanup */
-				mb_process_free(proc);
+				if (proc->flags & MB_PROCESS_WAIT) {
+					/* save exit status and wake any threads waiting
+					 * on this process */
+					DEBUG_VPRINT("process", "Signaling process %i", proc->id);
+					proc->exitted = 1;
+					proc->exit_status = WEXITSTATUS(status);
+					pthread_cond_broadcast(&proc->cond);
+				} else {
+					/* cleanup */
+					mb_process_free(proc);
+					/* remove process from list */
+					LIST_REMOVE(proc);
+				}
 
 				break;
 			}
@@ -495,7 +509,7 @@ mb_process_getpid(int id)
 {
 	struct mb_process *proc;
 
-	if ((proc = mb_process_getbyid(id)) != NULL) {
+	if ((proc = mb_process_getbyid(id, 0)) != NULL) {
 		return proc->pid;
 	}
 	return -1;
@@ -521,7 +535,7 @@ mb_process_openfd(int id, int std_fileno)
 		std_fileno == STDERR_FILENO);
 
 	/* get the process object */
-	if ((proc = mb_process_getbyid(id)) == NULL) {
+	if ((proc = mb_process_getbyid(id, 0)) == NULL) {
 		DEBUG_VPRINT("process", "Process id %i not found", id);
 		errno = ENOENT;
 		return -1;
@@ -596,6 +610,8 @@ mb_process_start(const char *binary, char * const argv[],
 	proc->stdin = -1;
 	proc->stdout = -1;
 	proc->stderr = -1;
+	proc->exit_status = -1;
+	proc->exitted = 0;
 	proc->stopping = 0;
 	proc->flags = flags;
 	proc->args = mb_process_clone_args(argv);
@@ -605,8 +621,7 @@ mb_process_start(const char *binary, char * const argv[],
 	proc->exit_callback_data = callback_data;
 
 	/* initialize pthread primitives */
-	if (pthread_mutex_init(&proc->mutex, NULL) != 0 ||
-		pthread_cond_init(&proc->cond, NULL) != 0) {
+	if (pthread_cond_init(&proc->cond, NULL) != 0) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
 			"Failed to initialize pthread primitives");
 		mb_process_free(proc);
@@ -622,10 +637,11 @@ mb_process_start(const char *binary, char * const argv[],
 	/* We need to lock the list BEFORE FORKING to ensure that even if
 	 * the child dies right away the exit code is caught and processed */
 	pthread_mutex_lock(&process_list_lock);
-	if ((proc->pid = mb_process_fork(proc)) != -1) {
-		LIST_ADD(&process_list, proc);
-		ret = proc->id;
+	LIST_ADD(&process_list, proc);
+	if ((proc->pid = mb_process_fork(proc)) == -1) {
+		LIST_REMOVE(proc);
 	}
+	ret = proc->id;
 	pthread_mutex_unlock(&process_list_lock);
 
 	return ret;
@@ -634,26 +650,51 @@ mb_process_start(const char *binary, char * const argv[],
 
 /**
  * mb_process_wait() -- Wait for a process to exit.
+ *
+ * NOTE: This function will fail if MB_PROCESS_WAIT is not set
+ * when starting the process!
  */
 int
-mb_process_wait(int id)
+mb_process_wait(int id, int *exit_status)
 {
+	int ret = -1;
 	struct mb_process *proc;
 
+	pthread_mutex_lock(&process_list_lock);
+
 	/* find the process to wait for */
-	if ((proc = mb_process_getbyid(id)) == NULL) {
+	if ((proc = mb_process_getbyid(id, 1)) == NULL) {
 		LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 			"Cannot wait for process id %i (no such process)", id);
 		errno = ENOENT;
-		return -1;
+		goto end;
+	}
+
+	/* if the process doesn't have the wait flag return error */
+	if ((proc->flags & MB_PROCESS_WAIT) == 0) {
+		errno = EINVAL;
+		goto end;
 	}
 
 	/* wait for process to exit */
-	pthread_mutex_lock(&proc->mutex);
-	pthread_cond_wait(&proc->cond, &proc->mutex);
-	pthread_mutex_unlock(&proc->mutex);
+	if (!proc->exitted) {
+		DEBUG_VPRINT("process", "Waiting for process %i", proc->id);
+		pthread_cond_wait(&proc->cond, &process_list_lock);
+	}
 
-	return 0;
+	/* at this point the process exitted so the pid must be -1 */
+	assert(proc->pid == -1);
+
+	/* return exit status */
+	*exit_status = proc->exit_status;
+
+	/* free the process */
+	LIST_REMOVE(proc);
+	mb_process_free(proc);
+	ret = 0;
+end:
+	pthread_mutex_unlock(&process_list_lock);
+	return ret;
 }
 
 
@@ -665,7 +706,7 @@ mb_process_stop(int id)
 {
 	struct mb_process *proc;
 
-	if ((proc = mb_process_getbyid(id)) != NULL) {
+	if ((proc = mb_process_getbyid(id, 0)) != NULL) {
 
 		proc->stopping = 1;
 

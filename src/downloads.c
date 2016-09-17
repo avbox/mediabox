@@ -112,7 +112,7 @@ mb_downloads_freeitems(void *item, void *data)
 static enum mbt_result
 mb_downloads_populatelist(int _id, void *data)
 {
-	int process_id;
+	int process_id, exit_status = -1;
 	FILE *f;
 	size_t n = 0;;
 	char *str = NULL, *name = NULL, *id = NULL, *progress = NULL, *progressbar = NULL;
@@ -134,7 +134,7 @@ mb_downloads_populatelist(int _id, void *data)
 
 	/* run the deluge-console process */
 	if ((process_id = mb_process_start(DELUGE_BIN, deluge_args,
-		MB_PROCESS_NICE | MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_PIPE,
+		MB_PROCESS_NICE | MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_PIPE | MB_PROCESS_WAIT,
 		"deluge-console", NULL, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "downloads", "Could not execute deluge-console");
 		return MB_TIMER_CALLBACK_RESULT_STOP;
@@ -238,12 +238,16 @@ mb_downloads_populatelist(int _id, void *data)
 
 	}
 
-	/* wait for process to exit */
-	mb_process_wait(process_id);
-
 	mbv_window_update(window);
 
-	return MB_TIMER_CALLBACK_RESULT_CONTINUE;
+	/* wait for process to exit */
+	if (mb_process_wait(process_id, &exit_status) == -1) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "download", "mb_process_wait() failed");
+		return MB_TIMER_CALLBACK_RESULT_STOP;
+	}
+
+	return (exit_status == 0) ? MB_TIMER_CALLBACK_RESULT_CONTINUE
+		: MB_TIMER_CALLBACK_RESULT_STOP;
 }
 
 

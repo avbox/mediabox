@@ -17,6 +17,7 @@ enum mb_process_flags
 	MB_PROCESS_STDOUT_PIPE		= 0x00000100,
 	MB_PROCESS_STDERR_LOG		= 0x00000200,
 	MB_PROCESS_STDERR_PIPE		= 0x00000400,
+	MB_PROCESS_WAIT			= 0x00000800,
 
 	MB_PROCESS_IONICE = (MB_PROCESS_IONICE_IDLE | MB_PROCESS_IONICE_BE | MB_PROCESS_IONICE_RT),
 	MB_PROCESS_STDOUT = (MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDOUT_PIPE),
@@ -33,7 +34,7 @@ typedef void (*mb_process_exit)(int id, int exit_status,
  * mb_process_wait() -- Wait for a process to exit.
  */
 int
-mb_process_wait(int id);
+mb_process_wait(int id, int *exit_status);
 
 
 /**

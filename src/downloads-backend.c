@@ -55,17 +55,6 @@ cp(const char *src, const char *dst)
 
 
 /**
- * mb_downloadmanager_onprocexit() -- Called back when the deluge-console
- * process exits. Saves the exit status
- */
-static void
-mb_downloadmanager_onprocexit(int id, int exit_status, void *data)
-{
-	*((int*)data) = exit_status;
-}
-
-
-/**
  * mb_downloadmanager_addurl() -- Adds a URL to the download queue.
  */
 int
@@ -87,15 +76,15 @@ mb_downloadmanager_addurl(char *url)
 
 	/* launch the deluged process */
 	if ((process_id = mb_process_start(DELUGED_BIN, args,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE | MB_PROCESS_SUPERUSER,
-		"deluge-console", mb_downloadmanager_onprocexit, &exit_status)) == -1) {
+		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE |
+		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT, "deluge-console", NULL, NULL)) == -1) {
 		LOG_VPRINT(MB_LOGLEVEL_ERROR, "download-backend",
 			"Could not execute deluge-console (errno=%i)", errno);
 		return -1;
 	}
 
 	/* wait for process to exit */
-	mb_process_wait(process_id);
+	mb_process_wait(process_id, &exit_status);
 
 	return exit_status;
 }

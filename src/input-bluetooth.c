@@ -126,13 +126,6 @@ mbi_bluetooth_register_service(uint8_t rfcomm_channel)
 }
 
 
-static void
-mbi_bluetooth_onprocexit(int id, int status, void *data)
-{
-	*((int*) data) = status;
-}
-
-
 static int
 mbi_bluetooth_devinit()
 {
@@ -141,8 +134,8 @@ mbi_bluetooth_devinit()
 
 	/* run the bluetoothctl process */
 	if ((process_id = mb_process_start(BLUETOOTHCTL_BIN, btctl_args,
-		MB_PROCESS_NICE | MB_PROCESS_STDOUT_PIPE,
-		"bluetoothctl", mbi_bluetooth_onprocexit, &exit_code)) == -1) {
+		MB_PROCESS_NICE | MB_PROCESS_STDOUT_PIPE | MB_PROCESS_WAIT,
+		"bluetoothctl", NULL, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "input-bluetooth", "Could not execute bluetoothctl");
 		return -1;
 	}
@@ -158,6 +151,9 @@ mbi_bluetooth_devinit()
 	/* write commands to stdin */
 	if (write(fd, "power on\n", 9 * sizeof(char)) == -1 ||
 		write(fd, "discoverable on\n", 16 * sizeof(char)) == -1 ||
+		write(fd, "quit\n", 5 * sizeof(char)) == -1 ||
+		write(fd, "quit\n", 5 * sizeof(char)) == -1 ||
+		write(fd, "quit\n", 5 * sizeof(char)) == -1 ||
 		write(fd, "quit\n", 5 * sizeof(char)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_WARN, "input-bluetooth",
 			"write() failed");
@@ -167,7 +163,7 @@ mbi_bluetooth_devinit()
 	close(fd);
 
 	/* wait for process to exit */
-	if (mb_process_wait(process_id) == -1) {
+	if (mb_process_wait(process_id, &exit_code) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_WARN, "input-bluetooth",
 			"mb_process_wait() returned -1");
 	}
