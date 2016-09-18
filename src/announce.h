@@ -3,10 +3,10 @@
 
 
 int
-mb_announce_start();
+mb_announce_start(void);
 
 
 void
-mb_announce_stop();
+mb_announce_stop(void);
 
 #endif
