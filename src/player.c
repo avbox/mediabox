@@ -2659,6 +2659,11 @@ mb_player_stop(struct mbp* inst)
 
 	if (inst->have_audio) {
 		while (inst->audio_paused) {
+			/* we need to set the quit flag before trying to
+			 * resume. Otherwise if something went wrong with
+			 * the audio stream and we're waiting for audio frames
+			 * we'll deadlock here. */
+			inst->audio_quit = 1;
 			pthread_cond_signal(&inst->resume_signal);
 		}
 	}
