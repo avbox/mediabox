@@ -330,6 +330,9 @@ mb_process_io_thread(void *arg)
 	struct mb_process *proc;
 	struct timeval tv;
 
+	MB_DEBUG_SET_THREAD_NAME("proc-io");
+	DEBUG_PRINT("process", "Starting IO thread");
+
 	while (!quit) {
 
 		fd_max = 0;

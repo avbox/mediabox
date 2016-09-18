@@ -2,7 +2,6 @@
 #include "config.h"
 #endif
 #include <stdlib.h>
-#include <stdio.h>
 #include <assert.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -13,11 +12,15 @@
 #include "input-tcp.h"
 #include "input-bluetooth.h"
 #include "linkedlist.h"
+#include "debug.h"
+#include "log.h"
+
 
 LISTABLE_TYPE(mbi_sink,
 	int readfd;
 	int writefd;
 );
+
 
 static int readfd;
 static int writefd;
@@ -52,7 +55,7 @@ mbi_dispatchevent(mbi_event e)
 
 	sink = LIST_TAIL(mbi_sink*, &sinks);
 	if (sink == NULL) {
-		fprintf(stderr, "mbi: input event dropped\n");
+		LOG_PRINT(MB_LOGLEVEL_INFO, "input", "Input event dropped. No sinks");
 
 	} else if ((ret = write_or_epipe(sink->writefd, &e, sizeof(mbi_event))) == 0) {
 		pthread_mutex_lock(&sinks_lock);
@@ -64,7 +67,8 @@ mbi_dispatchevent(mbi_event e)
 		dispatched = 0;
 
 	} else {
-		//fprintf(stderr, "write_or_epipe() returned %i\n", ret);
+		LOG_VPRINT(MB_LOGLEVEL_ERROR, "input",
+			"write_or_epipe returned %i", ret);
 	}
 
 	pthread_mutex_unlock(&dispatch_lock);
@@ -80,19 +84,24 @@ mbi_loop(void *arg)
 
 	(void) arg;
 
+	MB_DEBUG_SET_THREAD_NAME("input");
+	DEBUG_PRINT("input", "Starting input dispatcher thread");
+
 	while (1) {
 
 		/* read the next event */
 		read_or_die(readfd, &e, sizeof(mbi_event));
 
 		if (e == MBI_EVENT_EXIT) {
-			fprintf(stderr, "mbi: EXIT command received\n");
+			DEBUG_PRINT("input", "EXIT command received");
 			break;
 		}
 
 		while (!mbi_dispatchevent(e));
 	}
-	fprintf(stderr, "mbi: Input loop exiting\n");
+
+	DEBUG_PRINT("input", "Input dispatcher thread exiting");
+
 	return 0;
 }
 
@@ -111,12 +120,12 @@ mbi_grab_input_internal(int block)
 
 	input_sink = malloc(sizeof(mbi_sink));
 	if (input_sink == NULL) {
-		fprintf(stderr, "mbi_grab_input() -- out of memory\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "mbi_grab_input(): Out of memory");
 		return -1;
 	}
 
 	if (pipe(inputfd) == -1) {
-		fprintf(stderr, "mbi_grab_input() -- pipe() failed\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "mbi_grab_input(): pipe() failed");
 		free(input_sink);
 		return -1;
 	}
@@ -172,12 +181,14 @@ mbi_init(void)
 {
 	int event_pipe[2];
 
+	DEBUG_PRINT("input", "Starting input dispatcher");
+
 	/* ignore SIGPIPE */
 	signal(SIGPIPE, SIG_IGN);
 
 	/* create event pipes */
 	if (pipe(event_pipe) == -1) {
-		fprintf(stderr, "mbi_init() -- pipe() failed\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "Cannot initialize: pipe() failed");
 		return -1;
 	}
 
@@ -191,23 +202,24 @@ mbi_init(void)
 
 	/* initialize directfb input provider */
 	if (mbi_directfb_init() == -1) {
-		fprintf(stderr, "!!! mbi_directfb_init() failed\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "Could not start DirectFB provider");
 	}
 
 	/* initialize the tcp remote input provider */
 	if (mbi_tcp_init() == -1) {
-		fprintf(stderr, "!!! mbi_tcp_init() failed\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "Could not start TCP provider");
 	}
 
 #ifdef ENABLE_BLUETOOTH
 	/* initialize the bluetooth input provider */
 	if (mbi_bluetooth_init() == -1) {
-		fprintf(stderr, "!!! mbi_bluetooth_init() failed\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "Could not start Bluetooth provider");
 	}
 #endif
 
 	if (pthread_create(&input_loop_thread, NULL, mbi_loop, NULL) != 0) {
-		fprintf(stderr, "pthread_create() failed\n");
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "input",
+			"Could not start input dispatch thread");
 		return -1;
 	}	
 
