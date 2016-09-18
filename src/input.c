@@ -66,7 +66,7 @@ mbi_dispatchevent(mbi_event e)
 		free(sink);
 		dispatched = 0;
 
-	} else {
+	} else if (ret < 0) {
 		LOG_VPRINT(MB_LOGLEVEL_ERROR, "input",
 			"write_or_epipe returned %i", ret);
 	}
