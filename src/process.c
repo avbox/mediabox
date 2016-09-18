@@ -20,6 +20,8 @@
 #include "su.h"
 #include "process.h"
 #include "math.h"
+#include "file_util.h"
+
 
 #ifdef ENABLE_IONICE
 #include "ionice.h"
@@ -149,6 +151,9 @@ mb_process_fork(struct mb_process *proc)
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "process", "dup2() failed");
 		exit(EXIT_FAILURE);
 	}
+
+	/* close all file descriptors >= 3 */
+	closefrom(3);
 
 	/* set the process niceness */
 	if (proc->flags & MB_PROCESS_NICE) {

@@ -47,6 +47,8 @@ SOURCES=main.o \
 	mediasearch.o \
 	url_util.o \
 	time_util.o \
+	file_util.o \
+	string_util.o \
 	about.o \
 	announce.o \
 	iface_util.o \
