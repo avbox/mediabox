@@ -1,6 +1,9 @@
 #ifndef __MB_LOG_H__
 #define __MB_LOG_H__
 
+#include <stdio.h>
+
+
 enum mb_loglevel
 {
 	MB_LOGLEVEL_INFO,

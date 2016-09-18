@@ -1,6 +1,10 @@
 #ifndef __MB_DEBUG_H__
 #define __MB_DEBUG_H__
 
+
+#include <stdio.h>
+
+
 /**
  * MB_DEBUG_SET_THREAD_NAME() -- Set the thread name as seen in debugger.
  */

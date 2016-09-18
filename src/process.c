@@ -376,7 +376,7 @@ mb_process_io_thread(void *arg)
 					if (proc->flags & MB_PROCESS_STDOUT_LOG) {
 						/* TODO: We need to break the output in lines */
 						LOG_VPRINT(MB_LOGLEVEL_WARN, "process",
-							"%s: TODO: Log STDOUT output!!", proc->name);
+							"%s: %s", proc->name, buf);
 					}
 				}
 			}
@@ -633,6 +633,23 @@ mb_process_start(const char *binary, char * const argv[],
 		mb_process_free(proc);
 		return -1;
 	}
+
+#ifdef DEBUG
+	int l = 0, i;
+	char *tmp;
+	for (i = 0; proc->args[i] != NULL; i++) {
+		l += (strlen(proc->args[i]) * sizeof(char)) + 2;
+	}
+	if ((tmp = malloc(l)) != NULL) {
+		tmp[0] = '\0';
+		for (i = 0; proc->args[i] != NULL; i++) {
+			strcat(tmp, proc->args[i]);
+			strcat(tmp, " ");
+		}
+		DEBUG_VPRINT("process", "Exec: %s", tmp);
+		free(tmp);
+	}
+#endif
 
 	/* We need to lock the list BEFORE FORKING to ensure that even if
 	 * the child dies right away the exit code is caught and processed */
