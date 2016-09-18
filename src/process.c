@@ -385,7 +385,7 @@ mb_process_io_thread(void *arg)
 			}
 			if (proc->stderr != -1 && FD_ISSET(proc->stderr, &fds)) {
 				if (!(proc->flags & MB_PROCESS_STDERR_PIPE)) {
-					if ((res = read(proc->stdout, buf, sizeof(buf))) == -1) {
+					if ((res = read(proc->stderr, buf, sizeof(buf))) == -1) {
 						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 							"read() returned -1 (errno=%i)", errno);
 					}
