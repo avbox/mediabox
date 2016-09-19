@@ -56,23 +56,37 @@ mbs_welcomescreen(int id, void *data)
 	PangoLayout *layout_time, *layout_date;
 	PangoFontDescription *font_desc;
 
+	static char old_time_string[256] = { 0 };
+
 	(void) id;
 	(void) data;
+
+	/* format the time string */
+	now = time(NULL);
+	strftime(time_string, sizeof(time_string), "%l:%M %p",
+		localtime(&now));
+
+	/* if the time has not changed there's no need to repaint */
+	if (!strcmp(old_time_string, time_string)) {
+		return MB_TIMER_CALLBACK_RESULT_CONTINUE;
+	} else {
+		/* save the time string */
+		strcpy(old_time_string, time_string);
+	}
+
+	/* format date string */
+	strftime(date_string, sizeof(time_string), "%B %d, %Y",
+		localtime(&now));
+
+	pthread_mutex_lock(&screen_lock);
 
 	/* mbv_getscreensize(&w, &h); */
 	mbv_window_getcanvassize(root_window, &w, &h);
 
-	pthread_mutex_lock(&screen_lock);
-
+	/* redraw the whole screen */
 	mbv_window_clear(root_window, 0x000000ff);
 	mbv_window_setcolor(root_window, 0x8080ffff);
 	mbv_window_drawline(root_window, 0, h / 2, w - 1, h / 2);
-
-	now = time(NULL);
-	strftime(time_string, sizeof(time_string), "%l:%M %p",
-		localtime(&now));
-	strftime(date_string, sizeof(time_string), "%B %d, %Y",
-		localtime(&now));
 
 	if ((context = mbv_window_cairo_begin(root_window)) != NULL) {
 		if ((layout_time = pango_cairo_create_layout(context)) != NULL) {
