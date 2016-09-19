@@ -22,4 +22,9 @@ enum mb_loglevel
  */
 #define LOG_PRINT(loglevel, module, str) fprintf(stderr, module ": " str "\n");
 
+
+/* Some convenience macros */
+#define LOG_PRINT_ERROR(module, str) LOG_PRINT(MB_LOGLEVEL_ERROR, module, str)
+#define LOG_VPRINT_ERROR(module, fmt, ...) LOG_VPRINT(MB_LOGLEVEL_ERROR, module, fmt, __VA_ARGS__)
+
 #endif
