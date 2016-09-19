@@ -186,11 +186,30 @@ mbv_dfb_removewindowmask(struct mbv_dfb_window *window)
 
 
 int
+mbv_dfb_window_isvisible(struct mbv_dfb_window *window)
+{
+	assert(window != NULL);
+
+	/* walk the window list until we find the parent window.
+	 * If any of the parents windows is invisible so is this one */
+	while (window->parent != NULL) {
+		if (!window->visible) {
+			return 0;
+		}
+		window = window->parent;
+	}
+
+	assert(window != NULL);
+
+	return window->visible;
+}
+
+
+int
 mbv_dfb_window_blit_buffer(
 	struct mbv_dfb_window *window,
 	void *buf, int width, int height, int x, int y)
 {
-#if 1	
 	DFBSurfaceDescription dsc;
 	static IDirectFBSurface *surface = NULL;
 
@@ -211,14 +230,6 @@ mbv_dfb_window_blit_buffer(
 	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
 	DFBCHECK(window->content->Blit(window->content, surface, NULL, x, y));
 	surface->Release(surface);
-#else
-	void *dst;
-	int pitch;
-	DFBCHECK(window->surface->Lock(window->surface, DSLF_READ | DSLF_WRITE, &dst, &pitch));
-	memcpy(dst, buf, height * pitch);
-	DFBCHECK(window->surface->Unlock(window->surface));;
-	//DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_NONE));
-#endif
 
 	return 0;
 }
@@ -426,7 +437,7 @@ mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
 	/* initialize new window object */
 	inst->parent = window;
 	inst->dfb_window = window->dfb_window;
-	inst->visible = 0;
+	inst->visible = 1;
 	inst->cairo_context = NULL;
 	inst->rect.w = width;
 	inst->rect.h = height;
@@ -451,7 +462,11 @@ mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
 void
 mbv_dfb_window_update(struct mbv_dfb_window *window)
 {
-	DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_BLIT));
+	assert(window != NULL);
+
+	if (mbv_dfb_window_isvisible(window)) {
+		DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_BLIT));
+	}
 }
 
 
@@ -462,12 +477,10 @@ mbv_dfb_window_show(struct mbv_dfb_window *window)
 
 	assert(window != NULL);
 
-	if (window != root_window) {
-		if (!window->visible) {
-			window->visible = 1;
-			DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, window->opacity));
-			visible_changed = 1;
-		}
+	if (!window->visible) {
+		window->visible = 1;
+		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, window->opacity));
+		visible_changed = 1;
 	}
 
 	if (visible_changed) {
@@ -590,6 +603,7 @@ mbv_dfb_init(int argc, char **argv)
 		fprintf(stderr, "Could not create root window\n");
 		abort();
 	}
+	mbv_dfb_window_show(root_window);
 
 	/* print the pixel format of the root window */
 	DFBSurfacePixelFormat pix_fmt;

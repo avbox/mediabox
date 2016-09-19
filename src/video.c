@@ -62,6 +62,16 @@ mbv_getdefaultfont(void)
 }
 
 
+/**
+ * mbv_window_isvisible() -- Checks if the given window is visible.
+ */
+int
+mbv_window_isvisible(struct mbv_window *window)
+{
+	return mbv_dfb_window_isvisible(window->native_window);
+}
+
+
 int
 mbv_window_getsize(struct mbv_window *window, int *width, int *height)
 {

@@ -31,6 +31,10 @@ void
 mbv_dfb_getscreensize(int *width, int *height);
 
 
+int
+mbv_dfb_window_isvisible(struct mbv_dfb_window *window);
+
+
 void
 mbv_dfb_window_update(struct mbv_dfb_window *window);
 

@@ -62,6 +62,13 @@ void
 mbv_getscreensize(int *width, int *height);
 
 
+/**
+ * mbv_window_isvisible() -- Checks if the given window is visible.
+ */
+int
+mbv_window_isvisible(struct mbv_window *window);
+
+
 int
 mbv_window_getsize(struct mbv_window *window, int *width, int *height);
 
