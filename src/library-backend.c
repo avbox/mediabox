@@ -51,7 +51,7 @@ mb_library_backend_init(void)
 	/* launch the mediatomb process */
 	if ((mediatomb_process_id = mb_process_start(MEDIATOMB_BIN, mtargs,
 		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE |
-		MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_LOG,
+		MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDERR_LOG,
 		"mediatomb", NULL, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "library-backend", "Could not start mediatomb daemon");
 		return -1;
@@ -60,7 +60,7 @@ mb_library_backend_init(void)
 	/* launch the avmount process */
 	if ((avmount_process_id = mb_process_start(AVMOUNT_BIN, avargs,
 		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE |
-		MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_LOG,
+		MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDERR_LOG,
 		"avmount", NULL, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "library-backend", "Could not start avmount daemon");
 		return -1;
