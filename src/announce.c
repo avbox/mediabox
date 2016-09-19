@@ -135,6 +135,9 @@ mb_announce_start(void)
 		return sockfd = -1;
 	}
 
+	/* send the first announcement immediately */
+	mb_announce_sendbroadcast(0, NULL);
+
 	/* register a timer to send announcements */
 	tv.tv_sec = MB_ANNOUNCE_INTERVAL;
 	tv.tv_nsec = 0;
