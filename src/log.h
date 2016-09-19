@@ -24,7 +24,8 @@ enum mb_loglevel
 
 
 /* Some convenience macros */
-#define LOG_PRINT_ERROR(module, str) LOG_PRINT(MB_LOGLEVEL_ERROR, module, str)
-#define LOG_VPRINT_ERROR(module, fmt, ...) LOG_VPRINT(MB_LOGLEVEL_ERROR, module, fmt, __VA_ARGS__)
+#define LOG_PRINT_ERROR(str) LOG_PRINT(MB_LOGLEVEL_ERROR, LOG_MODULE, str)
+#define LOG_VPRINT_ERROR(fmt, ...) LOG_VPRINT(MB_LOGLEVEL_ERROR, LOG_MODULE, fmt, __VA_ARGS__)
+#define LOG_ERROR() LOG_VPRINT_ERROR("Error: %s", strerror(errno))
 
 #endif

@@ -5,6 +5,8 @@
 #include <alsa/asoundlib.h>
 #include <alsa/mixer.h>
 
+#define LOG_MODULE "soundctl"
+
 #include "debug.h"
 #include "log.h"
 #include "alsa-volume.h"
@@ -28,23 +30,19 @@ mb_alsa_volume_get(void)
 	snd_mixer_elem_t* elem;
 
 	if ((err = snd_mixer_open(&handle, 0)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "snd_mixer_open() failed: %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("snd_mixer_open() failed: %s", snd_strerror(err));
 		return -1;
 	}
 	if ((err = snd_mixer_attach(handle, card)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "snd_mixer_attach() failed: %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("snd_mixer_attach() failed: %s", snd_strerror(err));
 		goto end;
 	}
 	if ((err = snd_mixer_selem_register(handle, NULL, NULL)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "snd_mixer_selem_register() failed %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("snd_mixer_selem_register() failed %s", snd_strerror(err));
 		goto end;
 	}
 	if ((err = snd_mixer_load(handle)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "snd_mixer_load() failed: %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("snd_mixer_load() failed: %s", snd_strerror(err));
 		goto end;
 	}
 
@@ -53,16 +51,16 @@ mb_alsa_volume_get(void)
 	snd_mixer_selem_id_set_name(sid, selem_name);
 
 	if ((elem = snd_mixer_find_selem(handle, sid)) == NULL) {
-		LOG_PRINT_ERROR("soundctl", "snd_mixer_find_selem() returned NULL");
+		LOG_PRINT_ERROR("snd_mixer_find_selem() returned NULL");
 		goto end;
 	}
 	if ((err = snd_mixer_selem_get_playback_volume_range(elem, &min, &max)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "snd_mixer_selem_get_playback_volume_range() failed: %s",
+		LOG_VPRINT_ERROR("snd_mixer_selem_get_playback_volume_range() failed: %s",
 			snd_strerror(err));
 		goto end;
 	}
 	if ((err = snd_mixer_selem_get_playback_volume(elem, SND_MIXER_SCHN_UNKNOWN, &volume)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "snd_mixer_selem_get_playback_volume() failed: %s",
+		LOG_VPRINT_ERROR("snd_mixer_selem_get_playback_volume() failed: %s",
 			snd_strerror(ret));
 		goto end;
 	}
@@ -86,23 +84,19 @@ mb_alsa_volume_set(int volume)
 	snd_mixer_elem_t* elem;
 
 	if ((err = snd_mixer_open(&handle, 0)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "Could not open mixer: %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("Could not open mixer: %s", snd_strerror(err));
 		return -1;
 	}
 	if ((err = snd_mixer_attach(handle, card)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "Could not attach mixer: %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("Could not attach mixer: %s", snd_strerror(err));
 		goto end;
 	}
 	if ((err = snd_mixer_selem_register(handle, NULL, NULL)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "Could not register: %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("Could not register: %s", snd_strerror(err));
 		goto end;
 	}
 	if ((err = snd_mixer_load(handle)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "Could not load mixer: %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("Could not load mixer: %s", snd_strerror(err));
 		goto end;
 	}
 
@@ -111,17 +105,15 @@ mb_alsa_volume_set(int volume)
 	snd_mixer_selem_id_set_name(sid, selem_name);
 
 	if ((elem = snd_mixer_find_selem(handle, sid)) == NULL) {
-		LOG_PRINT_ERROR("soundctl", "snd_mixer_find_selem() returned NULL");
+		LOG_PRINT_ERROR("snd_mixer_find_selem() returned NULL");
 		goto end;
 	}
 	if ((err = snd_mixer_selem_get_playback_volume_range(elem, &min, &max)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "Could not get volume range: %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("Could not get volume range: %s", snd_strerror(err));
 		goto end;
 	}
 	if ((err = snd_mixer_selem_set_playback_volume_all(elem, volume * max / 100)) < 0) {
-		LOG_VPRINT_ERROR("soundctl", "Could not set volume: %s",
-			snd_strerror(err));
+		LOG_VPRINT_ERROR("Could not set volume: %s", snd_strerror(err));
 		goto end;
 	}
 

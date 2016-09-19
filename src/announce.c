@@ -9,6 +9,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#define LOG_MODULE		"announce"
+
 #include "debug.h"
 #include "iface_util.h"
 #include "timers.h"
@@ -22,6 +24,8 @@
 #define MB_FEATURES_DLMASTER	(0x01)
 #define MB_FEATURES_PLAYER	(0x02)
 #define MB_FEATURES_SHAREDLIB	(0x04)
+
+
 
 static int iface_index;
 static int sockfd;
@@ -109,13 +113,13 @@ mb_announce_start(void)
 
 	/* create socket */
 	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-		fprintf(stderr, "announce: Could not create socket\n");
+		LOG_ERROR();
 		return -1;
 	}
 
 	/* enable broadcast */
 	if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) == -1) {
-		fprintf(stderr, "announce: setsockopt() failed\n");
+		LOG_ERROR();
 		close(sockfd);
 		return sockfd = -1;
 	}
@@ -126,7 +130,7 @@ mb_announce_start(void)
 	addr.sin_addr.s_addr = htonl(-1);
 	memset(addr.sin_zero, 0, sizeof(addr.sin_zero));
 	if (bind(sockfd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
-		fprintf(stderr, "announce: bind() failed. errno=%i\n", errno);
+		LOG_ERROR();
 		close(sockfd);
 		return sockfd = -1;
 	}
