@@ -397,7 +397,7 @@ mb_process_io_thread(void *arg)
 					if (proc->flags & MB_PROCESS_STDERR_LOG) {
 						/* TODO: We need to break the output in lines */
 						LOG_VPRINT(MB_LOGLEVEL_WARN, "process",
-							"%s: TODO: Log STDERR output", proc->name);
+							"%s: %s", proc->name, buf);
 					}
 				}
 			}
