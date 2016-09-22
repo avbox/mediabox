@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#define LOG_MODULE "shell"
+
 #include "video.h"
 #include "input.h"
 #include "mainmenu.h"
@@ -25,6 +27,7 @@
 static int pw = 0, ph = 0;
 static struct mbv_window *root_window = NULL;
 static struct mbv_window *progress = NULL;
+static struct mb_ui_progressbar *progressbar = NULL;
 static struct mbp *player = NULL;
 static struct mbv_window *volumebar_window = NULL;
 static struct mb_ui_progressbar *volumebar = NULL;
@@ -264,10 +267,21 @@ mbs_playerstatuschanged(struct mbp *inst,
 {
 	if (inst == player) {
 		if (last_status == MB_PLAYER_STATUS_BUFFERING && status != MB_PLAYER_STATUS_BUFFERING) {
-			assert(progress != NULL);
+
 			DEBUG_PRINT("shell", "Destroying progress bar");
-			mbv_window_destroy(progress);
-			progress = NULL;
+
+			if (progress != NULL) {
+
+				assert(progressbar != NULL);
+
+				/* hide and destroy progress bar */
+				mbv_window_hide(progress);
+				mb_ui_progressbar_destroy(progressbar);
+				mbv_window_destroy(progress);
+				progressbar = NULL;
+				progress = NULL;
+			}
+
 		} else if (last_status == MB_PLAYER_STATUS_PAUSED && status != MB_PLAYER_STATUS_PAUSED) {
 			mb_player_showoverlaytext(player, "", 1,
 				MBV_ALIGN_LEFT);
@@ -299,14 +313,19 @@ mbs_playerstatuschanged(struct mbp *inst,
 				DEBUG_PRINT("shell", "Player state changed to BUFFERING");
 			}
 
+			/* We null test progress here instead of (last_status != MB_PLAYER_STATUS_BUFFERING)
+			 * because if for any reason this block bails out early we'll want it to run again
+			 * next time */
 			if (progress == NULL) {
 				int sw, sh, px, py;
 
 				DEBUG_PRINT("shell", "Initializing progress bar");
 
-				pthread_mutex_lock(&screen_lock);
+				assert(progressbar == NULL);
 
 				mbv_window_clear(root_window, 0x000000ff);
+				mbv_window_update(root_window);
+
 				mbv_window_getsize(root_window, &sw, &sh);
 
 				pw = (sw * 70) / 100;
@@ -314,24 +333,31 @@ mbs_playerstatuschanged(struct mbp *inst,
 				px = (sw / 2) - (pw / 2);
 				py = (sh / 2) - (ph / 2);
 
-				progress = mbv_window_new(NULL, px, py, pw, ph);
-				assert(progress != NULL);
+				/* create a window for the progress bar */
+				if ((progress = mbv_window_new(NULL, px, py, pw, ph)) == NULL) {
+					LOG_PRINT_ERROR("Could not create progressbar window");
+					break;
+				}
 
-				mbv_window_update(progress);
-				mbv_window_update(root_window);
+				/* create the progressbar widget */
+				if ((progressbar = mb_ui_progressbar_new(progress, 0, 0, pw, ph, 0, 100, 0)) == NULL) {
+					LOG_PRINT_ERROR("Could not create progressbar widget");
+					mbv_window_destroy(progress);
+					break;
+				}
 
-				pthread_mutex_unlock(&screen_lock);
+				/* show the progress bar */
+				mb_ui_progressbar_update(progressbar);
+				mbv_window_show(progress);
 
 			} else {
-				int donewidth = (pw * mb_player_bufferstate(inst)) / 100;
-
 				assert(progress != NULL);
+				assert(progressbar != NULL);
 
-				mbv_window_clear(root_window, 0x000000ff);
-				mbv_window_clear(progress, MBV_DEFAULT_BACKGROUND);
-				mbv_window_fillrectangle(progress, 0, 0, donewidth, ph);
+				/* update the progress bar */
+				mb_ui_progressbar_setvalue(progressbar, mb_player_bufferstate(inst));
+				mb_ui_progressbar_update(progressbar);
 				mbv_window_update(progress);
-				mbv_window_update(root_window);
 			}
 			break;
 
