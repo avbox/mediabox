@@ -296,7 +296,7 @@ int
 mb_ui_menu_showdialog(struct mb_ui_menu *inst)
 {
 	int fd, quit = 0, ret = 0;
-	mbi_event e;
+	enum mbi_event e;
 
 	/* grab the input device */
 	if ((fd = mbi_grab_input()) == -1) {
@@ -305,7 +305,7 @@ mb_ui_menu_showdialog(struct mb_ui_menu *inst)
 	}
 
 	/* run the message loop */
-	while (!quit && read_or_eof(fd, &e, sizeof(mbi_event)) != 0) {
+	while (!quit && mbi_getevent(fd, &e) != -1) {
 		switch (e) {
 		case MBI_EVENT_BACK:
 		{

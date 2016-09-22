@@ -6,7 +6,11 @@
 #include "pipe_util.h"
 #include "linkedlist.h"
 
-typedef enum
+
+#define MBI_RECIPIENT_ANY	(-1)
+
+
+enum mbi_event
 {
 	MBI_EVENT_NONE,
 	MBI_EVENT_PLAY,
@@ -54,15 +58,37 @@ typedef enum
 	MBI_EVENT_KBD_SPACE,
 	MBI_EVENT_EXIT,
 	MBI_EVENT_QUIT,
-}
-mbi_event;
+};
+
+
+/* Message passing structure */
+struct mb_message
+{
+	enum mbi_event msg;
+	int recipient;
+	size_t size;
+	char payload[];
+};
+
 
 void
-mbi_event_send(mbi_event e);
+mbi_event_send(enum mbi_event e);
 
 
 int
-mbi_dispatchevent(mbi_event e);
+mbi_dispatchevent(enum mbi_event e);
+
+
+/**
+ * mbi_getmessage() -- Gets the next message at the queue specified
+ * by the file descriptor.
+ */
+struct mb_message *
+mbi_getmessage(int fd);
+
+
+int
+mbi_getevent(int fd, enum mbi_event *e);
 
 
 /**
@@ -77,6 +103,13 @@ mbi_grab_input(void);
 
 int
 mbi_grab_input_nonblock(void);
+
+
+/**
+ * mbi_sendmessage() -- Sends a message.
+ */
+void
+mbi_sendmessage(int recipient, enum mbi_event e, void *data, size_t sz);
 
 
 int

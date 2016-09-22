@@ -3,9 +3,12 @@
 #endif
 #include <stdlib.h>
 #include <assert.h>
+#include <errno.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/signal.h>
+
+#define LOG_MODULE "input"
 
 #include "input.h"
 #include "input-directfb.h"
@@ -34,18 +37,63 @@ LIST_DECLARE_STATIC(sinks);
 LIST_DECLARE_STATIC(nonblock_sinks);
 
 
-int
-mbi_dispatchevent(mbi_event e)
+static void *
+malloc_safe(size_t sz)
+{
+	void *buf;
+	while ((buf = malloc(sz)) == NULL) {
+		usleep(500 * 1000L);
+	}
+	return buf;
+}
+
+
+static void *
+realloc_safe(void *buf, size_t sz)
+{
+	void *newbuf;
+	while ((newbuf = realloc(buf, sz)) == NULL) {
+		usleep(500 * 1000);
+	}
+	return newbuf;
+}
+
+
+/**
+ * mbi_dispatchmessage() -- Dispatch a message.
+ */
+static int
+mbi_dispatchmessage(struct mb_message *msg)
 {
 	int ret;
-	int dispatched = 1;
+	int dispatched = 0;
 	mbi_sink *sink;
 
 	pthread_mutex_lock(&dispatch_lock);
 
+	/* if the message specifies a recipient sent it to the recipient's
+	 * queue and return success if the message is successfully queued */
+	if (msg->recipient != MBI_RECIPIENT_ANY) {
+		LIST_FOREACH_SAFE(mbi_sink*, sink, &sinks, {
+			if (sink->readfd == msg->recipient) {
+				if (write_or_epipe(sink->writefd, msg, sizeof(struct mb_message) + msg->size) == -1) {
+					pthread_mutex_lock(&sinks_lock);
+					LIST_REMOVE(sink);
+					pthread_mutex_unlock(&sinks_lock);
+					free(sink);
+				}
+				dispatched = 0;
+				goto end;
+			}
+		});
+		errno = ENOENT;
+		dispatched = -1;
+		goto end;
+	}
+
 	/* first send the message to all nonblocking sinks */
 	LIST_FOREACH_SAFE(mbi_sink*, sink, &nonblock_sinks, {
-		if (write_or_epipe(sink->writefd, &e, sizeof(mbi_event)) == -1) {
+		if (write_or_epipe(sink->writefd, msg, sizeof(struct mb_message) + msg->size) == -1) {
 			pthread_mutex_lock(&sinks_lock);
 			LIST_REMOVE(sink);
 			pthread_mutex_unlock(&sinks_lock);
@@ -57,50 +105,129 @@ mbi_dispatchevent(mbi_event e)
 	if (sink == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_INFO, "input", "Input event dropped. No sinks");
 
-	} else if ((ret = write_or_epipe(sink->writefd, &e, sizeof(mbi_event))) == 0) {
+	} else if ((ret = write_or_epipe(sink->writefd, msg, sizeof(struct mb_message) + msg->size)) == 0) {
 		pthread_mutex_lock(&sinks_lock);
 		LIST_REMOVE(sink);
 		pthread_mutex_unlock(&sinks_lock);
 
 		close(sink->writefd);
 		free(sink);
-		dispatched = 0;
+		dispatched = -1;
 
 	} else if (ret < 0) {
 		LOG_VPRINT(MB_LOGLEVEL_ERROR, "input",
 			"write_or_epipe returned %i", ret);
 	}
 
+end:
 	pthread_mutex_unlock(&dispatch_lock);
 
 	return dispatched;
 }
 
 
+/**
+ * mbi_dispatch_event() -- Sends a message without data to the thread that currently
+ * receives input messages
+ */
+int
+mbi_dispatchevent(enum mbi_event e)
+{
+	struct mb_message msg;
+	msg.msg = e;
+	msg.recipient = -1;
+	msg.size = 0;
+	return mbi_dispatchmessage(&msg);
+}
+
+
+/**
+ * mbi_getmessage() -- Gets the next message at the queue specified
+ * by the file descriptor.
+ */
+struct mb_message *
+mbi_getmessage(int fd)
+{
+	struct mb_message *msg;
+
+	msg = malloc_safe(sizeof(struct mb_message));
+
+	/* read the next message */
+	if (read_or_eof(fd, msg, sizeof(struct mb_message)) == -1) {
+		free(msg);
+		return NULL;
+	}
+
+	/* if the message has data read it */
+	if (msg->size > 0) {
+		msg = realloc_safe(msg, sizeof(struct mb_message) + msg->size);
+		read_or_die(fd, ((void*) msg) + sizeof(struct mb_message), msg->size);
+	}
+	return msg;
+}
+
+
+/**
+ * mbi_getevent() -- Gets the event code for the next message in the
+ * queue and discards the rest of the message.
+ */
+int
+mbi_getevent(int fd, enum mbi_event *e)
+{
+	struct mb_message *msg;
+	if ((msg = mbi_getmessage(fd)) == NULL) {
+		return -1;
+	}
+	*e = msg->msg;
+	free(msg);
+	return 0;
+}
+
+
+/**
+ * mbi_loop() -- Runs on the background receiving and dispatching
+ * messages.
+ */
 static void*
 mbi_loop(void *arg)
 {
-	mbi_event e;
+	struct mb_message *msg;
+	size_t msgsz;
 
 	(void) arg;
 
 	MB_DEBUG_SET_THREAD_NAME("input");
 	DEBUG_PRINT("input", "Starting input dispatcher thread");
 
+	msgsz = 0;
+	msg = malloc_safe(sizeof(struct mb_message));
+
 	while (1) {
 
 		/* read the next event */
-		read_or_die(readfd, &e, sizeof(mbi_event));
+		read_or_die(readfd, msg, sizeof(struct mb_message));
 
-		if (e == MBI_EVENT_EXIT) {
+		/* if the message has data read it */
+		if (msg->size != 0) {
+			if (msg->size > msgsz) {
+				msg = realloc_safe(msg, sizeof(struct mb_message) + msg->size);
+				msgsz = msg->size;
+			}
+			read_or_die(readfd, ((void*) msg) + sizeof(struct mb_message), msg->size);
+		}
+
+		/* if this is the special exit message then quit */
+		if (msg->msg == MBI_EVENT_EXIT) {
 			DEBUG_PRINT("input", "EXIT command received");
 			break;
 		}
 
-		while (!mbi_dispatchevent(e));
+		while (mbi_dispatchmessage(msg) == -1);
 	}
 
 	DEBUG_PRINT("input", "Input dispatcher thread exiting");
+
+	free(msg);
 
 	return 0;
 }
@@ -164,14 +291,32 @@ mbi_grab_input_nonblock(void)
 }
 
 
+/**
+ * mbi_sendmessage() -- Sends a message.
+ */
 void
-mbi_event_send(mbi_event e)
+mbi_sendmessage(int recipient, enum mbi_event e, void *data, size_t sz)
 {
-        pthread_mutex_lock(&lock);
-        write_or_die(writefd, &e, sizeof(mbi_event));
-        pthread_mutex_unlock(&lock);
+	struct mb_message msg;
+	msg.msg = e;
+	msg.recipient = recipient;
+	msg.size = sz;
 
+	pthread_mutex_lock(&lock);
+	write_or_die(writefd, &msg, sizeof(struct mb_message));
+	if (sz > 0) {
+		write_or_die(writefd, data, sz);
+	}
+        pthread_mutex_unlock(&lock);
 }
+
+
+void
+mbi_event_send(enum mbi_event e)
+{
+	mbi_sendmessage(MBI_RECIPIENT_ANY, e, NULL, 0);
+}
+
 
 /**
  * mbi_init() -- Initialize input subsystem

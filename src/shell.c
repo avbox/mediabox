@@ -417,7 +417,7 @@ int
 mbs_show_dialog(void)
 {
 	int quit = 0;
-	mbi_event e;
+	enum mbi_event e;
 
 	/* mbs_welcomescreen(); */
 	mbs_start_clock();
@@ -429,7 +429,7 @@ mbs_show_dialog(void)
 	}
 
 	/* run the message loop */
-	while (!quit && read_or_eof(input_fd, &e, sizeof(mbi_event)) != 0) {
+	while (!quit && mbi_getevent(input_fd, &e) != -1) {
 		switch (e) {
 		case MBI_EVENT_KBD_Q:
 		case MBI_EVENT_QUIT:

@@ -299,8 +299,9 @@ end:
 
 static void *
 mb_mediasearch_inputthread(void *arg)
-{	int fd;
-	mbi_event e;
+{
+	int fd;
+	enum mbi_event e;
 
 #define CASE_KBD(x) \
 	case MBI_EVENT_KBD_ ## x: \
@@ -316,8 +317,9 @@ mb_mediasearch_inputthread(void *arg)
 		return NULL;
 	}
 
-	while (input_quit == 0 && read_or_eof(fd, &e, sizeof(mbi_event)) > 0) {
+	while (input_quit == 0 && mbi_getevent(fd, &e) != -1) {
 		int istext = 0;
+
 		switch (e) {
 		case MBI_EVENT_CLEAR:
 			mb_mediasearch_appendtoterms("\b");

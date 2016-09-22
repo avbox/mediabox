@@ -70,7 +70,7 @@ int
 mb_about_showdialog(void)
 {
 	int fd;
-	mbi_event e;
+	enum mbi_event e;
 	cairo_t *context;
 
 	PangoLayout *layout;
@@ -113,7 +113,7 @@ mb_about_showdialog(void)
 	}
 
 	/* wait for any input */
-	(void) read_or_eof(fd, &e, sizeof(mbi_event));
+	mbi_getevent(fd, &e);
 
 	/* hide the mainmenu window */
 	mbv_window_hide(window);
