@@ -315,7 +315,7 @@ mb_downloads_showdialog(void)
 	tv.tv_sec = 2;
 	tv.tv_nsec = 0;
 	update_timer_id = mbt_register(&tv,
-		MB_TIMER_TYPE_AUTORELOAD, mb_downloads_populatelist, NULL);
+		MB_TIMER_TYPE_AUTORELOAD, -1, mb_downloads_populatelist, NULL);
 	if (update_timer_id == -1) {
 		mbv_window_hide(window);
 		return -1;

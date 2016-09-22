@@ -767,7 +767,7 @@ mb_process_stop(int id)
 			tv.tv_sec = 5;
 			tv.tv_nsec = 0;
 			*id_copy = id;
-			if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, mb_process_force_kill, id_copy) == -1) {
+			if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, -1, mb_process_force_kill, id_copy) == -1) {
 				LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
 					"Could not register force stop timer");
 				free(id_copy);

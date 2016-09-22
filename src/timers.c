@@ -7,23 +7,25 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <assert.h>
 
 #include "timers.h"
 #include "time_util.h"
 #include "linkedlist.h"
 #include "debug.h"
+#include "input.h"
 
 
 /**
  * Timer structure
  */
 LISTABLE_TYPE(mb_timer_state,
-	int id;
+	struct mbt_timer_data public;
 	struct timespec interval;
 	struct timespec value;
 	enum mbt_timer_flags flags;
+	int message_fd;
 	mbt_timer_callback callback;
-	void *data;
 );
 
 
@@ -74,9 +76,15 @@ mbt_timers_thread(void *arg)
 			if (timelte(&tmr->value, &elapsed)) {
 				/* the timer has elapsed so invoke the callback */
 				if (tmr->callback != NULL) {
-					ret = tmr->callback(tmr->id, tmr->data);
+					ret = tmr->callback(tmr->public.id, tmr->public.data);
 				} else {
 					ret = MB_TIMER_CALLBACK_RESULT_CONTINUE;
+				}
+				if (tmr->flags & MB_TIMER_MESSAGE) {
+					if (tmr->message_fd != -1) {
+						mbi_sendmessage(tmr->message_fd, MBI_EVENT_TIMER,
+							&tmr->public, sizeof(struct mbt_timer_data));
+					}
 				}
 				if (tmr->flags & MB_TIMER_TYPE_AUTORELOAD) {
 					/* if this is an autoreload timer reload it */
@@ -138,7 +146,7 @@ mbt_cancel(int timer_id)
 	pthread_mutex_lock(&timers_lock);
 
 	LIST_FOREACH_SAFE(mb_timer_state*, tmr, &timers, {
-		if (tmr->id == timer_id) {
+		if (tmr->public.id == timer_id) {
 			LIST_REMOVE(tmr);
 			free(tmr);
 			ret = 0;
@@ -157,11 +165,13 @@ mbt_cancel(int timer_id)
  */
 int
 mbt_register(struct timespec *interval,
-	enum mbt_timer_flags flags, mbt_timer_callback func, void *data)
+	enum mbt_timer_flags flags, int message_fd, mbt_timer_callback func, void *data)
 {
 	mb_timer_state *timer;
 
 	DEBUG_PRINT("timers", "Registering timer");
+
+	assert(message_fd == -1 || message_fd > 2);
 
 	/* allocate and initialize timer entry */
 	if ((timer = malloc(sizeof(mb_timer_state))) == NULL) {
@@ -170,8 +180,9 @@ mbt_register(struct timespec *interval,
 	}
 	timer->interval = *interval;
 	timer->value = *interval;
+	timer->message_fd = message_fd;
 	timer->callback = func;
-	timer->data = data;
+	timer->public.data = data;
 	timer->flags = flags;
 
 	DEBUG_VPRINT("timers", "Adding timer (%lis%linsecs)",
@@ -179,14 +190,14 @@ mbt_register(struct timespec *interval,
 
 	/* add entry to list */
 	pthread_mutex_lock(&timers_lock);
-	timer->id = mbt_getnextid();
+	timer->public.id = mbt_getnextid();
 	LIST_ADD(&timers, timer);
 	pthread_mutex_unlock(&timers_lock);
 
 	/* wake the timers thread */
 	pthread_cond_signal(&timers_signal);
 
-	return timer->id;
+	return timer->public.id;
 }
 
 

@@ -148,7 +148,7 @@ mbs_start_clock()
 
 	tv.tv_sec = 2;
 	tv.tv_nsec = 0;
-	clock_timer_id = mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, mbs_welcomescreen, NULL);
+	clock_timer_id = mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, -1, mbs_welcomescreen, NULL);
 }
 
 
@@ -227,7 +227,7 @@ mbs_volumechanged(int volume)
 	/* Register timer to dismiss volume bar */
 	tv.tv_sec = 5;
 	tv.tv_nsec = 0;
-	new_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT, mbs_dismissvolumebar, NULL);
+	new_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT, -1, mbs_dismissvolumebar, NULL);
 	if (new_timer_id == -1) {
 		pthread_mutex_unlock(&volume_lock);
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "shell", "Could not register volume bar timer");

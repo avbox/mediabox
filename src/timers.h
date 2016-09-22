@@ -11,9 +11,15 @@ enum mbt_timer_flags
 {
 	MB_TIMER_TYPE_ONESHOT = 0,
 	MB_TIMER_TYPE_AUTORELOAD = 1,
-	MB_TIMER_AUTOFREE = 2
+	MB_TIMER_MESSAGE = 2
 };
 
+
+struct mbt_timer_data
+{
+	int id;
+	void *data;
+};
 
 /**
  * enum mbt_result -- Timer callback result
@@ -39,11 +45,19 @@ mbt_cancel(int timer_id);
 
 
 /**
- * mbt_register() -- Register a timer.
+ * Register a timer.
+ *
+ * \param interval The interval at which the timer will fire
+ * \param flags The timer flags
+ * \param message_fd The message queue file descriptor where
+ * 	the timeout messages will be sent to. This argument is ignored
+ * 	unless the MB_TIMER_MESSAGE flag is set.
+ * \param func The callback function
+ * \param data A pointer that will be passed to the callback function.
  */
 int
 mbt_register(struct timespec *interval,
-	enum mbt_timer_flags flags, mbt_timer_callback func, void *data);
+	enum mbt_timer_flags flags, int message_fd, mbt_timer_callback func, void *data);
 
 
 /**

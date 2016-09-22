@@ -2413,7 +2413,7 @@ mb_player_showoverlaytext(struct mbp *inst,
 	inst->top_overlay_alignment = alignment;
 	inst->top_overlay_text = strdup(text);
 	inst->top_overlay_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT,
-		&mb_player_dismiss_top_overlay, inst);
+		-1, &mb_player_dismiss_top_overlay, inst);
 
 	pthread_mutex_unlock(&inst->top_overlay_lock);
 }

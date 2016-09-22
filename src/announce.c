@@ -141,7 +141,7 @@ mb_announce_start(void)
 	/* register a timer to send announcements */
 	tv.tv_sec = MB_ANNOUNCE_INTERVAL;
 	tv.tv_nsec = 0;
-	if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, mb_announce_sendbroadcast, NULL) == -1) {
+	if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, -1, mb_announce_sendbroadcast, NULL) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "announce", "Could not register timer");
 		close(sockfd);
 		return sockfd = -1;
