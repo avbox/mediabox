@@ -138,7 +138,7 @@ mbs_welcomescreen(int id, void *data)
 
 
 static void
-mbs_start_clock()
+mbs_start_clock(void)
 {
 	struct timespec tv;
 	
@@ -148,7 +148,8 @@ mbs_start_clock()
 
 	tv.tv_sec = 2;
 	tv.tv_nsec = 0;
-	clock_timer_id = mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, -1, mbs_welcomescreen, NULL);
+	clock_timer_id = mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD | MB_TIMER_MESSAGE,
+		input_fd, NULL, NULL);
 }
 
 
@@ -227,7 +228,8 @@ mbs_volumechanged(int volume)
 	/* Register timer to dismiss volume bar */
 	tv.tv_sec = 5;
 	tv.tv_nsec = 0;
-	new_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT, -1, mbs_dismissvolumebar, NULL);
+	new_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT | MB_TIMER_MESSAGE,
+		input_fd, NULL, NULL);
 	if (new_timer_id == -1) {
 		pthread_mutex_unlock(&volume_lock);
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "shell", "Could not register volume bar timer");
@@ -417,10 +419,7 @@ int
 mbs_show_dialog(void)
 {
 	int quit = 0;
-	enum mbi_event e;
-
-	/* mbs_welcomescreen(); */
-	mbs_start_clock();
+	struct mb_message *message;
 
 	/* grab the input device */
 	if ((input_fd = mbi_grab_input()) == -1) {
@@ -428,9 +427,11 @@ mbs_show_dialog(void)
 		return -1;
 	}
 
+	mbs_start_clock();
+
 	/* run the message loop */
-	while (!quit && mbi_getevent(input_fd, &e) != -1) {
-		switch (e) {
+	while (!quit && (message = mbi_getmessage(input_fd)) != NULL) {
+		switch (message->msg) {
 		case MBI_EVENT_KBD_Q:
 		case MBI_EVENT_QUIT:
 		{
@@ -551,11 +552,27 @@ mbs_show_dialog(void)
 			mb_alsa_volume_set(volume);
 			break;
 		}
+		case MBI_EVENT_TIMER:
+		{
+			struct mbt_timer_data *timer_data;
+			timer_data = (struct mbt_timer_data*) message->payload;
+
+			/* DEBUG_VPRINT("shell", "Received timer message id=%i",
+				timer_data->id); */
+
+			if (timer_data->id == clock_timer_id) {
+				mbs_welcomescreen(timer_data->id, timer_data->data);
+			} else if (timer_data->id == volumebar_timer_id) {
+				mbs_dismissvolumebar(timer_data->id, timer_data->data);
+			}
+			break;
+		}
 		default:
-			fprintf(stderr, "mbs: Received event %i\n", (int) e);
+			DEBUG_VPRINT("shell", "Received event %i", (int) message->msg);
 			break;
 		}
 		mb_player_update(player);
+		free(message);
 	}
 
 	fprintf(stderr, "mbs: Exiting\n");
