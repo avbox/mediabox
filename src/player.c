@@ -50,6 +50,7 @@
 #include "time_util.h"
 #include "timers.h"
 #include "linkedlist.h"
+#include "input.h"
 
 
 /*
@@ -105,7 +106,7 @@ struct mbp
 	int64_t lasttime;
 	int64_t systemtimeoffset;
 	int64_t (*getmastertime)(struct mbp *inst);
-	mb_player_status_callback status_callback;
+	int status_notification_fd;
 
 	AVFormatContext *fmt_ctx;
 
@@ -233,9 +234,15 @@ mb_player_updatestatus(struct mbp *inst, enum mb_player_status status)
 	last_status = inst->status;
 	inst->status = status;
 
-	/* invoke the status callback */
-	if (inst->status_callback != NULL) {
-		inst->status_callback(inst, status, last_status);
+	/* send status notification */
+	if (inst->status_notification_fd != -1) {
+		struct mb_player_status_data status_data;
+		status_data.sender = inst;
+		status_data.last_status = last_status;
+		status_data.status = status;
+
+		mbi_sendmessage(inst->status_notification_fd, MBI_EVENT_PLAYER_NOTIFICATION,
+			&status_data, sizeof(struct mb_player_status_data));
 	}
 }
 
@@ -2202,14 +2209,16 @@ mb_player_getstatus(struct mbp *inst)
 }
 
 
+/**
+ * Register a queue for status notifications.
+ */
 int
-mb_player_add_status_callback(struct mbp *inst, mb_player_status_callback callback)
+mb_player_registernotificationqueue(struct mbp *inst, int queuefd)
 {
-	if (inst->status_callback != NULL) {
-		abort(); /* only one callback supported for now */
+	if (inst->status_notification_fd != -1) {
+		abort();
 	}
-
-	inst->status_callback = callback;
+	inst->status_notification_fd = queuefd;
 	return 0;
 }
 
@@ -2815,6 +2824,7 @@ mb_player_new(struct mbv_window *window)
 	inst->use_fbdev = 1;
 	inst->video_stream_index = -1;
 	inst->status = MB_PLAYER_STATUS_READY;
+	inst->status_notification_fd = -1;
 
 	LIST_INIT(&inst->playlist);
 

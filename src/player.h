@@ -26,6 +26,17 @@ enum mb_player_status
 };
 
 
+/**
+ * Status notification structure.
+ */
+struct mb_player_status_data
+{
+	struct mbp *sender;
+	enum mb_player_status last_status;
+	enum mb_player_status status;
+};
+
+
 /* status changed callback function */
 typedef void (*mb_player_status_callback)(struct mbp *inst,
 	enum mb_player_status status, enum mb_player_status last_status);
@@ -77,8 +88,11 @@ unsigned int
 mb_player_bufferstate(struct mbp *inst);
 
 
+/**
+ * Register a queue for status notifications.
+ */
 int
-mb_player_add_status_callback(struct mbp *inst, mb_player_status_callback callback);
+mb_player_registernotificationqueue(struct mbp *inst, int queuefd);
 
 
 /**

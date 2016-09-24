@@ -4,7 +4,6 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
-#include <pthread.h>
 
 #define LOG_MODULE "shell"
 
@@ -34,7 +33,6 @@ static struct mb_ui_progressbar *volumebar = NULL;
 static int volumebar_timer_id = -1;
 static int input_fd = -1;
 static int clock_timer_id = 0;
-static pthread_mutex_t screen_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 /**
@@ -79,8 +77,6 @@ mbs_welcomescreen(int id, void *data)
 	/* format date string */
 	strftime(date_string, sizeof(time_string), "%B %d, %Y",
 		localtime(&now));
-
-	pthread_mutex_lock(&screen_lock);
 
 	/* mbv_getscreensize(&w, &h); */
 	mbv_window_getcanvassize(root_window, &w, &h);
@@ -129,8 +125,6 @@ mbs_welcomescreen(int id, void *data)
 	}
 
         mbv_window_show(root_window);
-
-	pthread_mutex_unlock(&screen_lock);
 
 	return MB_TIMER_CALLBACK_RESULT_CONTINUE;
 }
@@ -389,8 +383,6 @@ mbs_init(void)
 		return -1;
 	}
 
-	/* register for status updates */
-	mb_player_add_status_callback(player, mbs_playerstatuschanged);
 	mbv_window_show(root_window);
 
 	return 0;
@@ -415,6 +407,12 @@ mbs_show_dialog(void)
 	/* initialize the volume control */
 	if (mb_alsa_volume_init(input_fd) != 0) {
 		fprintf(stderr, "shell: Could not initialize volume control");
+		return -1;
+	}
+
+	/* register our queue as the player's notification queue */
+	if (mb_player_registernotificationqueue(mbs_get_active_player(), input_fd) == -1) {
+		LOG_PRINT_ERROR("Could not reqister notification queue");
 		return -1;
 	}
 
@@ -561,6 +559,14 @@ mbs_show_dialog(void)
 			int *vol;
 			vol = ((int*) message->payload);
 			mbs_volumechanged(*vol);
+			break;
+		}
+		case MBI_EVENT_PLAYER_NOTIFICATION:
+		{
+			struct mb_player_status_data *status_data;
+			status_data = (struct mb_player_status_data*) message->payload;
+			mbs_playerstatuschanged(status_data->sender,
+				status_data->status, status_data->last_status);
 			break;
 		}
 		default:
