@@ -10,12 +10,10 @@
 #include "debug.h"
 #include "log.h"
 #include "alsa-volume.h"
+#include "input.h"
 
 
-#define AMIXER_BIN "/usr/bin/amixer"
-
-
-static mb_alsa_volumechanged volume_callback = NULL;
+static int message_fd = -1;
 static const char *card = "default";
 static const char *selem_name = "Master";
 
@@ -117,8 +115,9 @@ mb_alsa_volume_set(int volume)
 		goto end;
 	}
 
-	if (volume_callback != NULL) {
-		volume_callback(volume);
+	if (message_fd != -1) {
+		mbi_sendmessage(message_fd, MBI_EVENT_VOLUME_CHANGED, &volume,
+			sizeof(volume));
 	}
 
 	ret = 0;
@@ -131,10 +130,18 @@ end:
 
 
 int
-mb_alsa_volume_init(mb_alsa_volumechanged callback)
+mb_alsa_volume_init(int msgfd)
 {
-	/* assert(callback != NULL); */
-	assert(volume_callback == NULL);
-	volume_callback = callback;
+	assert(message_fd == -1);
+
+	message_fd = msgfd;
+
 	return 0;
+}
+
+
+void
+mb_alsa_volume_destroy(void)
+{
+	message_fd = -1;
 }

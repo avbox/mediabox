@@ -35,7 +35,6 @@ static int volumebar_timer_id = -1;
 static int input_fd = -1;
 static int clock_timer_id = 0;
 static pthread_mutex_t screen_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t volume_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 /**
@@ -156,8 +155,6 @@ mbs_start_clock(void)
 static enum mbt_result
 mbs_dismissvolumebar(int id, void *data)
 {
-	pthread_mutex_lock(&volume_lock);
-
 	if (id == volumebar_timer_id) {
 		DEBUG_VPRINT("shell", "Dismissing volume indicator (id=%i)",
 			id);
@@ -174,8 +171,6 @@ mbs_dismissvolumebar(int id, void *data)
 			id);
 	}
 
-	pthread_mutex_unlock(&volume_lock);
-
 	return MB_TIMER_CALLBACK_RESULT_STOP;
 }
 
@@ -187,8 +182,6 @@ mbs_volumechanged(int volume)
 	int new_timer_id;
 	struct timespec tv;
 	const int bar_width = 800;
-
-	pthread_mutex_lock(&volume_lock);
 
 	if (volumebar_timer_id == -1) {
 
@@ -205,7 +198,6 @@ mbs_volumechanged(int volume)
 		if (volumebar_window == NULL) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
 				"Could not create volume indicator window");
-			pthread_mutex_unlock(&volume_lock);
 			return;
 		}
 		volumebar = mb_ui_progressbar_new(volumebar_window, 0, 0, bar_width, 60, 0, 100, volume);
@@ -213,7 +205,6 @@ mbs_volumechanged(int volume)
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
 				"Could not create volume indicator");
 			mbv_window_destroy(volumebar_window);
-			pthread_mutex_unlock(&volume_lock);
 			return;
 		}
 
@@ -231,7 +222,6 @@ mbs_volumechanged(int volume)
 	new_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT | MB_TIMER_MESSAGE,
 		input_fd, NULL, NULL);
 	if (new_timer_id == -1) {
-		pthread_mutex_unlock(&volume_lock);
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "shell", "Could not register volume bar timer");
 
 		/* Hide the window only if there's not a timer already
@@ -255,8 +245,6 @@ mbs_volumechanged(int volume)
 	}
 
 	volumebar_timer_id = new_timer_id;
-
-	pthread_mutex_unlock(&volume_lock);
 }
 
 
@@ -394,12 +382,6 @@ mbs_init(void)
 		return -1;
 	}
 
-	/* initialize the volume control */
-	if (mb_alsa_volume_init(mbs_volumechanged) != 0) {
-		fprintf(stderr, "shell: Could not initialize volume control");
-		return -1;
-	}
-
 	/* initialize main media player */
 	player = mb_player_new(NULL);
 	if (player == NULL) {
@@ -427,7 +409,14 @@ mbs_show_dialog(void)
 		return -1;
 	}
 
+	/* start the clock timer */
 	mbs_start_clock();
+
+	/* initialize the volume control */
+	if (mb_alsa_volume_init(input_fd) != 0) {
+		fprintf(stderr, "shell: Could not initialize volume control");
+		return -1;
+	}
 
 	/* run the message loop */
 	while (!quit && (message = mbi_getmessage(input_fd)) != NULL) {
@@ -567,6 +556,13 @@ mbs_show_dialog(void)
 			}
 			break;
 		}
+		case MBI_EVENT_VOLUME_CHANGED:
+		{
+			int *vol;
+			vol = ((int*) message->payload);
+			mbs_volumechanged(*vol);
+			break;
+		}
 		default:
 			DEBUG_VPRINT("shell", "Received event %i", (int) message->msg);
 			break;
@@ -575,7 +571,10 @@ mbs_show_dialog(void)
 		free(message);
 	}
 
-	fprintf(stderr, "mbs: Exiting\n");
+	DEBUG_PRINT("shell", "Exiting");
+
+	mb_alsa_volume_destroy();
+
 	return 0;
 }
 

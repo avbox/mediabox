@@ -2,9 +2,6 @@
 #define __ALSA_VOLUME_H__
 
 
-typedef void (*mb_alsa_volumechanged)(int volume);
-
-
 int
 mb_alsa_volume_get(void);
 
@@ -14,7 +11,11 @@ mb_alsa_volume_set(int volume);
 
 
 int
-mb_alsa_volume_init(mb_alsa_volumechanged);
+mb_alsa_volume_init(int msgfd);
+
+
+void
+mb_alsa_volume_destroy(void);
 
 
 #endif
