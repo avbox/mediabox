@@ -935,7 +935,6 @@ mb_player_video(void *arg)
 	DEBUG_PRINT("player", "Video renderer started");
 
 	assert(inst != NULL);
-	assert(inst->video_quit == 0);
 
 	inst->video_playback_running = 1;
 
