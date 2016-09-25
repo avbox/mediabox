@@ -63,6 +63,20 @@ mbv_getscreensize(int *width, int *height);
 
 
 /**
+ * Gets the window's foreground color
+ */
+uint32_t
+mbv_window_getcolor(const struct mbv_window *window);
+
+
+/**
+ * Gets the window's background color.
+ */
+uint32_t
+mbv_window_getbackground(const struct mbv_window *window);
+
+
+/**
  * mbv_window_isvisible() -- Checks if the given window is visible.
  */
 int

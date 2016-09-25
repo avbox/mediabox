@@ -336,6 +336,28 @@ mbv_window_setcolor(struct mbv_window *window, uint32_t color)
 }
 
 
+/**
+ * Gets the window's foreground color
+ */
+uint32_t
+mbv_window_getcolor(const struct mbv_window *window)
+{
+	assert(window != NULL);
+	return window->foreground_color;
+}
+
+
+/**
+ * Gets the window's background color.
+ */
+uint32_t
+mbv_window_getbackground(const struct mbv_window *window)
+{
+	assert(window != NULL);
+	return window->background_color;
+}
+
+
 void
 mbv_window_drawline(struct mbv_window *window,
 	int x1, int y1, int x2, int y2)
@@ -397,6 +419,9 @@ mbv_window_drawstring(struct mbv_window *window,
 			cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->foreground_color));
 			pango_cairo_update_layout(context, layout);
 			pango_cairo_show_layout(context, layout);
+
+			g_object_unref(layout);
+
 		} else {
 			DEBUG_PRINT("video", "Could not create layout");
 		}
