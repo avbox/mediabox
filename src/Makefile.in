@@ -39,6 +39,7 @@ SOURCES=main.o \
 	player.o \
 	shell.o \
 	su.o \
+	ui-textview.o \
 	ui-menu.o \
 	ui-progressbar.o \
 	mainmenu.o \
