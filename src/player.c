@@ -1660,6 +1660,15 @@ mb_player_video_decode(void *arg)
 decoder_exit:
 	DEBUG_PRINT("player", "Video decoder exiting");
 
+	/* signal the video thread to exit and join it */
+	if (inst->video_playback_running) {
+		inst->video_quit = 1;
+		pthread_cond_signal(&inst->video_output_signal);
+		pthread_cond_signal(&inst->video_output_signal);
+		pthread_join(inst->video_output_thread, NULL);
+		DEBUG_PRINT("player", "Video playback thread exited");
+	}
+
 	if (inst->video_last_frame != NULL) {
 		free(inst->video_last_frame);
 		inst->video_last_frame = NULL;
@@ -2107,15 +2116,6 @@ decoder_exit:
 
 	/* clean video stuff */
 	if (inst->have_video) {
-		/* signal the video thread to exit and join it */
-		if (inst->video_playback_running) {
-			inst->video_quit = 1;
-			pthread_cond_signal(&inst->video_output_signal);
-			pthread_cond_signal(&inst->video_output_signal);
-			pthread_join(inst->video_output_thread, NULL);
-			DEBUG_PRINT("player", "Video playback thread exited");
-		}
-
 		/* signal the video decoder thread to exit and join it */
 		/* NOTE: Since this thread it's a midleman it waits on both locks */
 		inst->video_decoder_quit = 1;
