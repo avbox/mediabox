@@ -30,6 +30,7 @@ LDFLAGS+=-lz -lm
 SOURCES=main.o \
 	video.o \
 	video-directfb.o \
+	audio.o \
 	input.o \
 	input-directfb.o \
 	input-socket.o \
