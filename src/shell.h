@@ -10,6 +10,13 @@ mbs_get_active_player(void);
 
 
 /**
+ * Gets the shell's message queue fd.
+ */
+int
+mbs_getqueue(void);
+
+
+/**
  * mbs_init() -- Initialize the MediaBox shell
  */
 int
@@ -17,7 +24,7 @@ mbs_init(void);
 
 
 int
-mbs_show_dialog(void);
+mbs_showdialog(void);
 
 
 void

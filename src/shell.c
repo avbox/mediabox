@@ -45,6 +45,16 @@ mbs_get_active_player(void)
 }
 
 
+/**
+ * Gets the shell's message queue fd.
+ */
+int
+mbs_getqueue(void)
+{
+	return input_fd;
+}
+
+
 static enum mbt_result
 mbs_welcomescreen(int id, void *data)
 {
@@ -383,6 +393,13 @@ mbs_init(void)
 		return -1;
 	}
 
+	/* grab the input device */
+	if ((input_fd = mbi_grab_input()) == -1) {
+		fprintf(stderr, "mbs_show() -- mbi_grab_input failed\n");
+		return -1;
+	}
+
+
 	mbv_window_show(root_window);
 
 	return 0;
@@ -390,16 +407,10 @@ mbs_init(void)
 
 
 int
-mbs_show_dialog(void)
+mbs_showdialog(void)
 {
 	int quit = 0;
 	struct mb_message *message;
-
-	/* grab the input device */
-	if ((input_fd = mbi_grab_input()) == -1) {
-		fprintf(stderr, "mbs_show() -- mbi_grab_input failed\n");
-		return -1;
-	}
 
 	/* start the clock timer */
 	mbs_start_clock();
@@ -422,12 +433,8 @@ mbs_show_dialog(void)
 		case MBI_EVENT_KBD_Q:
 		case MBI_EVENT_QUIT:
 		{
-#ifndef NDEBUG
 			close(input_fd);
 			quit = 1;
-#else
-			abort();
-#endif
 			break;
 		}
 		case MBI_EVENT_MENU:
@@ -604,6 +611,8 @@ mbs_reboot(void)
 void
 mbs_destroy(void)
 {
-	mb_player_destroy(player);
+	if (player != NULL) {
+		mb_player_destroy(player);
+	}
 }
 

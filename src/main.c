@@ -5,10 +5,14 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <assert.h>
 #include <unistd.h>
+#include <signal.h>
 #include <pwd.h>
 #include <sys/types.h>
 #include <asoundlib.h>
+
+#define LOG_MODULE "main"
 
 #include "video.h"
 #include "input.h"
@@ -21,10 +25,38 @@
 #include "downloads-backend.h"
 #include "announce.h"
 #include "debug.h"
+#include "log.h"
 
 #ifdef ENABLE_IONICE
 #include "ionice.h"
 #endif
+
+
+/**
+ * Signal handler
+ */
+static void
+signal_handler(int signum)
+{
+	switch (signum) {
+	case SIGINT:
+	case SIGHUP:
+	case SIGTERM:
+	{
+		int queue;
+		DEBUG_PRINT("main", "Received SIGTERM");
+		if ((queue = mbs_getqueue()) != -1) {
+			mbi_sendmessage(queue, MBI_EVENT_QUIT, NULL, 0);
+		} else {
+			LOG_PRINT_ERROR("Could not get the shell's message queue");
+		}
+		break;
+	}
+	default:
+		DEBUG_VPRINT("main", "Received signal: %i", signum);
+		break;
+	}
+}
 
 
 int
@@ -100,14 +132,23 @@ main (int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
+	/* initialize the discovery service */
 	if (mb_announce_start() == -1) {
 		fprintf(stderr, "Could not start announcer.\n");
 		mb_downloadmanager_destroy();
 		exit(EXIT_FAILURE);
 	}
 
+	/* register signal handlers */
+	if (signal(SIGTERM, signal_handler) == SIG_ERR ||
+		signal(SIGHUP, signal_handler) == SIG_ERR ||
+		signal(SIGINT, signal_handler) == SIG_ERR) {
+		LOG_PRINT_ERROR("Could not set signal handlers");
+		exit(EXIT_FAILURE);
+	}
+
 	/* show the shell */
-	mbs_show_dialog();
+	mbs_showdialog();
 
 	/* cleanup */
 	mb_announce_stop();

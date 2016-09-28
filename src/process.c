@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include <limits.h>
 
+#define LOG_MODULE "process"
 
 #include "debug.h"
 #include "log.h"
@@ -53,7 +54,7 @@ static pthread_mutex_t process_list_lock = PTHREAD_MUTEX_INITIALIZER;
 static int nextid = 1;
 static pthread_t monitor_thread;
 static pthread_t io_thread;
-static int quit = 0;
+static int quit = 0, io_quit = 0;
 
 
 /**
@@ -300,12 +301,17 @@ mb_process_force_kill(int id, void *data)
 	int proc_id = *((int*) data);
 	struct mb_process *proc;
 
+	DEBUG_VPRINT("process", "Force kill callback for process %id",
+		proc_id);
+
 	pthread_mutex_lock(&process_list_lock);
 
 	LIST_FOREACH(struct mb_process*, proc, &process_list) {
 		if (proc->id == proc_id) {
+			DEBUG_VPRINT("process", "Force killing process %i (pid=%i)",
+				proc_id, proc->pid);
 			if (kill(proc->pid, SIGKILL) == -1) {
-				LOG_PRINT(MB_LOGLEVEL_ERROR, "process", "kill() regurned -1");
+				LOG_PRINT_ERROR("kill() regurned -1");
 			}
 
 			pthread_mutex_unlock(&process_list_lock);
@@ -338,7 +344,7 @@ mb_process_io_thread(void *arg)
 	MB_DEBUG_SET_THREAD_NAME("proc-io");
 	DEBUG_PRINT("process", "Starting IO thread");
 
-	while (!quit) {
+	while (!io_quit) {
 
 		fd_max = 0;
 		FD_ZERO(&fds);
@@ -405,6 +411,9 @@ mb_process_io_thread(void *arg)
 		pthread_mutex_unlock(&process_list_lock);
 
 	}
+
+	DEBUG_PRINT("process", "IO thread exitting");
+
 	return NULL;
 }
 
@@ -490,10 +499,11 @@ mb_process_monitor_thread(void *arg)
 					proc->exit_status = WEXITSTATUS(status);
 					pthread_cond_broadcast(&proc->cond);
 				} else {
-					/* cleanup */
-					mb_process_free(proc);
+					DEBUG_VPRINT("process", "Freeing process %i", proc->id);
 					/* remove process from list */
 					LIST_REMOVE(proc);
+					/* cleanup */
+					mb_process_free(proc);
 				}
 
 				break;
@@ -502,6 +512,9 @@ mb_process_monitor_thread(void *arg)
 
 		pthread_mutex_unlock(&process_list_lock);
 	}
+
+	io_quit = 1;
+
 	return NULL;
 }
 
@@ -731,7 +744,12 @@ mb_process_stop(int id)
 {
 	struct mb_process *proc;
 
+	DEBUG_VPRINT("process", "Stopping process id %i", id);
+
 	if ((proc = mb_process_getbyid(id, 0)) != NULL) {
+
+		DEBUG_VPRINT("process", "Found process %i (pid=%i name='%s')",
+			id, proc->pid, proc->name);
 
 		proc->stopping = 1;
 
@@ -777,6 +795,7 @@ mb_process_stop(int id)
 		return 0;
 
 	} else {
+		LOG_VPRINT_ERROR("Process id %i not found", id);
 		errno = ENOENT;
 		return -1;
 	}
@@ -792,6 +811,9 @@ mb_process_init(void)
 	DEBUG_PRINT("process", "Initializing process monitor");
 
 	LIST_INIT(&process_list);
+
+	quit = 0;
+	io_quit = 0;
 
 	if (pthread_create(&monitor_thread, NULL, mb_process_monitor_thread, NULL) != 0) {
 		fprintf(stderr, "process: Could not start thread\n");
@@ -819,11 +841,30 @@ mb_process_shutdown(void)
 
 	DEBUG_PRINT("process", "Shutting down process monitor");
 
-	LIST_FOREACH_SAFE(struct mb_process*, proc, &process_list, {
-		mb_process_stop(proc->id);
-	})
-
+	/* set the exit flag and stop all processes */
 	quit = 1;
+	LIST_FOREACH_SAFE(struct mb_process*, proc, &process_list, {
+		if (!proc->stopping || !(proc->flags & MB_PROCESS_WAIT)) {
+			mb_process_stop(proc->id);
+		}
+	});
+
+	/* if any process remains dump them to the log */
+	if (LIST_SIZE(&process_list) > 0) {
+		DEBUG_VPRINT("process", "Remaining processes: %zd", LIST_SIZE(&process_list));
+		LIST_FOREACH(struct mb_process*, proc, &process_list) {
+			DEBUG_VPRINT("process", "Process id %i: %s pid=%i waiting=%i stopping=%i",
+				proc->id, proc->name, proc->pid,
+				(proc->flags & MB_PROCESS_WAIT) ? 1 : 0,
+				proc->stopping);
+		}
+
+	}
+
+	/* wait for threads */
+	DEBUG_PRINT("process", "Waiting for monitor threads");
 	pthread_join(monitor_thread, 0);
 	pthread_join(io_thread, 0);
+
+	DEBUG_PRINT("process", "Process monitor down");
 }
