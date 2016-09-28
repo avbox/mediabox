@@ -300,6 +300,7 @@ mb_process_force_kill(int id, void *data)
 {
 	int proc_id = *((int*) data);
 	struct mb_process *proc;
+	enum mbt_result ret = MB_TIMER_CALLBACK_RESULT_STOP;
 
 	DEBUG_VPRINT("process", "Force kill callback for process %id",
 		proc_id);
@@ -313,10 +314,8 @@ mb_process_force_kill(int id, void *data)
 			if (kill(proc->pid, SIGKILL) == -1) {
 				LOG_PRINT_ERROR("kill() regurned -1");
 			}
-
-			pthread_mutex_unlock(&process_list_lock);
-
-			return MB_TIMER_CALLBACK_RESULT_CONTINUE;
+			ret = MB_TIMER_CALLBACK_RESULT_CONTINUE;
+			break;
 		}
 	}
 
@@ -324,7 +323,7 @@ mb_process_force_kill(int id, void *data)
 
 	free(data);
 
-	return MB_TIMER_CALLBACK_RESULT_STOP;
+	return ret;
 }
 
 

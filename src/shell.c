@@ -104,6 +104,7 @@ mbs_welcomescreen(int id, void *data)
 				pango_layout_set_alignment(layout_time, PANGO_ALIGN_CENTER);
 				pango_layout_set_text(layout_time, time_string, -1);
 				pango_cairo_update_layout(context, layout_time);
+				pango_font_description_free(font_desc);
 			}
 		}
 		if ((layout_date = pango_cairo_create_layout(context)) != NULL) {

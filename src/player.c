@@ -1125,9 +1125,8 @@ mb_player_video_decode(void *arg)
 		/* decode frame */
 		if (UNLIKELY((i = avcodec_decode_video2(inst->video_codec_ctx, video_frame_nat, &finished, &inst->video_packet[inst->video_packet_read_index])) < 0)) {
 			fprintf(stderr, "player: avcodec_decode_video2() returned %i\n", i);
-		}
 
-		if (LIKELY(finished)) {
+		} else if (LIKELY(finished)) {
 			int64_t frame_pts = video_frame_nat->pts =
 				av_frame_get_best_effort_timestamp(video_frame_nat);
 
@@ -1192,7 +1191,10 @@ mb_player_video_decode(void *arg)
 				av_frame_unref(video_frame_flt);
 			}
 			av_frame_unref(video_frame_nat);
+		} else {
+			av_frame_unref(video_frame_nat);
 		}
+
 		/* free packet */
 		av_free_packet(&inst->video_packet[inst->video_packet_read_index]);
 		pthread_mutex_lock(&inst->video_decoder_lock);

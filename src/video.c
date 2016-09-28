@@ -131,6 +131,9 @@ mbv_window_settitle(struct mbv_window *window, const char *title)
 			pango_cairo_update_layout(context, layout);
 			pango_cairo_show_layout(context, layout);
 
+			/* free the layout */
+			g_object_unref(layout);
+
 			/* draw line after title */
 			cairo_set_line_width(context, 2.0);
 			cairo_move_to(context, 0, font_height + 6);
@@ -451,11 +454,15 @@ mbv_window_destroy(struct mbv_window *window)
 {
 	assert(window != NULL);
 	assert(window->native_window != NULL);
+	assert(window->content_window != NULL);
 
 	if (window->title != NULL) {
 		free((void*)window->title);
 	}
 
+	if (window->content_window != window) {
+		mbv_window_destroy(window->content_window);
+	}
 	mbv_dfb_window_destroy(window->native_window);
 	free(window);
 }

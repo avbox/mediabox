@@ -443,7 +443,7 @@ write_frames:
 				if ((frames = snd_pcm_recover(inst->pcm_handle, frames, 0)) < 0) {
 					LOG_VPRINT_ERROR("Could not recover from ALSA underrun: %s",
 						snd_strerror(frames));
-					av_frame_unref(inst->frame[inst->playback_index]);
+					av_frame_free(&inst->frame[inst->playback_index]);
 					pthread_mutex_unlock(&inst->lock);
 					goto audio_exit;
 				}
@@ -455,7 +455,7 @@ write_frames:
 		if (UNLIKELY(frames < 0)) {
 			LOG_VPRINT_ERROR("Unable to recover from ALSA underrun: %s",
 				snd_strerror(frames));
-			av_frame_unref(inst->frame[inst->playback_index]);
+			av_frame_free(&inst->frame[inst->playback_index]);
 			pthread_mutex_unlock(&inst->lock);
 			goto audio_exit;
 		}
@@ -466,7 +466,7 @@ write_frames:
 		mb_audio_stream_calcunderruntime(inst);
 
 		/* free frame */
-		av_frame_unref(inst->frame[inst->playback_index]);
+		av_frame_free(&inst->frame[inst->playback_index]);
 
 		/* update buffer state and signal decoder */
 		inst->frame_state[inst->playback_index] = 0;
@@ -485,6 +485,7 @@ audio_exit:
 
 	/* cleanup */
 	if (inst->pcm_handle != NULL) {
+		snd_pcm_hw_free(inst->pcm_handle);
 		snd_pcm_close(inst->pcm_handle);
 		inst->pcm_handle = NULL;
 	}

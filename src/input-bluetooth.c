@@ -23,6 +23,8 @@
 #include <glib.h>
 #include <gio/gio.h>
 
+#define LOG_MODULE "input-bluetooth"
+
 #include "input.h"
 #include "input-socket.h"
 #include "linkedlist.h"
@@ -245,9 +247,17 @@ mbi_bluetooth_server(void *arg)
 	struct conn_state *state = NULL;
 	fd_set fds;
 	int n;
+	pthread_attr_t attr;
 
 	MB_DEBUG_SET_THREAD_NAME("input-bluetooth");
 	DEBUG_PRINT("input-bluetooth", "Bluetooth input server starting");
+
+	if (pthread_attr_init(&attr) != 0) {
+		LOG_PRINT_ERROR("Could not initialize pthread attributes");
+		return NULL;
+	}
+
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
 	while (!server_quit) {
 		channelno = 1;
@@ -332,8 +342,9 @@ rebind:
 
 			LIST_ADD(&sockets, state);
 
-			if (pthread_create(&state->thread, NULL, &mbi_socket_connection, state) != 0) {
-				fprintf(stderr, "input-bluetooth: Could not launch connection thread\n");
+			if (pthread_create(&state->thread, &attr, &mbi_socket_connection, state) != 0) {
+				LOG_PRINT_ERROR("Could not create bluetooth socket thread");
+				LIST_REMOVE(state);
 				close(newsockfd);
 				free(state);
 				continue;
@@ -355,7 +366,7 @@ rebind:
 int
 mbi_bluetooth_init(void)
 {
-	GError *error = NULL;
+	/* GError *error = NULL; */
 	char * const bluetoothd_args[] =
 	{
 		BLUETOOTHD_BIN,
@@ -375,6 +386,7 @@ mbi_bluetooth_init(void)
 	}
 
 
+#if 0
 	main_loop = g_main_loop_new(NULL, FALSE);
 	if (main_loop == NULL) {
 		fprintf(stderr, "input-bluetooth: Could not get new main loop\n");
@@ -387,6 +399,7 @@ mbi_bluetooth_init(void)
 		fprintf(stderr, "input-bluetooth: Unable to get dbus connection\n");
 		return -1;
 	}
+#endif
 
 	/* power on bluetooth device */
 	mbi_bluetooth_poweron();
@@ -410,21 +423,21 @@ mbi_bluetooth_destroy(void)
 		mb_process_stop(bluetooth_daemon_id);
 	}
 
-	if (main_loop != NULL) {
-		DEBUG_PRINT("input-bluetooth:", "TODO: Destroy main loop");
-	}
-
 	/* close the dbus connection */
 	if (dbus_conn != NULL) {
 		g_dbus_connection_close(dbus_conn, NULL, NULL, NULL);
 		dbus_conn = NULL;
 	}
 
+	if (main_loop != NULL) {
+		g_main_loop_quit(main_loop);
+	}
+
 	/* Close all connections */
 	DEBUG_PRINT("input-bluetooth", "Closing all open sockets");
 	LIST_FOREACH(struct conn_state*, socket, &sockets) {
 		socket->quit = 1;
-		pthread_join(socket->thread, NULL);
+		/* pthread_join(socket->thread, NULL); */
 	}
 
 	server_quit = 1;

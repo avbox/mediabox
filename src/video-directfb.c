@@ -21,7 +21,6 @@ struct mbv_dfb_window
 	struct mbv_dfb_window *parent;
 	IDirectFBWindow *dfb_window;
 	IDirectFBSurface *surface;
-	IDirectFBSurface *content;
 	DFBRectangle rect;
 	cairo_t *cairo_context;
 	pthread_mutex_t cairo_lock;
@@ -214,7 +213,7 @@ mbv_dfb_window_blit_buffer(
 	static IDirectFBSurface *surface = NULL;
 
 	assert(window != NULL);
-	assert(window->content != NULL);
+	assert(window->surface != NULL);
 
 	dsc.width = width;
 	dsc.height = height;
@@ -228,7 +227,7 @@ mbv_dfb_window_blit_buffer(
 
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
 	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
-	DFBCHECK(window->content->Blit(window->content, surface, NULL, x, y));
+	DFBCHECK(window->surface->Blit(window->surface, surface, NULL, x, y));
 	surface->Release(surface);
 
 	return 0;
@@ -352,8 +351,6 @@ mbv_dfb_window_new(
 	/* set basic drawing flags */
 	DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_NOFX));
 
-	DFBCHECK(win->surface->GetSubSurface(win->surface, NULL, &win->content));
-
 	return win;
 }
 
@@ -375,20 +372,20 @@ mbv_dfb_window_cairo_begin(struct mbv_dfb_window *window)
 
 	assert(window->cairo_context == NULL);
 
-	DFBCHECK(window->content->Lock(window->content, DSLF_READ | DSLF_WRITE, &buf, &pitch));
+	DFBCHECK(window->surface->Lock(window->surface, DSLF_READ | DSLF_WRITE, &buf, &pitch));
 
 	surface = cairo_image_surface_create_for_data(buf,
 		CAIRO_FORMAT_ARGB32, window->rect.w, window->rect.h,
 		cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, window->rect.w));
 	if (surface == NULL) {
-		DFBCHECK(window->content->Unlock(window->content));
+		DFBCHECK(window->surface->Unlock(window->surface));
 		return NULL;
 	}
 
 	window->cairo_context = cairo_create(surface);
 	cairo_surface_destroy(surface);
 	if (window->cairo_context == NULL) {
-		DFBCHECK(window->content->Unlock(window->content));
+		DFBCHECK(window->surface->Unlock(window->surface));
 	}
 		
 	return window->cairo_context;
@@ -408,7 +405,7 @@ mbv_dfb_window_cairo_end(struct mbv_dfb_window *window)
 	cairo_destroy(window->cairo_context);
 	window->cairo_context = NULL;
 
-	DFBCHECK(window->content->Unlock(window->content));
+	DFBCHECK(window->surface->Unlock(window->surface));
 
 	pthread_mutex_unlock(&window->cairo_lock);
 }
@@ -452,8 +449,7 @@ mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
 
 	/* create the sub-window surface */
 	DFBRectangle rect = { x, y, width, height };
-	DFBCHECK(window->content->GetSubSurface(window->content, &rect, &inst->surface));
-	DFBCHECK(inst->surface->GetSubSurface(inst->surface, NULL, &inst->content));
+	DFBCHECK(window->surface->GetSubSurface(window->surface, &rect, &inst->surface));
 
 	return inst;
 }
@@ -521,7 +517,6 @@ mbv_dfb_window_destroy(struct mbv_dfb_window *window)
 	mbv_dfb_window_hide(window);
 
 	/* release window surfaces */
-	window->content->Release(window->content);
 	window->surface->Release(window->surface);
 
 	/* if this is not a subwindow then destroy the directfb
@@ -607,7 +602,7 @@ mbv_dfb_init(int argc, char **argv)
 
 	/* print the pixel format of the root window */
 	DFBSurfacePixelFormat pix_fmt;
-	DFBCHECK(root_window->content->GetPixelFormat(root_window->content, &pix_fmt));
+	DFBCHECK(root_window->surface->GetPixelFormat(root_window->surface, &pix_fmt));
 	DEBUG_VPRINT("video-dfb", "Root window pixel format: %s", mbv_dfb_pixfmt_tostring(pix_fmt));
 
 	/* for now one byte per pixel */
