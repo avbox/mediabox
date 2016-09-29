@@ -66,7 +66,7 @@
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_BGRA)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_VIDEO_BUFFER_FRAMES  (50)
+#define MB_VIDEO_BUFFER_FRAMES  (40)
 #define MB_VIDEO_BUFFER_PACKETS (1)
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
@@ -1268,7 +1268,7 @@ static void *
 mb_player_audio_decode(void * arg)
 {
 	int finished = 0, ret;
-	struct mbp* inst = (struct mbp*) arg;
+	struct mbp * const inst = (struct mbp * const) arg;
 	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
 	AVCodecContext *audio_codec_ctx = NULL;
 	AVFrame *audio_frame_nat = NULL;
@@ -1279,7 +1279,6 @@ mb_player_audio_decode(void * arg)
 	AVPacket packet, packet1;
 
 	MB_DEBUG_SET_THREAD_NAME("audio_decoder");
-
 
 	assert(inst != NULL);
 	assert(inst->audio_decoder_quit == 0);
@@ -1297,24 +1296,19 @@ mb_player_audio_decode(void * arg)
 	}
 
 	/* allocate audio frames */
-	audio_frame_nat = av_frame_alloc(); /* native */
-	if (audio_frame_nat == NULL) {
-		fprintf(stderr, "player: Could not allocate audio frames\n");
-		goto decoder_exit;
-	}
-
+	audio_frame_nat = av_frame_alloc();
 	audio_frame = av_frame_alloc();
-	if (audio_frame == NULL) {
+	if (audio_frame_nat == NULL || audio_frame == NULL) {
+		LOG_PRINT_ERROR("Could not allocate audio frames");
 		goto decoder_exit;
 	}
 
 	/* initialize audio filter graph */
-	fprintf(stderr, "player: audio_filters: %s\n",
-		audio_filters);
+	DEBUG_VPRINT("player", "Audio filters: %s", audio_filters);
 	if (mb_player_initaudiofilters(inst->fmt_ctx, audio_codec_ctx,
 		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
 		audio_filters, inst->audio_stream_index) < 0) {
-		fprintf(stderr, "player: Could not init filter graph!\n");
+		LOG_PRINT_ERROR("Could not init filter graph!");
 		goto decoder_exit;
 	}
 
@@ -1357,7 +1351,7 @@ mb_player_audio_decode(void * arg)
 			ret = avcodec_decode_audio4(audio_codec_ctx, audio_frame_nat,
 				&finished, &packet1);
 			if (UNLIKELY(ret < 0)) {
-				av_log(NULL, AV_LOG_ERROR, "Error decoding audio\n");
+				LOG_VPRINT_ERROR("Error decoding audio (ret=%i)", ret);
 				continue;
 			}
 			packet1.size -= ret;
@@ -1370,7 +1364,7 @@ mb_player_audio_decode(void * arg)
 				/* push the audio data from decoded frame into the filtergraph */
 				if (UNLIKELY(av_buffersrc_add_frame_flags(audio_buffersrc_ctx,
 					audio_frame_nat, 0) < 0)) {
-					av_log(NULL, AV_LOG_ERROR, "Error while feeding the audio filtergraph\n");
+					LOG_PRINT_ERROR("Error while feeding the audio filtergraph");
 					break;
 				}
 
@@ -1387,9 +1381,9 @@ mb_player_audio_decode(void * arg)
 						goto decoder_exit;
 					}
 
-					mb_audio_stream_write(inst->audio_stream, audio_frame,
-						audio_buffersink_ctx->inputs[0]->time_base);
-
+					/* write frame to audio stream and free it */
+					mb_audio_stream_write(inst->audio_stream, audio_frame->data[0],
+						audio_frame->nb_samples);
 					av_frame_unref(audio_frame);
 				}
 			}

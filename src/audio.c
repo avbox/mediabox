@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdint.h>
 #include <assert.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -12,21 +13,19 @@
 #include "linkedlist.h"
 #include "compiler.h"
 
-/* we don't need all this and when we're done here
- * we won't need any of them */
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libswscale/swscale.h>
-#include <libavfilter/avfiltergraph.h>
-#include <libavfilter/avcodec.h>
-#include <libavfilter/buffersink.h>
-#include <libavfilter/buffersrc.h>
-#include <libavutil/opt.h>
+
+/**
+ * Structure for storing audio packets.
+ */
+LISTABLE_STRUCT(mb_audio_packet,
+	size_t n_samples;
+	uint8_t * data;
+);
 
 
-#define MB_AUDIO_BUFFER_FRAMES  (160)
-
-
+/**
+ * Audio stream structure.
+ */
 struct mb_audio_stream
 {
 	snd_pcm_t *pcm_handle;
@@ -44,15 +43,25 @@ struct mb_audio_stream
 	int64_t underrun_time;
 	snd_pcm_uframes_t buffer_size;
 	unsigned int framerate;
-
-	/* we want to get rid of these and store incoming frames
-	 * on a dynamic fifo buffer */
-	AVFrame *frame[MB_AUDIO_BUFFER_FRAMES];
-	AVRational frame_timebase[MB_AUDIO_BUFFER_FRAMES];
-	char frame_state[MB_AUDIO_BUFFER_FRAMES];
-	int playback_index;
-	int write_index;
+	LIST packets;
 };
+
+
+/**
+ * Flush the queue
+ */
+static void
+mb_audio_stream_flushqueue(struct mb_audio_stream * const stream)
+{
+	struct mb_audio_packet *packet;
+	pthread_mutex_lock(&stream->queue_lock);
+	LIST_FOREACH_SAFE(struct mb_audio_packet *, packet, &stream->packets, {
+		LIST_REMOVE(packet);
+		ATOMIC_DEC(&stream->frames);
+		free(packet);
+	});
+	pthread_mutex_unlock(&stream->queue_lock);
+}
 
 
 /**
@@ -63,19 +72,7 @@ mb_audio_stream_flush(struct mb_audio_stream * const inst)
 {
 	/* mb_player_flushaudio */
 	pthread_mutex_lock(&inst->lock);
-	while (!inst->quit) {
-		/* first drain the decoded frames buffer */
-		if (!inst->quit && (inst->frame_state[inst->playback_index] != 1)) {
-			break;
-		}
-
-		/* free the frame */
-		av_frame_free(&inst->frame[inst->playback_index]);
-		inst->frame_state[inst->playback_index] = 0;
-		inst->playback_index++;
-		inst->playback_index %= MB_AUDIO_BUFFER_FRAMES;
-		__sync_fetch_and_sub(&inst->frames, 1);
-	}
+	mb_audio_stream_flushqueue(inst);
 	pthread_cond_signal(&inst->wake);
 	pthread_mutex_unlock(&inst->lock);
 }
@@ -174,7 +171,7 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 
 	/* move the clock up to what it should be after the ALSA buffer is drained
 	 * and drain the buffer */
-	inst->clock_offset += ((1000 * 1000) / inst->framerate) * (inst->buffer_size - avail);
+	inst->clock_offset += ((1000L * 1000L) / inst->framerate) * (inst->buffer_size - avail);
 	snd_pcm_drain(inst->pcm_handle);
 
 	assert(inst->clock_offset > 0);
@@ -303,6 +300,7 @@ mb_audio_stream_io(void *arg)
 {
 	int ret;
 	struct mb_audio_stream * const inst = (struct mb_audio_stream * const) arg;
+	struct mb_audio_packet * packet;
 	const char *device = "default";
 	unsigned int period_usecs = 10;
 	int dir;
@@ -412,24 +410,30 @@ mb_audio_stream_io(void *arg)
 
 		pthread_mutex_lock(&inst->lock);
 
-		/* if there's no frame ready we must wait */
-		if (UNLIKELY(inst->frame_state[inst->playback_index] != 1) || inst->paused) {
+		/* sleep if there are no packets or we're paused */
+		if (LIST_EMPTY(&inst->packets) || inst->paused) {
 			if (inst->quit) {
 				pthread_mutex_unlock(&inst->lock);
 				continue;
 			}
-			if (LIKELY(inst->frame_state[inst->playback_index] != 1) || inst->paused) {
-				DEBUG_PRINT("audio", "Audio stream stalled");
-				pthread_cond_wait(&inst->wake, &inst->lock);
-				pthread_mutex_unlock(&inst->lock);
-				continue;
-			}
+			pthread_cond_wait(&inst->wake, &inst->lock);
+			pthread_mutex_unlock(&inst->lock);
+			continue;
 		}
+
+		/* get the next packet */
+		packet = LIST_TAIL(struct mb_audio_packet*, &inst->packets);
+		assert(packet != NULL);
+
+		/* remove the packet from the queue */
+		pthread_mutex_lock(&inst->queue_lock);
+		LIST_REMOVE(packet);
+		pthread_mutex_unlock(&inst->queue_lock);
+		ATOMIC_DEC(&inst->frames);
 
 write_frames:
 		/* play the frame */
-		frames = snd_pcm_writei(inst->pcm_handle, inst->frame[inst->playback_index]->data[0],
-			inst->frame[inst->playback_index]->nb_samples);
+		frames = snd_pcm_writei(inst->pcm_handle, packet->data, packet->n_samples);
 		if (UNLIKELY(frames < 0)) {
 			/* dump the stream status */
 			mb_audio_stream_dumpstatus(inst);
@@ -443,7 +447,7 @@ write_frames:
 				if ((frames = snd_pcm_recover(inst->pcm_handle, frames, 0)) < 0) {
 					LOG_VPRINT_ERROR("Could not recover from ALSA underrun: %s",
 						snd_strerror(frames));
-					av_frame_free(&inst->frame[inst->playback_index]);
+					free(packet);
 					pthread_mutex_unlock(&inst->lock);
 					goto audio_exit;
 				}
@@ -455,7 +459,7 @@ write_frames:
 		if (UNLIKELY(frames < 0)) {
 			LOG_VPRINT_ERROR("Unable to recover from ALSA underrun: %s",
 				snd_strerror(frames));
-			av_frame_free(&inst->frame[inst->playback_index]);
+			free(packet);
 			pthread_mutex_unlock(&inst->lock);
 			goto audio_exit;
 		}
@@ -465,19 +469,11 @@ write_frames:
 		/* calculate the next underrun time */
 		mb_audio_stream_calcunderruntime(inst);
 
-		/* free frame */
-		av_frame_free(&inst->frame[inst->playback_index]);
-
-		/* update buffer state and signal decoder */
-		inst->frame_state[inst->playback_index] = 0;
-		pthread_mutex_lock(&inst->queue_lock);
-		pthread_cond_signal(&inst->wake);
-		pthread_mutex_unlock(&inst->queue_lock);
+		/* unlock stream */
 		pthread_mutex_unlock(&inst->lock);
 
-		inst->playback_index = (inst->playback_index + 1) % MB_AUDIO_BUFFER_FRAMES;
-
-		ATOMIC_DEC(&inst->frames);
+		/* free packet */
+		free(packet);
 	}
 
 audio_exit:
@@ -489,6 +485,9 @@ audio_exit:
 		snd_pcm_close(inst->pcm_handle);
 		inst->pcm_handle = NULL;
 	}
+
+	/* free any remaining packets */
+	mb_audio_stream_flushqueue(inst);
 
 	inst->playback_running = 0;
 
@@ -503,47 +502,37 @@ audio_exit:
 
 /**
  * Writes an audio frame to the stream.
- *
- * NOTE: This function is NOT thread safe!
- *
- * TODO: Implement this using plain buffers (not AVFrame). Problem
- * is we're using the pty.
  */
 int
-mb_audio_stream_write(struct mb_audio_stream *stream, AVFrame* frame, AVRational timebase)
+mb_audio_stream_write(struct mb_audio_stream * const stream,
+	const uint8_t * const data, const size_t n_samples)
 {
-	while (!stream->quit) {
-		/* if the video output has not finished we must wait */
-		if (UNLIKELY(stream->frame_state[stream->write_index] != 0)) {
-			pthread_mutex_lock(&stream->queue_lock);
-			if (UNLIKELY(stream->frame_state[stream->write_index] != 0)) {
-				if (UNLIKELY(stream->quit)) {
-					pthread_mutex_unlock(&stream->queue_lock);
-					continue;
-				}
-				if (LIKELY(stream->frame_state[stream->write_index] != 0)) {
-					pthread_cond_wait(&stream->wake, &stream->queue_lock);
-				}
-			}
-			pthread_mutex_unlock(&stream->queue_lock);
-			continue;
-		}
-		break;
+	struct mb_audio_packet *packet;
+	const int sz = n_samples * 4;	/* assumes 2 channel stereo */
+
+	assert(stream != NULL);
+
+	if (n_samples == 0) {
+		return 0;
 	}
 
-	stream->frame[stream->write_index] = av_frame_clone(frame);
-	stream->frame_timebase[stream->write_index] = timebase;
+	/* allocate memory for packet */
+	if ((packet = malloc(sizeof(struct mb_audio_packet) + sz)) == NULL) {
+		LOG_PRINT_ERROR("Could not allocate packet");
+		errno = ENOMEM;
+		return -1;
+	}
 
-	/* update the buffer index and signal renderer thread */
+	/* copy samples */
+	packet->n_samples = n_samples;
+	packet->data = (uint8_t*) (packet + 1);
+	memcpy(packet->data, data, sz);
+
+	/* add packet to queue */
 	pthread_mutex_lock(&stream->queue_lock);
-	stream->frame_state[stream->write_index] = 1;
-	pthread_cond_signal(&stream->wake);
-	pthread_mutex_unlock(&stream->queue_lock);
-
-	stream->write_index++;
-	stream->write_index %= MB_AUDIO_BUFFER_FRAMES;
-
+	LIST_ADD(&stream->packets, packet);
 	ATOMIC_INC(&stream->frames);
+	pthread_mutex_unlock(&stream->queue_lock);
 
 	return 0;
 }
@@ -626,6 +615,7 @@ mb_audio_stream_new(void)
 
 	/* initialize stream object */
 	memset(inst, 0, sizeof(struct mb_audio_stream));
+	LIST_INIT(&inst->packets);
 
 	/* initialize pthread primitives */
 	if (pthread_mutex_init(&inst->lock, NULL) != 0 ||
@@ -646,8 +636,6 @@ mb_audio_stream_new(void)
 void
 mb_audio_stream_destroy(struct mb_audio_stream * const stream)
 {
-	int i;
-
 	/* wait for IO thread */
 	pthread_mutex_lock(&stream->lock);
 	if (stream->playback_running) {
@@ -660,12 +648,8 @@ mb_audio_stream_destroy(struct mb_audio_stream * const stream)
 	}
 	pthread_mutex_unlock(&stream->lock);
 
-	/* free audio frames */
-	for (i = 0; i < MB_AUDIO_BUFFER_FRAMES; i++) {
-		if (stream->frame_state[i] == 1) {
-			av_frame_free(&stream->frame[i]);
-		}
-	}
+	/* free any remaining packets */
+	mb_audio_stream_flushqueue(stream);
 
 	/* free stream object */
 	free(stream);

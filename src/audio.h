@@ -1,7 +1,10 @@
 #ifndef __MB_AUDIO_H__
 #define __MB_AUDIO_H__
 
-/* Opaque stream structure */
+
+/**
+ * Opaque stream structure
+ */
 struct mb_audio_stream;
 
 
@@ -38,12 +41,10 @@ mb_audio_stream_resume(struct mb_audio_stream * const inst);
 
 /**
  * Writes an audio frame to the stream.
- *
- * TODO: Implement this using plain buffers (not AVFrame). Problem
- * is we're using the pty.
  */
 int
-mb_audio_stream_write(struct mb_audio_stream * const stream, AVFrame * frame, AVRational timebase);
+mb_audio_stream_write(struct mb_audio_stream * const stream,
+	const uint8_t * const data, const size_t n_samples);
 
 
 /**
