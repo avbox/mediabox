@@ -40,8 +40,6 @@ struct mbv_dfb_window
 };
 
 
-static DFBRectangle* rects[10];
-static uint8_t *screen_mask = NULL;
 
 
 IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
@@ -57,6 +55,9 @@ static char *fb_mem = NULL;
 static size_t screensize;
 static struct fb_fix_screeninfo finfo;
 static struct fb_var_screeninfo vinfo;
+static uint8_t *screen_mask = NULL;
+static DFBRectangle* rects[10];
+static int n_rects = 0;
 
 
 static struct mbv_dfb_window *root_window = NULL;
@@ -237,6 +238,7 @@ mbv_dfb_addwindowmask(struct mbv_dfb_window *window)
 			break;
 		}
 	}
+	ATOMIC_INC(&n_rects);
 	mbv_dfb_regeneratemask();
 }
 
@@ -257,6 +259,7 @@ mbv_dfb_removewindowmask(struct mbv_dfb_window *window)
 		}
 	}
 
+	ATOMIC_DEC(&n_rects);
 	mbv_dfb_regeneratemask();
 }
 
@@ -290,7 +293,6 @@ mbv_dfb_window_blit_buffer(
 		int x_pos, y_pos, pixelsz;
 		unsigned int screen = 0;
 		void *fb_buf;
-		uint8_t * const m = (uint8_t*) screen_mask;
 
 		assert(x == 0 && y == 0);
 
@@ -303,13 +305,17 @@ mbv_dfb_window_blit_buffer(
 		(void) ioctl(fbdev_fd, FBIO_WAITFORVSYNC, &screen);
 #endif
 
-		for (y_pos = 0; y_pos < vinfo.yres; y_pos++) {
-			for (x_pos = 0; x_pos < vinfo.xres; x_pos++) {
-				if (LIKELY(!m[(width * y_pos) + x_pos])) {
-					long location = (x_pos + vinfo.xoffset) * pixelsz +
-						(y_pos + vinfo.yoffset) * finfo.line_length;
-					uint32_t *ppix = (uint32_t*) buf;
-					*((uint32_t*)(fb_buf + location)) = *(ppix + (((width * y_pos) + x_pos)));
+		if (LIKELY(n_rects == 0)) {
+			memcpy(fb_buf, buf, screensize);
+		} else {
+			for (y_pos = 0; y_pos < vinfo.yres; y_pos++) {
+				for (x_pos = 0; x_pos < vinfo.xres; x_pos++) {
+					if (LIKELY(!screen_mask[(width * y_pos) + x_pos])) {
+						long location = (x_pos + vinfo.xoffset) * pixelsz +
+							(y_pos + vinfo.yoffset) * finfo.line_length;
+						uint32_t *ppix = (uint32_t*) buf;
+						*((uint32_t*)(fb_buf + location)) = *(ppix + (((width * y_pos) + x_pos)));
+					}
 				}
 			}
 		}
