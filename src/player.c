@@ -12,7 +12,6 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <time.h>
-
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -29,15 +28,7 @@
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
-
 #include <pango/pangocairo.h>
-
-
-/* for direct rendering */
-#include <linux/fb.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
 
 #define LOG_MODULE "player"
 
@@ -71,13 +62,7 @@
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
 #define MB_DECODER_PRINT_FPS
-/* #define ENABLE_DOUBLE_BUFFERING (1) */
 
-/* render directly to fbdev */
-#define MB_FBDEV_RENDERER
-
-#define MB_ALSA_BUFFER_SIZE	(32 * 1024)
-#define MB_ALSA_LATENCY		(500000)
 
 /**
  * Player structure.
@@ -99,8 +84,6 @@ struct mbp
 	int seek_result;
 	uint8_t *buf;
 	int bufsz;
-	uint8_t *render_mask;
-	int use_fbdev;
 	struct timespec systemreftime;
 	int64_t lasttime;
 	int64_t systemtimeoffset;
@@ -128,9 +111,6 @@ struct mbp
 	AVPacket video_packet[MB_VIDEO_BUFFER_PACKETS];
 	char video_packet_state[MB_VIDEO_BUFFER_PACKETS];
 	void *video_last_frame;
-#ifdef ENABLE_DOUBLE_BUFFERING
-	void *video_buffer;
-#endif
 	uint8_t *frame_data[MB_VIDEO_BUFFER_FRAMES];
 	char frame_state[MB_VIDEO_BUFFER_FRAMES];
 	int64_t frame_pts[MB_VIDEO_BUFFER_FRAMES];
@@ -154,7 +134,6 @@ struct mbp
 	pthread_cond_t video_output_signal;
 	pthread_mutex_t video_output_lock;
 	pthread_t video_output_thread;
-
 	pthread_cond_t stream_signal;
 	pthread_mutex_t stream_lock;
 	pthread_t stream_thread;
@@ -396,46 +375,6 @@ mb_player_getsystemtime(struct mbp *inst)
 }
 
 
-void *
-mbv_dfb_getscreenmask();
-
-
-static inline void
-mb_player_fbdev_render(struct mbp *inst,
-	int fd, struct fb_var_screeninfo *vinfo,
-	struct fb_fix_screeninfo *finfo, void *fb_mem, void *buf)
-{
-	int x, y, pixelsz;
-	unsigned int screen = 0;
-	void *fb_buf;
-	uint8_t *m = (uint8_t*) mbv_dfb_getscreenmask();
-
-	pixelsz = vinfo->bits_per_pixel / CHAR_BIT;
-	
-#ifdef ENABLE_DOUBLE_BUFFERING
-	fb_buf = inst->video_buffer;
-#else
-	fb_buf = fb_mem;
-	(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
-#endif
-
-	for (y = 0; y < vinfo->yres; y++) {
-		for (x = 0; x < vinfo->xres; x++) {
-			if (LIKELY(!m[(inst->width * y) + x])) {
-				long location = (x + vinfo->xoffset) * pixelsz + (y + vinfo->yoffset) * finfo->line_length;
-				uint32_t *ppix = (uint32_t*) buf;
-				*((uint32_t*)(fb_buf + location)) = *(ppix + (((inst->width * y) + x)));
-			}
-		}
-	}
-
-#ifdef ENABLE_DOUBLE_BUFFERING
-	(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
-	memcpy(fb_mem, inst->video_buffer, inst->bufsz * sizeof(uint8_t));
-#endif
-}
-
-
 static inline void
 mb_player_postproc(struct mbp *inst, void *buf)
 {
@@ -487,13 +426,6 @@ mb_player_video(void *arg)
 	struct timespec new_tp, last_tp, elapsed_tp;
 	int frames = 0, fps = 0;
 #endif
-#ifdef MB_FBDEV_RENDERER
-	int fd = -1;
-	long screensize;
-	struct fb_fix_screeninfo finfo;
-	struct fb_var_screeninfo vinfo;
-	void *fb_mem = NULL;
-#endif
 
 	MB_DEBUG_SET_THREAD_NAME("video_playback");
 	DEBUG_PRINT("player", "Video renderer started");
@@ -501,33 +433,6 @@ mb_player_video(void *arg)
 	assert(inst != NULL);
 
 	inst->video_playback_running = 1;
-
-	/* initialize framebuffer for direct rendering */
-	if (inst->use_fbdev) {
-		mb_su_gainroot();
-		if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
-			if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
-				ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1) {
-				fprintf(stderr, "player: ioctl() failed. "
-					"Direct rendering disabled\n");
-				inst->use_fbdev = 0;
-				close(fd);
-			} else {
-				screensize = vinfo.yres_virtual * finfo.line_length;
-				fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
-					MAP_SHARED, fd, (off_t) 0);
-				if (fb_mem == MAP_FAILED) {
-					fprintf(stderr, "player: mmap() failed. "
-						"Direct rendering disabled\n");
-					inst->use_fbdev = 0;
-					close(fd);
-				}
-			}
-		} else {
-			inst->use_fbdev = 0;
-		}
-		mb_su_droproot();
-	}
 
 	DEBUG_PRINT("player", "Video renderer ready");
 
@@ -649,13 +554,8 @@ recalc:
 			}
 		}
 
-
-		if (LIKELY(inst->use_fbdev)) {
-			mb_player_fbdev_render(inst, fd, &vinfo, &finfo, fb_mem, buf);
-		} else  {
-			/* blit the frame through window manager */
-			mbv_window_blit_buffer(inst->window, buf, inst->width, inst->height, 0, 0);
-		}
+		/* blit the frame to window  */
+		mbv_window_blit_buffer(inst->window, buf, inst->width, inst->height, 0, 0);
 
 #ifdef MB_DECODER_PRINT_FPS
 		/* calculate fps */
@@ -689,16 +589,7 @@ video_exit:
 
 	/* clear screen */
 	memset(inst->frame_data[0], 0, inst->bufsz);
-	if (inst->use_fbdev) {
-		mb_player_fbdev_render(inst, fd, &vinfo, &finfo, fb_mem, inst->frame_data[0]);
-	} else {
-		mbv_window_blit_buffer(inst->window, inst->frame_data[0], inst->width, inst->height, 0, 0);
-	}
-
-	/* denitialize fbdev */
-	if (inst->use_fbdev) {
-		close(fd);
-	}
+	mbv_window_blit_buffer(inst->window, inst->frame_data[0], inst->width, inst->height, 0, 0);
 
 	inst->video_playback_running = 0;
 
@@ -2186,85 +2077,6 @@ mb_player_stop(struct mbp* inst)
 
 
 /**
- * mb_player_checkfbdev() -- Checks if there's a framebuffer device suitable
- * for direct rendering
- */
-static void
-mb_player_checkfbdev(struct mbp *inst)
-{
-	int fd;
-
-	assert(inst != NULL);
-	assert(inst->window != NULL);
-
-	if (!mbv_isfbdev()) {
-		fprintf(stderr, "player: WARNING!!: Direct rendering disabled\n");
-		inst->use_fbdev = 0;
-		return;
-	}
-
-	DEBUG_PRINT("player", "Initializing /dev/fb0");
-
-	/* try to gain root */
-	if (mb_su_gainroot() == -1) {
-		fprintf(stderr, "player: Cannot gain root rights!\n");
-	}
-
-	if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
-		struct fb_fix_screeninfo finfo;
-		struct fb_var_screeninfo vinfo;
-		void *fb_mem = NULL;
-		long screensize;
-
-		/* get screeninfo */
-		if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
-			ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1)
-		{
-			fprintf(stderr, "player: mb_player_checkfbdev(): ioctl() failed\n");
-			inst->use_fbdev = 0;
-			goto end;
-		}
-
-		/* dump some screen info */
-		DEBUG_VPRINT("player", "fbdev: bpp=%i", vinfo.bits_per_pixel);
-		DEBUG_VPRINT("player", "fbdev: type=%i", finfo.type);
-		DEBUG_VPRINT("player", "fbdev: visual=%i", finfo.visual);
-		DEBUG_VPRINT("player", "fbdev: FOURCC (grayscale): '%c%c%c%c'",
-			((char*)&vinfo.grayscale)[0], ((char*)&vinfo.grayscale)[1],
-			((char*)&vinfo.grayscale)[2], ((char*)&vinfo.grayscale)[3]);
-		DEBUG_VPRINT("player", "fbdev: xoffset=%i yoffset=%i r=%i g=%i b=%i"
-			"player: r=%i g=%i b=%i\n",
-			vinfo.xoffset, vinfo.yoffset,
-			vinfo.red.offset, vinfo.green.offset, vinfo.blue.offset,
-			vinfo.red.length, vinfo.green.length, vinfo.blue.length);
-
-		/* try to mmap video memory */
-		screensize = vinfo.yres_virtual * finfo.line_length;
-		fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
-			MAP_SHARED, fd, (off_t) 0);
-		if (fb_mem == MAP_FAILED) {
-			fprintf(stderr, "player: mmap() failed\n");
-			inst->use_fbdev = 0;
-			close(fd);
-			goto end;
-		}
-
-		/* framebuffer device is good */
-		inst->use_fbdev = 1;
-
-		/* unmap memory and cleanup */
-		munmap(fb_mem, screensize);
-		close(fd);
-
-	} else {
-		inst->use_fbdev = 0;
-	}
-end:
-	mb_su_droproot();
-}
-
-
-/**
  * mb_player_init() -- Create a new player object.
  */
 struct mbp*
@@ -2303,7 +2115,6 @@ mb_player_new(struct mbv_window *window)
 	}
 
 	inst->window = window;
-	inst->use_fbdev = 1;
 	inst->video_stream_index = -1;
 	inst->status = MB_PLAYER_STATUS_READY;
 	inst->status_notification_fd = -1;
@@ -2327,10 +2138,6 @@ mb_player_new(struct mbv_window *window)
 		free(inst);
 		return NULL;
 	}
-
-	/* check if the framebuffer device is usable for
-	 * direct rendering */
-	mb_player_checkfbdev(inst);
 
 	return inst;
 }

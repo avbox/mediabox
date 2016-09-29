@@ -8,8 +8,19 @@
 #include <directfb_windows.h>
 #include <cairo/cairo.h>
 
+/* for direct rendering */
+#include <linux/fb.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+
+#define LOG_MODULE "video-dfb"
+
 #include "debug.h"
+#include "log.h"
+#include "compiler.h"
 #include "video.h"
+#include "su.h"
 
 /* #define DEBUG_MEMORY */
 #define DEFAULT_OPACITY     (MBV_DEFAULT_OPACITY)
@@ -37,7 +48,15 @@ IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
 static IDirectFBDisplayLayer *layer = NULL;
 static int screen_width = 0;
 static int screen_height = 0;
+
+
+/* for direct rendering */
 static int is_fbdev = 0;
+static int fbdev_fd = -1;
+static char *fb_mem = NULL;
+static size_t screensize;
+static struct fb_fix_screeninfo finfo;
+static struct fb_var_screeninfo vinfo;
 
 
 static struct mbv_dfb_window *root_window = NULL;
@@ -96,6 +115,76 @@ mbv_dfb_isfbdev(void)
 
 
 /**
+ * mb_player_checkfbdev() -- Checks if there's a framebuffer device suitable
+ * for direct rendering
+ */
+static void
+mbv_dfb_checkfbdev(void)
+{
+	int fd;
+
+	DEBUG_PRINT("player", "Initializing /dev/fb0");
+
+	/* try to gain root */
+	if (mb_su_gainroot() == -1) {
+		fprintf(stderr, "player: Cannot gain root rights!\n");
+	}
+
+	if ((fd = open("/dev/fb0", O_RDWR)) != -1) {
+		struct fb_fix_screeninfo finfo;
+		struct fb_var_screeninfo vinfo;
+		void *fb_mem = NULL;
+		long screensize;
+
+		/* get screeninfo */
+		if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
+			ioctl(fd, FBIOGET_FSCREENINFO, &finfo) == -1)
+		{
+			fprintf(stderr, "player: mb_player_checkfbdev(): ioctl() failed\n");
+			is_fbdev = 0;
+			goto end;
+		}
+
+		/* dump some screen info */
+		DEBUG_VPRINT("player", "fbdev: bpp=%i", vinfo.bits_per_pixel);
+		DEBUG_VPRINT("player", "fbdev: type=%i", finfo.type);
+		DEBUG_VPRINT("player", "fbdev: visual=%i", finfo.visual);
+		DEBUG_VPRINT("player", "fbdev: FOURCC (grayscale): '%c%c%c%c'",
+			((char*)&vinfo.grayscale)[0], ((char*)&vinfo.grayscale)[1],
+			((char*)&vinfo.grayscale)[2], ((char*)&vinfo.grayscale)[3]);
+		DEBUG_VPRINT("player", "fbdev: xoffset=%i yoffset=%i r=%i g=%i b=%i"
+			"player: r=%i g=%i b=%i\n",
+			vinfo.xoffset, vinfo.yoffset,
+			vinfo.red.offset, vinfo.green.offset, vinfo.blue.offset,
+			vinfo.red.length, vinfo.green.length, vinfo.blue.length);
+
+		/* try to mmap video memory */
+		screensize = vinfo.yres_virtual * finfo.line_length;
+		fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
+			MAP_SHARED, fd, (off_t) 0);
+		if (fb_mem == MAP_FAILED) {
+			fprintf(stderr, "player: mmap() failed\n");
+			is_fbdev = 0;
+			close(fd);
+			goto end;
+		}
+
+		/* framebuffer device is good */
+		is_fbdev = 1;
+
+		/* unmap memory and cleanup */
+		munmap(fb_mem, screensize);
+		close(fd);
+
+	} else {
+		is_fbdev = 0;
+	}
+end:
+	mb_su_droproot();
+}
+
+
+/**
  * mbv_dfb_getscreensize() -- Gets the screen width and height
  */
 void
@@ -103,18 +192,6 @@ mbv_dfb_getscreensize(int *w, int *h)
 {
 	*w = screen_width;
 	*h = screen_height;
-}
-
-
-/**
- * mbv_dfb_getscreenmask() -- Gets a pointer to the screen mask.
- * Please see the description of mbv_dfb_regeneratemask() for more
- * details
- */
-void *
-mbv_dfb_getscreenmask(void *buf)
-{
-	return (void *) screen_mask;
 }
 
 
@@ -207,28 +284,63 @@ mbv_dfb_window_isvisible(struct mbv_dfb_window *window)
 int
 mbv_dfb_window_blit_buffer(
 	struct mbv_dfb_window *window,
-	void *buf, int width, int height, int x, int y)
+	void *buf, int width, int height, const int x, const int y)
 {
-	DFBSurfaceDescription dsc;
-	static IDirectFBSurface *surface = NULL;
+	if (LIKELY(is_fbdev && window == root_window)) {
+		int x_pos, y_pos, pixelsz;
+		unsigned int screen = 0;
+		void *fb_buf;
+		uint8_t * const m = (uint8_t*) screen_mask;
 
-	assert(window != NULL);
-	assert(window->surface != NULL);
+		assert(x == 0 && y == 0);
 
-	dsc.width = width;
-	dsc.height = height;
-	dsc.flags = DSDESC_HEIGHT | DSDESC_WIDTH | DSDESC_PREALLOCATED | DSDESC_PIXELFORMAT;
-	dsc.caps = DSCAPS_NONE;
-	dsc.pixelformat = DSPF_RGB32;
-	dsc.preallocated[0].data = buf;
-	dsc.preallocated[0].pitch = width * 4;
-	dsc.preallocated[1].data = NULL;
-	dsc.preallocated[1].pitch = 0;
+		pixelsz = vinfo.bits_per_pixel / CHAR_BIT;
 
-	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
-	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
-	DFBCHECK(window->surface->Blit(window->surface, surface, NULL, x, y));
-	surface->Release(surface);
+#ifdef ENABLE_DOUBLE_BUFFERING
+		fb_buf = inst->video_buffer;
+#else
+		fb_buf = fb_mem;
+		(void) ioctl(fbdev_fd, FBIO_WAITFORVSYNC, &screen);
+#endif
+
+		for (y_pos = 0; y_pos < vinfo.yres; y_pos++) {
+			for (x_pos = 0; x_pos < vinfo.xres; x_pos++) {
+				if (LIKELY(!m[(width * y_pos) + x_pos])) {
+					long location = (x_pos + vinfo.xoffset) * pixelsz +
+						(y_pos + vinfo.yoffset) * finfo.line_length;
+					uint32_t *ppix = (uint32_t*) buf;
+					*((uint32_t*)(fb_buf + location)) = *(ppix + (((width * y_pos) + x_pos)));
+				}
+			}
+		}
+
+#ifdef ENABLE_DOUBLE_BUFFERING
+		(void) ioctl(fd, FBIO_WAITFORVSYNC, &screen);
+		memcpy(fb_mem, inst->video_buffer, inst->bufsz * sizeof(uint8_t));
+#endif
+
+	} else {
+		DFBSurfaceDescription dsc;
+		static IDirectFBSurface *surface = NULL;
+
+		assert(window != NULL);
+		assert(window->surface != NULL);
+
+		dsc.width = width;
+		dsc.height = height;
+		dsc.flags = DSDESC_HEIGHT | DSDESC_WIDTH | DSDESC_PREALLOCATED | DSDESC_PIXELFORMAT;
+		dsc.caps = DSCAPS_NONE;
+		dsc.pixelformat = DSPF_RGB32;
+		dsc.preallocated[0].data = buf;
+		dsc.preallocated[0].pitch = width * 4;
+		dsc.preallocated[1].data = NULL;
+		dsc.preallocated[1].pitch = 0;
+
+		DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
+		DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
+		DFBCHECK(window->surface->Blit(window->surface, surface, NULL, x, y));
+		surface->Release(surface);
+	}
 
 	return 0;
 }
@@ -626,7 +738,39 @@ mbv_dfb_init(int argc, char **argv)
 			fprintf(stderr, "mbv: Could not create autoflip thread\n");
 			abort();
 		}
+	} else {
+		mbv_dfb_checkfbdev();
 	}
+	if (is_fbdev) {
+		/* initialize framebuffer for direct rendering */
+		mb_su_gainroot();
+		if ((fbdev_fd = open("/dev/fb0", O_RDWR)) != -1) {
+			if (ioctl(fbdev_fd, FBIOGET_VSCREENINFO, &vinfo) == -1 ||
+				ioctl(fbdev_fd, FBIOGET_FSCREENINFO, &finfo) == -1) {
+				LOG_VPRINT_ERROR("Direct rendering disabled: %s", strerror(errno));
+				is_fbdev = 0;
+				close(fbdev_fd);
+				fbdev_fd = -1;
+			} else {
+				screensize = vinfo.yres_virtual * finfo.line_length;
+				fb_mem = mmap(0, screensize, PROT_READ | PROT_WRITE,
+					MAP_SHARED, fbdev_fd, (off_t) 0);
+				if (fb_mem == MAP_FAILED) {
+					LOG_VPRINT_ERROR("Direct rendering disabled: %s",
+						strerror(errno));
+					is_fbdev = 0;
+					close(fbdev_fd);
+					fbdev_fd = -1;
+					fb_mem = NULL;
+				}
+			}
+		} else {
+			LOG_VPRINT_ERROR("Direct rendering disabled: %s", strerror(errno));
+			is_fbdev = 0;
+		}
+		mb_su_droproot();
+	}
+
 	return root_window;
 }
 
@@ -640,6 +784,11 @@ mbv_dfb_destroy()
 	if (!is_fbdev) {
 		root_window_flipper_exit = 1;
 		pthread_join(root_window_flipper, NULL);
+	} else {
+		assert(fb_mem != NULL);
+		assert(fbdev_fd != -1);
+		munmap(fb_mem, screensize);
+		close(fbdev_fd);
 	}
 
 	mbv_dfb_window_destroy(root_window);

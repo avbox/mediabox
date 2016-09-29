@@ -42,7 +42,7 @@ mbv_dfb_window_update(struct mbv_dfb_window *window);
 int
 mbv_dfb_window_blit_buffer(
 	struct mbv_dfb_window *window, void *buf, int width, int height,
-	int x, int y);
+	const int x, const int y);
 
 
 struct mbv_dfb_window*
