@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <assert.h>
+#include <time.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <alsa/asoundlib.h>
@@ -12,6 +13,7 @@
 #include "su.h"
 #include "linkedlist.h"
 #include "compiler.h"
+#include "time_util.h"
 
 
 /**
@@ -100,7 +102,7 @@ mb_audio_stream_gettime(struct mb_audio_stream * const inst)
 
 	if (inst->pcm_handle == NULL || (err = snd_pcm_status(inst->pcm_handle, status)) < 0) {
 		LOG_VPRINT_ERROR("Stream status error: %s", snd_strerror(err));
-		return 0;
+		return inst->lasttime;
 	}
 
 	state = snd_pcm_status_get_state(status);
@@ -405,6 +407,11 @@ mb_audio_stream_io(void *arg)
 
 	DEBUG_PRINT("audio", "Audio thread ready");
 
+	/* set the handle to nonblock mode */
+	if (snd_pcm_nonblock(inst->pcm_handle, 1) < 0) {
+		LOG_PRINT_ERROR("Could not set ALSA PCM handle to nonblock mode");
+	}
+
 	/* start audio IO */
 	while (LIKELY(inst->quit == 0)) {
 
@@ -425,16 +432,25 @@ mb_audio_stream_io(void *arg)
 		packet = LIST_TAIL(struct mb_audio_packet*, &inst->packets);
 		assert(packet != NULL);
 
-		/* remove the packet from the queue */
-		pthread_mutex_lock(&inst->queue_lock);
-		LIST_REMOVE(packet);
-		pthread_mutex_unlock(&inst->queue_lock);
-		ATOMIC_DEC(&inst->frames);
-
 write_frames:
 		/* play the frame */
 		frames = snd_pcm_writei(inst->pcm_handle, packet->data, packet->n_samples);
 		if (UNLIKELY(frames < 0)) {
+			if (frames == -EAGAIN) {
+				/* the ringbuffer is full so sleep until it's half empty */
+				const int64_t waitusecs =
+					(inst->underrun_time - mb_audio_stream_gettime(inst)) / 2;
+				struct timespec abs, waittime;
+
+				abs = abstime();
+				waittime.tv_sec = (waitusecs / (1000L * 1000L));
+				waittime.tv_nsec = (waitusecs % (1000L * 1000L)) * 1000L;
+				waittime = timeadd(&abs, &waittime);
+				pthread_cond_timedwait(&inst->wake, &inst->lock, &waittime);
+				pthread_mutex_unlock(&inst->lock);
+				continue;
+			}
+
 			/* dump the stream status */
 			mb_audio_stream_dumpstatus(inst);
 
@@ -471,6 +487,12 @@ write_frames:
 
 		/* unlock stream */
 		pthread_mutex_unlock(&inst->lock);
+
+		/* remove the packet from the queue */
+		pthread_mutex_lock(&inst->queue_lock);
+		LIST_REMOVE(packet);
+		pthread_mutex_unlock(&inst->queue_lock);
+		ATOMIC_DEC(&inst->frames);
 
 		/* free packet */
 		free(packet);
