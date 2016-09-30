@@ -39,10 +39,9 @@ struct mb_audio_stream
 	int paused;
 	int frames;
 	int playback_running;
-	int playback_started;
 	int64_t clock_offset;
 	int64_t lasttime;
-	int64_t underrun_time;
+	int64_t xruntime;
 	snd_pcm_uframes_t buffer_size;
 	unsigned int framerate;
 	LIST packets;
@@ -80,6 +79,42 @@ mb_audio_stream_flush(struct mb_audio_stream * const inst)
 }
 
 
+static void
+mb_audio_stream_dumpstatus(struct mb_audio_stream * const stream)
+{
+#ifndef NDEBUG
+	int err;
+	snd_pcm_state_t state;
+	snd_pcm_status_t *status;
+	snd_pcm_status_alloca(&status);
+
+	/* get the pcm stream status */
+	if ((err = snd_pcm_status(stream->pcm_handle, status)) < 0) {
+		LOG_VPRINT_ERROR("Cannot dump ALSA status: %s\n", snd_strerror(err));
+		return;
+	}
+
+	/* get the stream state */
+	state = snd_pcm_status_get_state(status);
+
+	/* print the state */
+	switch (state) {
+	case SND_PCM_STATE_OPEN: DEBUG_PRINT("audio", "ALSA state: OPEN"); break;
+	case SND_PCM_STATE_SETUP: DEBUG_PRINT("audio", "ALSA state: SETUP"); break;
+	case SND_PCM_STATE_PREPARED: DEBUG_PRINT("audio", "ALSA state: PREPARED"); break;
+	case SND_PCM_STATE_RUNNING: DEBUG_PRINT("audio", "ALSA state: RUNNING"); break;
+	case SND_PCM_STATE_XRUN: DEBUG_PRINT("audio", "ALSA state: XRUN"); break;
+	case SND_PCM_STATE_DRAINING: DEBUG_PRINT("audio", "ALSA state: DRAINING"); break;
+	case SND_PCM_STATE_PAUSED: DEBUG_PRINT("audio", "ALSA state: PAUSED"); break;
+	case SND_PCM_STATE_SUSPENDED: DEBUG_PRINT("audio", "ALSA state: SUSPENDED"); break;
+	case SND_PCM_STATE_DISCONNECTED: DEBUG_PRINT("audio", "ALSA state: DISCONNECTED"); break;
+	default: DEBUG_VPRINT("audio", "Unknown ALSA state: %i", state); break;
+	}
+
+#endif
+}
+
+
 /**
  * Gets the time elapsed (in uSecs) since the
  * stream started playing. This clock stops when the audio stream is paused
@@ -92,7 +127,7 @@ mb_audio_stream_gettime(struct mb_audio_stream * const inst)
 	uint64_t time;
 	snd_pcm_status_t *status;
 	snd_pcm_state_t state;
-	snd_htimestamp_t audio_timestamp, audio_trigger_timestamp;
+	snd_htimestamp_t ts, tts;
 
 	if (inst->paused) {
 		return inst->clock_offset;
@@ -106,21 +141,35 @@ mb_audio_stream_gettime(struct mb_audio_stream * const inst)
 	}
 
 	state = snd_pcm_status_get_state(status);
-	snd_pcm_status_get_trigger_htstamp(status, &audio_trigger_timestamp);
-	snd_pcm_status_get_htstamp(status, &audio_timestamp);
+	snd_pcm_status_get_trigger_htstamp(status, &tts);
+	snd_pcm_status_get_htstamp(status, &ts);
 
-	if (state == SND_PCM_STATE_XRUN || state == SND_PCM_STATE_SETUP) {
-		return inst->underrun_time;
+	switch (state) {
+	case SND_PCM_STATE_OPEN:
+		return 0;
+	case SND_PCM_STATE_XRUN:
+		if (UNLIKELY(inst->lasttime != inst->xruntime)) {
+			DEBUG_VPRINT("audio", "PCM State is XRUN! (clock_offset=%li xruntime=%li lasttime=%li",
+				inst->clock_offset, inst->xruntime, inst->lasttime);
 
-	} else if (state != SND_PCM_STATE_RUNNING) {
+		}
+		inst->clock_offset = inst->lasttime = inst->xruntime;
+		/* fall through */
+	case SND_PCM_STATE_SETUP:
+	case SND_PCM_STATE_PREPARED:
+	case SND_PCM_STATE_PAUSED:
+	case SND_PCM_STATE_SUSPENDED:
+	case SND_PCM_STATE_DISCONNECTED:
+		return inst->lasttime;
+	case SND_PCM_STATE_RUNNING:
+	case SND_PCM_STATE_DRAINING:
+		time  = ((ts.tv_sec * 1000L * 1000L * 1000L) + ts.tv_nsec) / 1000L;
+		time -= ((tts.tv_sec * 1000L * 1000L * 1000L) + tts.tv_nsec) / 1000L;
+		time += inst->clock_offset;
+		return inst->lasttime = (int64_t) time;
+	default:
 		return inst->lasttime;
 	}
-
-	time  = ((audio_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_timestamp.tv_nsec) / 1000;
-	time -= ((audio_trigger_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_trigger_timestamp.tv_nsec) / 1000;
-	time += inst->clock_offset;
-
-	return inst->lasttime = (int64_t) time;
 }
 
 
@@ -131,11 +180,11 @@ mb_audio_stream_gettime(struct mb_audio_stream * const inst)
 int
 mb_audio_stream_pause(struct mb_audio_stream * const inst)
 {
-	int err;
+	int err, ret = -1;
 	uint64_t time;
 	snd_pcm_status_t *status;
 	snd_pcm_state_t state;
-	snd_htimestamp_t audio_timestamp, audio_trigger_timestamp;
+	snd_htimestamp_t ts, tts;
 	snd_pcm_uframes_t avail;
 
 	DEBUG_PRINT("audio", "Pausing audio stream");
@@ -144,43 +193,88 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 
 	pthread_mutex_lock(&inst->lock);
 
+	/* get pcm handle status */
 	if ((err = snd_pcm_status(inst->pcm_handle, status)) < 0) {
 		LOG_VPRINT_ERROR("Stream status error: %s\n", snd_strerror(err));
-		pthread_mutex_unlock(&inst->lock);
-		return -1;
+		goto end;
 	}
 
+	/* get state and timestamps */
 	state = snd_pcm_status_get_state(status);
-	snd_pcm_status_get_trigger_htstamp(status, &audio_trigger_timestamp);
-	snd_pcm_status_get_htstamp(status, &audio_timestamp);
+	snd_pcm_status_get_trigger_htstamp(status, &tts);
+	snd_pcm_status_get_htstamp(status, &ts);
 
-	if (state == SND_PCM_STATE_RUNNING) {
-		time  = ((audio_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_timestamp.tv_nsec) / 1000;
-		time -= ((audio_trigger_timestamp.tv_sec * 1000 * 1000 * 1000) + audio_trigger_timestamp.tv_nsec) / 1000;
+	switch (state) {
+	case SND_PCM_STATE_OPEN:
+	case SND_PCM_STATE_SETUP:
+	case SND_PCM_STATE_PREPARED:
+		LOG_PRINT_ERROR("Error: Non-pausable state");
+		ret = -1;
+		goto end;
+	case SND_PCM_STATE_SUSPENDED:
+	case SND_PCM_STATE_PAUSED:
+		DEBUG_PRINT("audio", "Unexpected ALSA state");
+		abort();
+		break;
+	case SND_PCM_STATE_XRUN:
+		DEBUG_VPRINT("audio", "Pausing on XRUN: offset=%li xruntime=%li lasttime=%li",
+			inst->clock_offset, inst->xruntime, inst->lasttime);
+		inst->paused = 1;
+		inst->clock_offset = inst->xruntime;
+		snd_pcm_drain(inst->pcm_handle);
+		ret = 0;
+		goto end;
+	case SND_PCM_STATE_RUNNING:
+		DEBUG_PRINT("audio", "Pausing RUNNING stream");
+
+		time  = ((ts.tv_sec * 1000L * 1000L * 1000L) + ts.tv_nsec) / 1000L;
+		time -= ((tts.tv_sec * 1000L * 1000L * 1000L) + tts.tv_nsec) / 1000L;
 		time += inst->clock_offset;
-	} else {
-		time = inst->lasttime;
+
+		assert(time > 0 || inst->lasttime == 0);
+		assert(time < INT64_MAX);
+
+		inst->paused = 1;
+		inst->clock_offset = time;
+
+		/* move the clock up to what it should be after the ALSA buffer is drained
+		 * and drain the buffer */
+		avail = snd_pcm_status_get_avail(status);
+		inst->clock_offset += ((1000L * 1000L) / inst->framerate) * (inst->buffer_size - avail);
+		snd_pcm_drain(inst->pcm_handle);
+
+		/* wait for the buffer to drain. if this fails for some
+		 * reason return success */
+		do {
+			/* get pcm handle status */
+			if ((err = snd_pcm_status(inst->pcm_handle, status)) < 0) {
+				LOG_VPRINT_ERROR("Stream status error: %s\n", snd_strerror(err));
+				ret =  0;
+				goto end;
+			}
+			state = snd_pcm_status_get_state(status);
+		} while (state == SND_PCM_STATE_DRAINING);
+
+		/* dump the stream status */
+		mb_audio_stream_dumpstatus(inst);
+
+		ret = 0;
+		goto end;
+	case SND_PCM_STATE_DISCONNECTED:
+	case SND_PCM_STATE_DRAINING:
+		LOG_PRINT_ERROR("Invalid ALSA state");
+		/* since we only drain in this function and we wait
+		 * we should never hit this */
+		abort();
+		break;
 	}
 
-	/* fprintf(stderr, "time=%lu offset=%li\n", time, inst->audio_clock_offset); */
-	assert(time > 0 || inst->lasttime == 0);
-	assert(time < INT64_MAX);
-
-	/* set the clock to the current audio time */
-	inst->clock_offset = time;
-	inst->paused = 1;
-	avail = snd_pcm_status_get_avail(status);
-
-	/* move the clock up to what it should be after the ALSA buffer is drained
-	 * and drain the buffer */
-	inst->clock_offset += ((1000L * 1000L) / inst->framerate) * (inst->buffer_size - avail);
-	snd_pcm_drain(inst->pcm_handle);
-
+end:
 	assert(inst->clock_offset > 0);
 
 	pthread_mutex_unlock(&inst->lock);
 
-	return 0;
+	return ret;
 }
 
 
@@ -231,7 +325,7 @@ end:
  * Calculate the next underrun time.
  */
 static void
-mb_audio_stream_calcunderruntime(struct mb_audio_stream * const stream)
+mb_audio_stream_calcxruntime(struct mb_audio_stream * const stream)
 {
 	int err;
 	uint64_t time;
@@ -242,7 +336,7 @@ mb_audio_stream_calcunderruntime(struct mb_audio_stream * const stream)
 	/* get the pcm stream status */
 	if ((err = snd_pcm_status(stream->pcm_handle, status)) < 0) {
 		LOG_VPRINT_ERROR("Stream status error: %s", snd_strerror(err));
-		stream->underrun_time = stream->clock_offset;
+		stream->xruntime = stream->clock_offset;
 		return;
 	}
 
@@ -254,43 +348,7 @@ mb_audio_stream_calcunderruntime(struct mb_audio_stream * const stream)
 		(stream->buffer_size - snd_pcm_status_get_avail(status));
 
 	/* save it */
-	stream->underrun_time = time;
-}
-
-
-static void
-mb_audio_stream_dumpstatus(struct mb_audio_stream * const stream)
-{
-#ifndef NDEBUG
-	int err;
-	snd_pcm_state_t state;
-	snd_pcm_status_t *status;
-	snd_pcm_status_alloca(&status);
-
-	/* get the pcm stream status */
-	if ((err = snd_pcm_status(stream->pcm_handle, status)) < 0) {
-		LOG_VPRINT_ERROR("Cannot dump ALSA status: %s\n", snd_strerror(err));
-		return;
-	}
-
-	/* get the stream state */
-	state = snd_pcm_status_get_state(status);
-
-	/* print the state */
-	switch (state) {
-	case SND_PCM_STATE_OPEN: DEBUG_PRINT("audio", "ALSA state: OPEN"); break;
-	case SND_PCM_STATE_SETUP: DEBUG_PRINT("audio", "ALSA state: SETUP"); break;
-	case SND_PCM_STATE_PREPARED: DEBUG_PRINT("audio", "ALSA state: PREPARED"); break;
-	case SND_PCM_STATE_RUNNING: DEBUG_PRINT("audio", "ALSA state: RUNNING"); break;
-	case SND_PCM_STATE_XRUN: DEBUG_PRINT("audio", "ALSA state: XRUN"); break;
-	case SND_PCM_STATE_DRAINING: DEBUG_PRINT("audio", "ALSA state: DRAINING"); break;
-	case SND_PCM_STATE_PAUSED: DEBUG_PRINT("audio", "ALSA state: PAUSED"); break;
-	case SND_PCM_STATE_SUSPENDED: DEBUG_PRINT("audio", "ALSA state: SUSPENDED"); break;
-	case SND_PCM_STATE_DISCONNECTED: DEBUG_PRINT("audio", "ALSA state: DISCONNECTED"); break;
-	default: DEBUG_VPRINT("audio", "Unknown ALSA state: %i", state); break;
-	}
-
-#endif
+	stream->xruntime = time;
 }
 
 
@@ -432,14 +490,13 @@ mb_audio_stream_io(void *arg)
 		packet = LIST_TAIL(struct mb_audio_packet*, &inst->packets);
 		assert(packet != NULL);
 
-write_frames:
 		/* play the frame */
 		frames = snd_pcm_writei(inst->pcm_handle, packet->data, packet->n_samples);
 		if (UNLIKELY(frames < 0)) {
 			if (frames == -EAGAIN) {
 				/* the ringbuffer is full so sleep until it's half empty */
 				const int64_t waitusecs =
-					(inst->underrun_time - mb_audio_stream_gettime(inst)) / 2;
+					(inst->xruntime - mb_audio_stream_gettime(inst)) / 2;
 				struct timespec abs, waittime;
 
 				abs = abstime();
@@ -454,12 +511,12 @@ write_frames:
 			/* dump the stream status */
 			mb_audio_stream_dumpstatus(inst);
 
-			/* we never attempt writing to a SUSPENDED stream */
-			assert(frames != -ESTRPIPE);
-
 			/* if we have underrun try to recover */
-			if (frames == -EPIPE || frames == -EINTR) {
+			if (frames == -EPIPE || frames == -EINTR || frames == -ESTRPIPE) {
 				DEBUG_PRINT("audio", "Recovering from ALSA error");
+
+				inst->clock_offset = inst->xruntime;
+
 				if ((frames = snd_pcm_recover(inst->pcm_handle, frames, 0)) < 0) {
 					LOG_VPRINT_ERROR("Could not recover from ALSA underrun: %s",
 						snd_strerror(frames));
@@ -467,9 +524,8 @@ write_frames:
 					pthread_mutex_unlock(&inst->lock);
 					goto audio_exit;
 				}
-
-				/* write the frames again */
-				goto write_frames;
+				pthread_mutex_unlock(&inst->lock);
+				continue;
 			}
 		}
 		if (UNLIKELY(frames < 0)) {
@@ -480,10 +536,8 @@ write_frames:
 			goto audio_exit;
 		}
 
-		inst->playback_started = 1;
-
 		/* calculate the next underrun time */
-		mb_audio_stream_calcunderruntime(inst);
+		mb_audio_stream_calcxruntime(inst);
 
 		/* unlock stream */
 		pthread_mutex_unlock(&inst->lock);
@@ -556,6 +610,11 @@ mb_audio_stream_write(struct mb_audio_stream * const stream,
 	ATOMIC_INC(&stream->frames);
 	pthread_mutex_unlock(&stream->queue_lock);
 
+	/* signal output thread */
+	pthread_mutex_lock(&stream->lock);
+	pthread_cond_signal(&stream->wake);
+	pthread_mutex_unlock(&stream->lock);
+
 	return 0;
 }
 
@@ -566,22 +625,35 @@ mb_audio_stream_write(struct mb_audio_stream * const stream,
 int
 mb_audio_stream_start(struct mb_audio_stream * const stream)
 {
-	if (!stream->playback_running) {
-		pthread_mutex_lock(&stream->lock);
-		if (!stream->playback_running) {
-			stream->playback_running = 1;
-			if (pthread_create(&stream->thread, NULL, mb_audio_stream_io, stream) != 0) {
-				LOG_PRINT_ERROR("Could not start IO thread");
-				stream->playback_running = 0;
-				pthread_mutex_unlock(&stream->lock);
-				return -1;
-			}
-			pthread_cond_wait(&stream->wake, &stream->lock);
-		}
-		pthread_mutex_unlock(&stream->lock);
-		return 0;
+	int ret = -1;
+
+	if (stream->playback_running) {
+		LOG_PRINT_ERROR("Audio stream already started");
+		return -1;
 	}
-	return -1;
+
+	pthread_mutex_lock(&stream->lock);
+
+	if (!stream->playback_running) {
+		stream->playback_running = 1;
+		if (pthread_create(&stream->thread, NULL, mb_audio_stream_io, stream) != 0) {
+			LOG_PRINT_ERROR("Could not start IO thread");
+			stream->playback_running = 0;
+			goto end;
+		}
+
+		pthread_cond_wait(&stream->wake, &stream->lock);
+
+		if (!stream->playback_running) {
+			LOG_PRINT_ERROR("Audio thread initialization failed");
+			goto end;
+		}
+
+		ret = 0;
+	}
+end:
+	pthread_mutex_unlock(&stream->lock);
+	return ret;
 }
 
 
@@ -615,7 +687,7 @@ mb_audio_stream_setclock(struct mb_audio_stream * const stream, const int64_t cl
 {
 	assert(stream != NULL);
 	stream->clock_offset = clock;
-	stream->underrun_time = clock;
+	stream->xruntime = clock;
 	return 0;
 }
 

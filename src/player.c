@@ -429,18 +429,9 @@ mb_player_video(void *arg)
 
 	MB_DEBUG_SET_THREAD_NAME("video_playback");
 	DEBUG_PRINT("player", "Video renderer started");
-
 	assert(inst != NULL);
 
 	inst->video_playback_running = 1;
-
-	DEBUG_PRINT("player", "Video renderer ready");
-
-	/* signal control thread that we're ready */
-	pthread_mutex_lock(&inst->video_output_lock);
-	pthread_cond_broadcast(&inst->video_output_signal);
-	pthread_mutex_unlock(&inst->video_output_lock);
-
 
 #ifdef MB_DECODER_PRINT_FPS
 	(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
@@ -452,6 +443,13 @@ mb_player_video(void *arg)
 		mb_player_wait4buffers(inst, &inst->video_quit);
 		mb_player_resetsystemtime(inst, 0);
 	}
+
+	/* signal control thread that we're ready */
+	pthread_mutex_lock(&inst->video_output_lock);
+	pthread_cond_broadcast(&inst->video_output_signal);
+	pthread_mutex_unlock(&inst->video_output_lock);
+
+	DEBUG_PRINT("player", "Video renderer ready");
 
 	while (LIKELY(!inst->video_quit)) {
 		/* if there's no frame ready we must wait */
@@ -1322,6 +1320,8 @@ mb_player_stream_decode(void *arg)
 
 	MB_DEBUG_SET_THREAD_NAME("stream_input");
 
+	/* detach thread */
+	pthread_detach(pthread_self());
 
 	assert(inst != NULL);
 	assert(inst->media_file != NULL);
@@ -1570,7 +1570,7 @@ decoder_exit:
 
 	inst->video_stream_index = -1;
 	inst->audio_stream_index = -1;
-	inst->stream_quit = 0;
+	inst->stream_quit = 1;
 
 	mb_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 
@@ -1592,6 +1592,11 @@ decoder_exit:
 	}
 
 	inst->stopping = 0;
+
+	/* signal that we're exitting */
+	pthread_mutex_lock(&inst->stream_lock);
+	pthread_cond_signal(&inst->stream_signal);
+	pthread_mutex_unlock(&inst->stream_lock);
 
 	return NULL;
 }
@@ -1903,17 +1908,26 @@ mb_player_play(struct mbp *inst, const char * const path)
 
 	/* start the main decoder thread */
 	pthread_mutex_lock(&inst->stream_lock);
+	inst->stream_quit = 0;
 	if (pthread_create(&inst->stream_thread, NULL, mb_player_stream_decode, inst) != 0) {
-		fprintf(stderr, "pthread_create() failed!\n");
+		LOG_PRINT_ERROR("Could not fire decoder thread");
 		mb_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 		return -1;
 	}
 	pthread_cond_wait(&inst->stream_signal, &inst->stream_lock);
 	pthread_mutex_unlock(&inst->stream_lock);
 
+	/* check if decoder initialization failed */
+	if (inst->stream_quit) {
+		LOG_VPRINT_ERROR("Playback of '%s' failed", path);
+		mb_player_stop(inst);
+		return -1;
+	}
+
 	/* if there's no audio or video to decode then return error and exit.
 	 * The decoder thread will shut itself down so no cleanup is necessary */
 	if (!inst->have_audio && !inst->have_video) {
+		mb_player_stop(inst);
 		return -1;
 	}
 
@@ -1952,6 +1966,7 @@ mb_player_play(struct mbp *inst, const char * const path)
 	if (pthread_create(&inst->video_output_thread, NULL, mb_player_video, inst) != 0) {
 		fprintf(stderr, "player: Could not start renderer thread\n");
 		pthread_mutex_unlock(&inst->video_output_lock);
+		mb_player_stop(inst);
 		return -1;
 	}
 	pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
@@ -1959,11 +1974,15 @@ mb_player_play(struct mbp *inst, const char * const path)
 
 	/* fire the audio output thread */
 	if (inst->have_audio) {
-		mb_audio_stream_start(inst->audio_stream);
+		if (mb_audio_stream_start(inst->audio_stream) == -1) {
+			LOG_PRINT_ERROR("Could not start audio stream");
+			inst->have_audio = 0;
+			if (!inst->have_video) {
+				mb_player_stop(inst);
+				return -1;
+			}
+		}
 	}
-
-	/* detach the decoder thread */
-	pthread_detach(inst->stream_thread);
 
 	return 0;
 }
