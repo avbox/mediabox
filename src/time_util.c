@@ -80,17 +80,35 @@ timediff(const struct timespec *start, const struct timespec *end)
 }
 
 
-struct timespec
-abstime(void)
+/**
+ * Gets the absolute time.
+ * This is useful for pthread_cond_timedwait().
+ */
+struct timespec *
+abstime(struct timespec * const tv)
 {
-	struct timespec tmp;
 	struct timeval now; 
 	gettimeofday(&now, NULL);
-	long int abstime_ns_large = now.tv_usec * 1000;
-	tmp.tv_sec = now.tv_sec + (abstime_ns_large / 1000000000);
-	tmp.tv_nsec = abstime_ns_large % 1000000000;
-	return tmp;
+	long int abstime_ns_large = now.tv_usec * 1000L;
+	tv->tv_sec = now.tv_sec + (abstime_ns_large / 1000000000L);
+	tv->tv_nsec = abstime_ns_large % 1000000000L;
+	return tv;
 }
+
+
+/**
+ * Add the absolute time (returned by abstime()) to the timespec
+ * structure argument.
+ */
+struct timespec *
+delay2abstime(struct timespec * const tv)
+{
+	struct timespec abs;
+	abstime(&abs);
+	*tv = timeadd(tv, &abs);
+	return tv;
+}
+
 
 
 int64_t

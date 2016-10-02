@@ -44,11 +44,7 @@ static int nextid = 1;
 void *
 mbt_timers_thread(void *arg)
 {
-	struct timespec last_sleep;
-	struct timespec elapsed;
-	struct timespec now;
-	struct timespec sleeptime;
-	struct timespec abs;
+	struct timespec last_sleep, elapsed, now, sleeptime;
 	mb_timer_state *tmr;
 	enum mbt_result ret;
 
@@ -111,8 +107,7 @@ mbt_timers_thread(void *arg)
 			}
 		});
 
-		abs = abstime();
-		sleeptime = timeadd(&abs, &sleeptime);
+		delay2abstime(&sleeptime);
 		last_sleep = now;
 		pthread_cond_timedwait(&timers_signal, &timers_lock, &sleeptime);
 	}

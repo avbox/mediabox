@@ -497,12 +497,11 @@ mb_audio_stream_io(void *arg)
 				/* the ringbuffer is full so sleep until it's half empty */
 				const int64_t waitusecs =
 					(inst->xruntime - mb_audio_stream_gettime(inst)) / 2;
-				struct timespec abs, waittime;
+				struct timespec waittime;
 
-				abs = abstime();
 				waittime.tv_sec = (waitusecs / (1000L * 1000L));
 				waittime.tv_nsec = (waitusecs % (1000L * 1000L)) * 1000L;
-				waittime = timeadd(&abs, &waittime);
+				delay2abstime(&waittime);
 				pthread_cond_timedwait(&inst->wake, &inst->lock, &waittime);
 				pthread_mutex_unlock(&inst->lock);
 				continue;
