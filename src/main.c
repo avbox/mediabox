@@ -31,6 +31,8 @@
 #include "ionice.h"
 #endif
 
+#define WORKDIR  "/var/lib/mediabox"
+
 
 /**
  * Signal handler
@@ -83,6 +85,13 @@ main (int argc, char **argv)
 			fprintf(stderr, "main: Invalid argument %s\n", argv[i]);
 			exit(EXIT_FAILURE);
 		}
+	}
+
+	/* Change the working directory.
+	 * This is where profiling data will be stored */
+	if (chdir(WORKDIR) == -1) {
+		LOG_VPRINT_ERROR("Could not change directory: %s",
+			strerror(errno));
 	}
 
 	/* initialize process manager */
