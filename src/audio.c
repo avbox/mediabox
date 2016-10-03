@@ -493,14 +493,12 @@ mb_audio_stream_io(void *arg)
 		/* play the frame */
 		frames = snd_pcm_writei(inst->pcm_handle, packet->data, packet->n_samples);
 		if (UNLIKELY(frames < 0)) {
-			if (frames == -EAGAIN) {
-				/* the ringbuffer is full so sleep until it's half empty */
+			if (UNLIKELY(frames == -EAGAIN)) {
+				/* the ring buffer is full so sleep until it's half empty */
 				const int64_t waitusecs =
 					(inst->xruntime - mb_audio_stream_gettime(inst)) / 2;
-				struct timespec waittime;
-
-				waittime.tv_sec = (waitusecs / (1000L * 1000L));
-				waittime.tv_nsec = (waitusecs % (1000L * 1000L)) * 1000L;
+				struct timespec waittime = { 0 };
+				utimeadd(&waittime, waitusecs);
 				delay2abstime(&waittime);
 				pthread_cond_timedwait(&inst->wake, &inst->lock, &waittime);
 				pthread_mutex_unlock(&inst->lock);
@@ -511,7 +509,7 @@ mb_audio_stream_io(void *arg)
 			mb_audio_stream_dumpstatus(inst);
 
 			/* if we have underrun try to recover */
-			if (frames == -EPIPE || frames == -EINTR || frames == -ESTRPIPE) {
+			if (LIKELY(frames == -EPIPE || frames == -EINTR || frames == -ESTRPIPE)) {
 				DEBUG_PRINT("audio", "Recovering from ALSA error");
 
 				inst->clock_offset = inst->xruntime;

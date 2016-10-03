@@ -12,8 +12,11 @@ int
 timelte(const struct timespec *time1, const struct timespec *time2);
 
 
+/**
+ * Adds two timespec structures.
+ */
 struct timespec
-timeadd(const struct timespec *time1, const struct timespec *time2);
+timeadd(const struct timespec * const time1, const struct timespec * const time2);
 
 
 /**
@@ -33,8 +36,12 @@ int64_t
 utimediff(const struct timespec *a, const struct timespec *b);
 
 
+/**
+ * Adds the specified number of micro-seconds to the timespec
+ * struct.
+ */
 void
-utimeadd(struct timespec *t, unsigned int usecs);
+utimeadd(struct timespec * const tv, const int64_t usecs);
 
 
 /**

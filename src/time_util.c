@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <sys/time.h>
 
+#include "compiler.h"
+
 static const struct timespec zerotime = { .tv_sec = 0, .tv_nsec = 0 };
 
 
@@ -31,7 +33,7 @@ timelt(const struct timespec *time1, const struct timespec *time2)
 int
 timelte(const struct timespec *time1, const struct timespec *time2)
 {
-	if (time1->tv_sec == time2->tv_sec && time1->tv_nsec == time2->tv_nsec) {
+	if (UNLIKELY(time1->tv_sec == time2->tv_sec && time1->tv_nsec == time2->tv_nsec)) {
 		return 1;
 	} else {
 		return _timelt(time1, time2);
@@ -39,20 +41,17 @@ timelte(const struct timespec *time1, const struct timespec *time2)
 }
 
 
+/**
+ * Adds two timespec structures.
+ */
 struct timespec
-timeadd(const struct timespec *time1, const struct timespec *time2)
+timeadd(const struct timespec * const time1, const struct timespec * const time2)
 {
 	struct timespec tmp;
-	int64_t nsec = time1->tv_nsec + time2->tv_nsec;
-
+	const int64_t nsec = time1->tv_nsec + time2->tv_nsec;
 	tmp.tv_sec = time1->tv_sec + time2->tv_sec;
-
-	while (nsec > 1000L * 1000L * 1000L) {
-		nsec -= 1000L * 1000L * 1000L;
-		tmp.tv_sec++;
-	}
-
-	tmp.tv_nsec = nsec;
+	tmp.tv_sec += nsec / (1000L * 1000L * 1000L);
+	tmp.tv_nsec = nsec % (1000L * 1000L * 1000L);
 	return tmp;
 }
 
@@ -71,7 +70,7 @@ timediff(const struct timespec *start, const struct timespec *end)
 
 	if ((end->tv_nsec - start->tv_nsec)<0) {
 		temp.tv_sec = end->tv_sec - start->tv_sec - 1;
-		temp.tv_nsec = 1000000000 + end->tv_nsec - start->tv_nsec;
+		temp.tv_nsec = 1000000000L + end->tv_nsec - start->tv_nsec;
 	} else {
 		temp.tv_sec = end->tv_sec - start->tv_sec;
 		temp.tv_nsec = end->tv_nsec - start->tv_nsec;
@@ -110,34 +109,34 @@ delay2abstime(struct timespec * const tv)
 }
 
 
-
+/**
+ * Calculates the time difference between the arguments
+ * in micro-seconds.
+ */
 int64_t
-utimediff(const struct timespec *a, const struct timespec *b)
+utimediff(const struct timespec * a, const struct timespec * b)
 {
-	if (a == NULL) {
+
+	if (UNLIKELY(a == NULL)) {
 		a = &zerotime;
 	}
-	if (b == NULL) {
+	if (UNLIKELY(b == NULL)) {
 		b = &zerotime;
 	}
-	int64_t aa = ((a->tv_sec * 1000 * 1000 * 1000) + a->tv_nsec) / 1000;
-	int64_t bb = ((b->tv_sec * 1000 * 1000 * 1000) + b->tv_nsec) / 1000;
-	int64_t cc = aa - bb;
-	return cc;
+	const int64_t aa = ((a->tv_sec * 1000L * 1000L * 1000L) + a->tv_nsec) / 1000L;
+	const int64_t bb = ((b->tv_sec * 1000L * 1000L * 1000L) + b->tv_nsec) / 1000L;
+	return (aa - bb);
 }
 
+
+/**
+ * Adds the specified number of micro-seconds to the timespec
+ * struct.
+ */
 void
-utimeadd(struct timespec *t, unsigned int usecs)
+utimeadd(struct timespec * const tv, const int64_t usecs)
 {
-	uint64_t nsecs;
-
-	nsecs = t->tv_nsec + (usecs * 1000);
-	while (nsecs > (1000 * 1000 * 1000)) {
-		nsecs -= 1000 * 1000 * 1000;
-		t->tv_sec++;
-	}
-	t->tv_nsec = nsecs;
+	tv->tv_sec += usecs / (1000L * 1000L);
+	tv->tv_nsec += (usecs % (1000L * 1000L)) * 1000L;;
 }
-
-
 
