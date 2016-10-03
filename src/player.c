@@ -1436,61 +1436,66 @@ mb_player_stream_decode(void *arg)
 	/* start decoding */
 	while (LIKELY(!inst->stream_quit && av_read_frame(inst->fmt_ctx, &packet) >= 0)) {
 		if (packet.stream_index == inst->video_stream_index) {
+
+			pthread_mutex_lock(&inst->video_decoder_lock);
+
 			/* if the buffer is full wait for the output thread to make room */
-			while (UNLIKELY(inst->video_packet_state[inst->video_packet_write_index] == 1)) {
-				pthread_mutex_lock(&inst->video_decoder_lock);
+			do {
+				/* don't go to sleep after receiving the quit command */
 				if (UNLIKELY(inst->stream_quit)) {
 					pthread_mutex_unlock(&inst->video_decoder_lock);
+					av_free_packet(&packet);
 					goto decoder_exit;
 				}
 				if (LIKELY(inst->video_packet_state[inst->video_packet_write_index] == 1)) {
 					pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
-					pthread_mutex_unlock(&inst->video_decoder_lock);
-					if (inst->stream_quit) {
-						goto decoder_exit;
-					}
-					continue;
 				}
-				/* unlocked bellow */
-			}
+			} while (UNLIKELY(inst->video_packet_state[inst->video_packet_write_index] == 1));
 			
 			/* save the packet and signal decoder thread */
 			inst->video_packet[inst->video_packet_write_index] = packet;
 			inst->video_packet_state[inst->video_packet_write_index] = 1;
-			pthread_cond_signal(&inst->video_decoder_signal);
-			pthread_cond_signal(&inst->video_output_signal);
-			pthread_mutex_unlock(&inst->video_decoder_lock);
 
-			inst->video_packet_write_index++;
-			inst->video_packet_write_index %= MB_VIDEO_BUFFER_PACKETS;
-			__sync_fetch_and_add(&inst->video_packets, 1);
+			/* we must signal both conditions because the video decoder
+			 * may wait on both the packets queue and the frames queue. But
+			 * two threads should never be waiting on the same condition */
+			pthread_cond_signal(&inst->video_decoder_signal);
+			pthread_mutex_unlock(&inst->video_decoder_lock);
+			pthread_mutex_lock(&inst->video_output_lock);
+			pthread_cond_signal(&inst->video_output_signal);
+			pthread_mutex_unlock(&inst->video_output_lock);
+
+			/* increment the buffer pointer */
+			inst->video_packet_write_index =
+				(inst->video_packet_write_index + 1) % MB_VIDEO_BUFFER_PACKETS;
+			ATOMIC_INC(&inst->video_packets);
 
 		} else if (packet.stream_index == inst->audio_stream_index) {
-			while (UNLIKELY(inst->audio_packet_state[inst->audio_packet_write_index] == 1)) {
-				pthread_mutex_lock(&inst->audio_decoder_lock);
+			
+			pthread_mutex_lock(&inst->audio_decoder_lock);
+			
+			/* if the buffer is full we must wait */
+			do {
+				/* don't sleep after receiving quit command */
 				if (UNLIKELY(inst->stream_quit)) {
 					pthread_mutex_unlock(&inst->audio_decoder_lock);
+					av_free_packet(&packet);
 					goto decoder_exit;
 				}
 				if (LIKELY(inst->audio_packet_state[inst->audio_packet_write_index] == 1)) {
 					pthread_cond_wait(&inst->audio_decoder_signal, &inst->audio_decoder_lock);
-					pthread_mutex_unlock(&inst->audio_decoder_lock);
-					if (inst->stream_quit) {
-						goto decoder_exit;
-					}
-					continue;
 				}
-				/* unlock below */
-			}
+			} while (LIKELY(inst->audio_packet_state[inst->audio_packet_write_index] == 1));
+
 			/* save the packet and signal decoder */
 			inst->audio_packet[inst->audio_packet_write_index] = packet;
 			inst->audio_packet_state[inst->audio_packet_write_index] = 1;
 			pthread_cond_signal(&inst->audio_decoder_signal);
 			pthread_mutex_unlock(&inst->audio_decoder_lock);
 
-			inst->audio_packet_write_index++;
-			inst->audio_packet_write_index %= MB_AUDIO_BUFFER_PACKETS;
-			__sync_fetch_and_add(&inst->audio_packets, 1);
+			inst->audio_packet_write_index =
+				(inst->audio_packet_write_index + 1) % MB_AUDIO_BUFFER_PACKETS;
+			ATOMIC_INC(&inst->audio_packets);
 		}
 
 		/* handle seek request */
