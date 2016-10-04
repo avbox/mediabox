@@ -38,6 +38,7 @@ mbv_window_cairo_end(struct mbv_window *window)
 }
 
 
+#ifndef NDEBUG
 static int
 mbv_getfontsize(PangoFontDescription *desc)
 {
@@ -50,7 +51,7 @@ mbv_getfontsize(PangoFontDescription *desc)
 
 	return sz;
 }
-
+#endif
 
 /**
  * mbv_getdefaultfont() -- Gets the default system font description.

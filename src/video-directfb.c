@@ -85,6 +85,7 @@ static pthread_mutex_t root_window_lock = PTHREAD_MUTEX_INITIALIZER;
 	(color      ) & 0xFF
 
 
+#ifndef NDEBUG
 static char *
 mbv_dfb_pixfmt_tostring(DFBSurfacePixelFormat fmt)
 {
@@ -103,6 +104,7 @@ mbv_dfb_pixfmt_tostring(DFBSurfacePixelFormat fmt)
 		return pix_fmt;
 	}
 }
+#endif
 
 
 /**
