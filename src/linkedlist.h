@@ -84,6 +84,7 @@ struct type \
         prev->next = next; \
 }
 
+#define LIST_ISNULL(list, item) (((struct __listhead*)(item)) == (list))
 #define LIST_TAIL(type, list) ((type) (LIST_EMPTY((list)) ? NULL : ((struct __listhead*)(list))->prev))
 #define LIST_NEXT(type, item) ((type) ((struct __listhead*)(item))->next)
 #define LIST_PREV(type, item) ((type) ((struct __listhead*)(item))->prev)

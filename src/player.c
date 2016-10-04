@@ -1591,7 +1591,7 @@ decoder_exit:
 	if (!inst->stopping && inst->playlist_item != NULL) {
 		inst->playlist_item = LIST_NEXT(struct mb_playlist_item*,
 			inst->playlist_item);
-		if (inst->playlist_item != NULL) {
+		if (!LIST_ISNULL(&inst->playlist, inst->playlist_item)) {
 			mb_player_play(inst, inst->playlist_item->filepath);
 		}
 	}
@@ -1675,7 +1675,7 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 				struct mb_playlist_item *next =
 					LIST_NEXT(struct mb_playlist_item*,
 					inst->playlist_item);
-				if (next == NULL) {
+				if (LIST_ISNULL(&inst->playlist, next)) {
 					break;
 				}
 				next_item = next;
@@ -1696,7 +1696,7 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 				struct mb_playlist_item *next =
 					LIST_PREV(struct mb_playlist_item*,
 					inst->playlist_item);
-				if (next == NULL) {
+				if (LIST_ISNULL(&inst->playlist, next)) {
 					break;
 				}
 				next_item = next;
