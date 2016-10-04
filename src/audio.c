@@ -115,34 +115,16 @@ mb_audio_stream_dumpstatus(struct mb_audio_stream * const stream)
 }
 
 
-/**
- * Gets the time elapsed (in uSecs) since the
- * stream started playing. This clock stops when the audio stream is paused
- * or underruns.
- */
-int64_t
-mb_audio_stream_gettime(struct mb_audio_stream * const inst)
+static inline int64_t
+mb_audio_stream_gettime_internal(struct mb_audio_stream * const inst, snd_pcm_status_t *pcm_status)
 {
-	int err = 0;
 	uint64_t time;
-	snd_pcm_status_t *status;
 	snd_pcm_state_t state;
 	snd_htimestamp_t ts, tts;
 
-	if (inst->paused) {
-		return inst->clock_offset;
-	}
-
-	snd_pcm_status_alloca(&status);
-
-	if (inst->pcm_handle == NULL || (err = snd_pcm_status(inst->pcm_handle, status)) < 0) {
-		LOG_VPRINT_ERROR("Stream status error: %s", snd_strerror(err));
-		return inst->lasttime;
-	}
-
-	state = snd_pcm_status_get_state(status);
-	snd_pcm_status_get_trigger_htstamp(status, &tts);
-	snd_pcm_status_get_htstamp(status, &ts);
+	state = snd_pcm_status_get_state(pcm_status);
+	snd_pcm_status_get_trigger_htstamp(pcm_status, &tts);
+	snd_pcm_status_get_htstamp(pcm_status, &ts);
 
 	switch (state) {
 	case SND_PCM_STATE_OPEN:
@@ -170,6 +152,32 @@ mb_audio_stream_gettime(struct mb_audio_stream * const inst)
 	default:
 		return inst->lasttime;
 	}
+}
+
+
+/**
+ * Gets the time elapsed (in uSecs) since the
+ * stream started playing. This clock stops when the audio stream is paused
+ * or underruns.
+ */
+int64_t
+mb_audio_stream_gettime(struct mb_audio_stream * const inst)
+{
+	int err = 0;
+	snd_pcm_status_t *status;
+
+	if (inst->paused) {
+		return inst->clock_offset;
+	}
+
+	snd_pcm_status_alloca(&status);
+
+	if (inst->pcm_handle == NULL || (err = snd_pcm_status(inst->pcm_handle, status)) < 0) {
+		LOG_VPRINT_ERROR("Stream status error: %s", snd_strerror(err));
+		return inst->lasttime;
+	}
+
+	return mb_audio_stream_gettime_internal(inst, status);
 }
 
 
@@ -341,7 +349,7 @@ mb_audio_stream_calcxruntime(struct mb_audio_stream * const stream)
 	}
 
 	/* get the current stream time */
-	time = mb_audio_stream_gettime(stream);
+	time = mb_audio_stream_gettime_internal(stream, status);
 
 	/* add the time that will take to play what's left of the buffer */
 	time += ((1000L * 1000L) / stream->framerate) *
