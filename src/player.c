@@ -1313,10 +1313,10 @@ decoder_exit:
 static void*
 mb_player_stream_decode(void *arg)
 {
-	struct mbp *inst = (struct mbp*) arg;
 	int i;
 	AVPacket packet;
-
+	AVDictionary *stream_opts = NULL;
+	struct mbp *inst = (struct mbp*) arg;
 
 	MB_DEBUG_SET_THREAD_NAME("stream_input");
 
@@ -1351,7 +1351,8 @@ mb_player_stream_decode(void *arg)
 		inst->width, inst->height, inst->media_file);
 
 	/* open file */
-	if (avformat_open_input(&inst->fmt_ctx, inst->media_file, NULL, NULL) != 0) {
+	av_dict_set(&stream_opts, "timeout", "30000000", 0);
+	if (avformat_open_input(&inst->fmt_ctx, inst->media_file, NULL, &stream_opts) != 0) {
 		fprintf(stderr, "player: Could not open '%s'\n",
 			inst->media_file);
 		goto decoder_exit;
@@ -1571,6 +1572,10 @@ decoder_exit:
 	if (inst->fmt_ctx != NULL) {
 		avformat_close_input(&inst->fmt_ctx);
 		inst->fmt_ctx = NULL;
+	}
+
+	if (stream_opts != NULL) {
+		av_dict_free(&stream_opts);
 	}
 
 	inst->video_stream_index = -1;
