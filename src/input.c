@@ -2,6 +2,7 @@
 #include "config.h"
 #endif
 #include <stdlib.h>
+#include <stdint.h>
 #include <assert.h>
 #include <errno.h>
 #include <unistd.h>
@@ -161,7 +162,7 @@ mbi_getmessage(int fd)
 	/* if the message has data read it */
 	if (msg->size > 0) {
 		msg = realloc_safe(msg, sizeof(struct mb_message) + msg->size);
-		read_or_die(fd, ((void*) msg) + sizeof(struct mb_message), msg->size);
+		read_or_die(fd, ((uint8_t*) msg) + sizeof(struct mb_message), msg->size);
 	}
 	return msg;
 }
@@ -213,7 +214,7 @@ mbi_loop(void *arg)
 				msg = realloc_safe(msg, sizeof(struct mb_message) + msg->size);
 				msgsz = msg->size;
 			}
-			read_or_die(readfd, ((void*) msg) + sizeof(struct mb_message), msg->size);
+			read_or_die(readfd, ((uint8_t*) msg) + sizeof(struct mb_message), msg->size);
 		}
 
 		/* if this is the special exit message then quit */

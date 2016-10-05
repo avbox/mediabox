@@ -21,7 +21,7 @@
  */
 LISTABLE_STRUCT(mb_audio_packet,
 	size_t n_samples;
-	uint8_t * data;
+	uint8_t data[];
 );
 
 
@@ -479,7 +479,7 @@ mb_audio_stream_io(void *arg)
 	}
 
 	/* start audio IO */
-	while (LIKELY(inst->quit == 0)) {
+	while (LIKELY(!inst->quit)) {
 
 		pthread_mutex_lock(&inst->lock);
 
@@ -496,7 +496,7 @@ mb_audio_stream_io(void *arg)
 
 		/* get the next packet */
 		packet = LIST_TAIL(struct mb_audio_packet*, &inst->packets);
-		assert(packet != NULL);
+		assert(!LIST_ISNULL(&inst->packets, packet));
 
 		/* play the frame */
 		frames = snd_pcm_writei(inst->pcm_handle, packet->data, packet->n_samples);
@@ -606,7 +606,6 @@ mb_audio_stream_write(struct mb_audio_stream * const stream,
 
 	/* copy samples */
 	packet->n_samples = n_samples;
-	packet->data = (uint8_t*) (packet + 1);
 	memcpy(packet->data, data, sz);
 
 	/* add packet to queue */

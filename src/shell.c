@@ -73,7 +73,7 @@ mbs_welcomescreen(int id, void *data)
 
 	/* format the time string */
 	now = time(NULL);
-	strftime(time_string, sizeof(time_string), "%l:%M %p",
+	strftime(time_string, sizeof(time_string), "%I:%M %p",
 		localtime(&now));
 
 	/* if the time has not changed there's no need to repaint */

@@ -40,7 +40,7 @@ typedef struct __ ## type \
 	LIST_DECLARE(__ ## type ## _listhead); \
 	fields \
 } \
-type;
+type
 
 
 #define LISTABLE_STRUCT(type, fields) \
@@ -48,7 +48,7 @@ struct type \
 { \
 	LIST_DECLARE(__ ## type ## _listhead); \
 	fields \
-};
+}
 
 
 #define LIST_DECLARE_STATIC(var) \

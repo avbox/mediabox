@@ -22,7 +22,7 @@ endif
 CC=@CC@
 CFLAGS=@CFLAGS@
 LDFLAGS=@LDFLAGS@
-CFLAGS+=-std=gnu99 -fno-stack-protector -Wunused-variable -Wall -D_GNU_SOURCE
+CFLAGS+=-std=c99 -pedantic -fno-stack-protector -Wunused-variable -Wall -D_GNU_SOURCE
 ASFLAGS=-ggdb
 LDFLAGS+=-lz -lm
 

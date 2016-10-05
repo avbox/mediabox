@@ -51,7 +51,7 @@ static int screen_height = 0;
 /* for direct rendering */
 static int is_fbdev = 0;
 static int fbdev_fd = -1;
-static char *fb_mem = NULL;
+static uint8_t *fb_mem = NULL;
 static size_t screensize;
 static struct fb_fix_screeninfo finfo;
 static struct fb_var_screeninfo vinfo;
@@ -67,7 +67,7 @@ static pthread_mutex_t root_window_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 
-#define DFBCHECK(x...)                                         \
+#define DFBCHECK(x)                                         \
 {                                                            \
 	DFBResult err = x;                                         \
          \
@@ -294,7 +294,7 @@ mbv_dfb_window_blit_buffer(
 	if (LIKELY(is_fbdev && window == root_window)) {
 		int x_pos, y_pos, pixelsz;
 		unsigned int screen = 0;
-		void *fb_buf;
+		uint8_t *fb_buf;
 
 		assert(x == 0 && y == 0);
 
