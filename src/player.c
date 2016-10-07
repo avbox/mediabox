@@ -1156,7 +1156,7 @@ decoder_exit:
 static void *
 mb_player_audio_decode(void * arg)
 {
-	int finished = 0, ret;
+	int finished = 0, ret, first_frame = 0;
 	struct mbp * const inst = (struct mbp * const) arg;
 	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
 	AVCodecContext *audio_codec_ctx = NULL;
@@ -1268,6 +1268,20 @@ mb_player_audio_decode(void * arg)
 					if (UNLIKELY(ret < 0)) {
 						av_frame_unref(audio_frame);
 						goto decoder_exit;
+					}
+
+					/* if this is the first frame then set the audio stream
+					 * clock to it's pts. This is needed because not all streams
+					 * start at pts 0 */
+					if (UNLIKELY(!first_frame)) {
+						int64_t pts;
+						pts = av_rescale_q(audio_frame->pts,
+							inst->fmt_ctx->streams[inst->audio_stream_index]->time_base,
+							AV_TIME_BASE_Q);
+						mb_audio_stream_setclock(inst->audio_stream, pts);
+						DEBUG_VPRINT("player", "First audio pts: %li",
+							pts);
+						first_frame = 1;
 					}
 
 					/* write frame to audio stream and free it */
