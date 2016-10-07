@@ -138,6 +138,9 @@ struct mbp
 	pthread_mutex_t stream_lock;
 	pthread_t stream_thread;
 
+	pthread_mutex_t decoder_start_lock;
+	pthread_cond_t decoder_start_signal;
+
 	int stream_percent;
 
 	/* overlay stuff */
@@ -1438,9 +1441,9 @@ mb_player_stream_decode(void *arg)
 
 	DEBUG_PRINT("player", "Stream decoder ready");
 
-	pthread_mutex_lock(&inst->stream_lock);
-	pthread_cond_signal(&inst->stream_signal);
-	pthread_mutex_unlock(&inst->stream_lock);
+	pthread_mutex_lock(&inst->decoder_start_lock);
+	pthread_cond_signal(&inst->decoder_start_signal);
+	pthread_mutex_unlock(&inst->decoder_start_lock);
 
 	/* if there's no streams to decode then exit */
 	if (!inst->have_audio && !inst->have_video) {
@@ -1931,15 +1934,15 @@ mb_player_play(struct mbp *inst, const char * const path)
 	mb_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
 
 	/* start the main decoder thread */
-	pthread_mutex_lock(&inst->stream_lock);
+	pthread_mutex_lock(&inst->decoder_start_lock);
 	inst->stream_quit = 0;
 	if (pthread_create(&inst->stream_thread, NULL, mb_player_stream_decode, inst) != 0) {
 		LOG_PRINT_ERROR("Could not fire decoder thread");
 		mb_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 		return -1;
 	}
-	pthread_cond_wait(&inst->stream_signal, &inst->stream_lock);
-	pthread_mutex_unlock(&inst->stream_lock);
+	pthread_cond_wait(&inst->decoder_start_signal, &inst->decoder_start_lock);
+	pthread_mutex_unlock(&inst->decoder_start_lock);
 
 	/* check if decoder initialization failed */
 	if (inst->stream_quit) {
@@ -2172,6 +2175,8 @@ mb_player_new(struct mbv_window *window)
 		pthread_mutex_init(&inst->video_output_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->audio_decoder_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->video_decoder_lock, NULL) != 0 ||
+		pthread_mutex_init(&inst->decoder_start_lock, NULL) != 0 ||
+		pthread_cond_init(&inst->decoder_start_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->video_decoder_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->audio_decoder_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->video_output_signal, NULL) != 0 ||
