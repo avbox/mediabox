@@ -40,11 +40,11 @@ mb_audio_stream_resume(struct mb_audio_stream * const inst);
 
 
 /**
- * Writes an audio frame to the stream.
+ * Writes n_frames audio frames to the stream.
  */
 int
 mb_audio_stream_write(struct mb_audio_stream * const stream,
-	const uint8_t * const data, const size_t n_samples);
+	const uint8_t * const data, const size_t n_frames);
 
 
 /**

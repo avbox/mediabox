@@ -14,14 +14,15 @@
 #include "linkedlist.h"
 #include "compiler.h"
 #include "time_util.h"
+#include "math.h"
 
 
 /**
  * Structure for storing audio packets.
  */
 LISTABLE_STRUCT(mb_audio_packet,
-	size_t n_samples;
-	uint8_t data[];
+	size_t n_frames;
+	uint8_t *data;
 );
 
 
@@ -46,6 +47,19 @@ struct mb_audio_stream
 	unsigned int framerate;
 	LIST packets;
 };
+
+
+/**
+ * Get the size in bytes of a number of audio samples.
+ */
+static inline size_t
+mb_audio_stream_frames2size(struct mb_audio_stream * const stream, ssize_t frames)
+{
+	/* For now this is hardcoded to 4 bytes per frame since we
+	 * only support 16-bit stereo */
+	(void) stream;
+	return frames * 4;
+}
 
 
 /**
@@ -248,7 +262,7 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 		/* move the clock up to what it should be after the ALSA buffer is drained
 		 * and drain the buffer */
 		avail = snd_pcm_status_get_avail(status);
-		inst->clock_offset += ((1000L * 1000L) / inst->framerate) * (inst->buffer_size - avail);
+		inst->clock_offset += ((inst->buffer_size - avail) * 1000L * 1000L) / inst->framerate;
 		snd_pcm_drain(inst->pcm_handle);
 
 		/* wait for the buffer to drain. if this fails for some
@@ -352,8 +366,8 @@ mb_audio_stream_calcxruntime(struct mb_audio_stream * const stream)
 	time = mb_audio_stream_gettime_internal(stream, status);
 
 	/* add the time that will take to play what's left of the buffer */
-	time += ((1000L * 1000L) / stream->framerate) *
-		(stream->buffer_size - snd_pcm_status_get_avail(status));
+	time += ((stream->buffer_size - snd_pcm_status_get_avail(status)) * 1000L * 1000L) /
+		stream->framerate;
 
 	/* save it */
 	stream->xruntime = time;
@@ -364,9 +378,10 @@ mb_audio_stream_calcxruntime(struct mb_audio_stream * const stream)
  * This is the main playback loop.
  */
 static void*
-mb_audio_stream_io(void *arg)
+mb_audio_stream_output(void *arg)
 {
 	int ret;
+	size_t n_frames;
 	struct mb_audio_stream * const inst = (struct mb_audio_stream * const) arg;
 	struct mb_audio_packet * packet;
 	const char *device = "default";
@@ -375,7 +390,7 @@ mb_audio_stream_io(void *arg)
 	snd_pcm_hw_params_t *params;
 	snd_pcm_sw_params_t *swparams;
 	snd_pcm_sframes_t frames;
-	snd_pcm_uframes_t period_frames = 8;
+	snd_pcm_uframes_t period_frames = 8, frames_write_max = 8;
 
 	MB_DEBUG_SET_THREAD_NAME("audio_playback");
 	DEBUG_PRINT("player", "Audio playback thread started");
@@ -456,6 +471,8 @@ mb_audio_stream_io(void *arg)
 			snd_strerror(ret));
 	}
 
+	frames_write_max = period_frames / 2;
+
 	DEBUG_VPRINT("audio", "ALSA buffer size: %lu", (unsigned long) inst->buffer_size);
 	DEBUG_VPRINT("audio", "ALSA period size: %lu", (unsigned long) period_frames);
 	DEBUG_VPRINT("audio", "ALSA period time: %u", period_usecs);
@@ -498,14 +515,21 @@ mb_audio_stream_io(void *arg)
 		packet = LIST_TAIL(struct mb_audio_packet*, &inst->packets);
 		assert(!LIST_ISNULL(&inst->packets, packet));
 
+		/* calculate the number of frames to write */
+		n_frames = MIN(frames_write_max, packet->n_frames);
+
 		/* play the frame */
-		frames = snd_pcm_writei(inst->pcm_handle, packet->data, packet->n_samples);
+		frames = snd_pcm_writei(inst->pcm_handle, packet->data, n_frames);
 		if (UNLIKELY(frames < 0)) {
 			if (UNLIKELY(frames == -EAGAIN)) {
-				/* the ring buffer is full so sleep until it's half empty */
+				/* the ring buffer is full so we sleep for as long as it
+				 * takes to play the current fragment to ensure there's enough
+				 * room next time we try. Since the max fragment size is half
+				 * the buffer size this will ensure the buffer never gets much
+				 * more than half empty */
 				const int64_t waitusecs =
-					(inst->xruntime - mb_audio_stream_gettime(inst)) / 2;
-				struct timespec waittime = { 0 };
+					(n_frames * 1000L * 1000L) / inst->framerate;
+				struct timespec waittime = { .tv_sec = 0, .tv_nsec = 0 };
 				utimeadd(&waittime, waitusecs);
 				delay2abstime(&waittime);
 				pthread_cond_timedwait(&inst->wake, &inst->lock, &waittime);
@@ -518,7 +542,8 @@ mb_audio_stream_io(void *arg)
 
 			/* if we have underrun try to recover */
 			if (LIKELY(frames == -EPIPE || frames == -EINTR || frames == -ESTRPIPE)) {
-				DEBUG_PRINT("audio", "Recovering from ALSA error");
+				DEBUG_VPRINT("audio", "Recovering from ALSA error: %s",
+					snd_strerror(frames));
 
 				inst->clock_offset = inst->xruntime;
 
@@ -547,14 +572,19 @@ mb_audio_stream_io(void *arg)
 		/* unlock stream */
 		pthread_mutex_unlock(&inst->lock);
 
-		/* remove the packet from the queue */
-		pthread_mutex_lock(&inst->queue_lock);
-		LIST_REMOVE(packet);
-		pthread_mutex_unlock(&inst->queue_lock);
-		ATOMIC_DEC(&inst->frames);
+		/* update the packet structure */
+		packet->n_frames -= n_frames;
+		packet->data += mb_audio_stream_frames2size(inst, n_frames);
 
-		/* free packet */
-		free(packet);
+		/* if there's no samples left in the packet then
+		 * remove it from the queue and free it */
+		if (packet->n_frames == 0) {
+			pthread_mutex_lock(&inst->queue_lock);
+			LIST_REMOVE(packet);
+			pthread_mutex_unlock(&inst->queue_lock);
+			ATOMIC_DEC(&inst->frames);
+			free(packet);
+		}
 	}
 
 audio_exit:
@@ -582,18 +612,18 @@ audio_exit:
 
 
 /**
- * Writes an audio frame to the stream.
+ * Writes n_frames audio frames to the stream.
  */
 int
 mb_audio_stream_write(struct mb_audio_stream * const stream,
-	const uint8_t * const data, const size_t n_samples)
+	const uint8_t * const data, const size_t n_frames)
 {
 	struct mb_audio_packet *packet;
-	const int sz = n_samples * 4;	/* assumes 2 channel stereo */
+	const int sz = mb_audio_stream_frames2size(stream, n_frames);
 
 	assert(stream != NULL);
 
-	if (n_samples == 0) {
+	if (n_frames == 0) {
 		return 0;
 	}
 
@@ -605,7 +635,8 @@ mb_audio_stream_write(struct mb_audio_stream * const stream,
 	}
 
 	/* copy samples */
-	packet->n_samples = n_samples;
+	packet->n_frames = n_frames;
+	packet->data = (uint8_t*) (packet + 1);
 	memcpy(packet->data, data, sz);
 
 	/* add packet to queue */
@@ -640,7 +671,7 @@ mb_audio_stream_start(struct mb_audio_stream * const stream)
 
 	if (!stream->playback_running) {
 		stream->playback_running = 1;
-		if (pthread_create(&stream->thread, NULL, mb_audio_stream_io, stream) != 0) {
+		if (pthread_create(&stream->thread, NULL, mb_audio_stream_output, stream) != 0) {
 			LOG_PRINT_ERROR("Could not start IO thread");
 			stream->playback_running = 0;
 			goto end;
