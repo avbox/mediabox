@@ -1,7 +1,10 @@
 src/*.o
 src/mediabox
+src/Makefile
+src/Makefile.in
 *.swp
 Makefile
+Makefile.in
 aclocal.m4
 autom4te.cache/
 config.guess

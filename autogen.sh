@@ -13,5 +13,5 @@ echo '* Running autoheader...'
 autoheader
 
 #echo '* Running automake...'
-#automake --add-missing --copy --force-missing
+automake --add-missing --copy --force-missing
 
