@@ -203,11 +203,7 @@ int
 mb_audio_stream_pause(struct mb_audio_stream * const inst)
 {
 	int err, ret = -1;
-	uint64_t time;
 	snd_pcm_status_t *status;
-	snd_pcm_state_t state;
-	snd_htimestamp_t ts, tts;
-	snd_pcm_uframes_t avail;
 
 	DEBUG_PRINT("audio", "Pausing audio stream");
 
@@ -221,12 +217,7 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 		goto end;
 	}
 
-	/* get state and timestamps */
-	state = snd_pcm_status_get_state(status);
-	snd_pcm_status_get_trigger_htstamp(status, &tts);
-	snd_pcm_status_get_htstamp(status, &ts);
-
-	switch (state) {
+	switch (snd_pcm_status_get_state(status)) {
 	case SND_PCM_STATE_OPEN:
 	case SND_PCM_STATE_SETUP:
 	case SND_PCM_STATE_PREPARED:
@@ -249,20 +240,8 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 	case SND_PCM_STATE_RUNNING:
 		DEBUG_PRINT("audio", "Pausing RUNNING stream");
 
-		time  = ((ts.tv_sec * 1000L * 1000L * 1000L) + ts.tv_nsec) / 1000L;
-		time -= ((tts.tv_sec * 1000L * 1000L * 1000L) + tts.tv_nsec) / 1000L;
-		time += inst->clock_offset;
-
-		assert(time > 0 || inst->lasttime == 0);
-		assert(time < INT64_MAX);
-
+		/* start draining the buffer */
 		inst->paused = 1;
-		inst->clock_offset = time;
-
-		/* move the clock up to what it should be after the ALSA buffer is drained
-		 * and drain the buffer */
-		avail = snd_pcm_status_get_avail(status);
-		inst->clock_offset += ((inst->buffer_size - avail) * 1000L * 1000L) / inst->framerate;
 		snd_pcm_drain(inst->pcm_handle);
 
 		/* wait for the buffer to drain. if this fails for some
@@ -274,8 +253,7 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 				ret =  0;
 				goto end;
 			}
-			state = snd_pcm_status_get_state(status);
-		} while (state == SND_PCM_STATE_DRAINING);
+		} while (snd_pcm_status_get_state(status) == SND_PCM_STATE_DRAINING);
 
 		/* dump the stream status */
 		mb_audio_stream_dumpstatus(inst);
