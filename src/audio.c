@@ -66,7 +66,7 @@ mb_audio_stream_frames2size(struct mb_audio_stream * const stream, ssize_t frame
  * Flush the queue
  */
 static void
-mb_audio_stream_flushqueue(struct mb_audio_stream * const stream)
+mb_audio_stream_dropqueue(struct mb_audio_stream * const stream)
 {
 	struct mb_audio_packet *packet;
 	pthread_mutex_lock(&stream->queue_lock);
@@ -83,11 +83,11 @@ mb_audio_stream_flushqueue(struct mb_audio_stream * const stream)
  * Flush an audio stream.
  */
 void
-mb_audio_stream_flush(struct mb_audio_stream * const inst)
+mb_audio_stream_drop(struct mb_audio_stream * const inst)
 {
 	/* mb_player_flushaudio */
 	pthread_mutex_lock(&inst->lock);
-	mb_audio_stream_flushqueue(inst);
+	mb_audio_stream_dropqueue(inst);
 	pthread_cond_signal(&inst->wake);
 	pthread_mutex_unlock(&inst->lock);
 }
@@ -141,16 +141,14 @@ mb_audio_stream_gettime_internal(struct mb_audio_stream * const inst, snd_pcm_st
 	snd_pcm_status_get_htstamp(pcm_status, &ts);
 
 	switch (state) {
-	case SND_PCM_STATE_OPEN:
-		return 0;
 	case SND_PCM_STATE_XRUN:
 		if (UNLIKELY(inst->lasttime != inst->xruntime)) {
 			DEBUG_VPRINT("audio", "PCM State is XRUN! (clock_offset=%li xruntime=%li lasttime=%li",
 				inst->clock_offset, inst->xruntime, inst->lasttime);
-
 		}
 		inst->clock_offset = inst->lasttime = inst->xruntime;
 		/* fall through */
+	case SND_PCM_STATE_OPEN:
 	case SND_PCM_STATE_SETUP:
 	case SND_PCM_STATE_PREPARED:
 	case SND_PCM_STATE_PAUSED:
@@ -164,6 +162,7 @@ mb_audio_stream_gettime_internal(struct mb_audio_stream * const inst, snd_pcm_st
 		time += inst->clock_offset;
 		return inst->lasttime = (int64_t) time;
 	default:
+		DEBUG_VPRINT("audio", "Unknown ALSA state (state=%i)", state);
 		return inst->lasttime;
 	}
 }
@@ -238,7 +237,8 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 		ret = 0;
 		goto end;
 	case SND_PCM_STATE_RUNNING:
-		DEBUG_PRINT("audio", "Pausing RUNNING stream");
+		DEBUG_VPRINT("audio", "Pausing RUNNING stream (offset=%li,time=%li)",
+			inst->clock_offset, mb_audio_stream_gettime(inst));
 
 		/* start draining the buffer */
 		inst->paused = 1;
@@ -255,6 +255,9 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 			}
 		} while (snd_pcm_status_get_state(status) == SND_PCM_STATE_DRAINING);
 
+		/* make sure we return the right time while paused */
+		inst->lasttime = inst->clock_offset = inst->xruntime;
+
 		/* dump the stream status */
 		mb_audio_stream_dumpstatus(inst);
 
@@ -270,8 +273,6 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 	}
 
 end:
-	assert(inst->clock_offset > 0);
-
 	pthread_mutex_unlock(&inst->lock);
 
 	return ret;
@@ -286,7 +287,8 @@ mb_audio_stream_resume(struct mb_audio_stream * const inst)
 {
 	int err, ret = -1;
 
-	DEBUG_PRINT("audio", "Resuming audio stream");
+	DEBUG_VPRINT("audio", "Resuming audio stream (time=%li)",
+		mb_audio_stream_gettime(inst));
 
 	pthread_mutex_lock(&inst->lock);
 
@@ -294,8 +296,6 @@ mb_audio_stream_resume(struct mb_audio_stream * const inst)
 		LOG_PRINT_ERROR("Cannot resume non-paused stream");
 		goto end;
 	}
-
-	assert(inst->clock_offset > 0);
 
 	/* reset ALSA. The clock will start running again when the
 	 * audio starts playing */
@@ -313,6 +313,9 @@ mb_audio_stream_resume(struct mb_audio_stream * const inst)
 	inst->paused = 0;
 	ret = 0;
 end:
+	DEBUG_VPRINT("audio", "Audio stream resumed (time=%li)",
+		mb_audio_stream_gettime(inst));
+
 	/* signal IO thread */
 	pthread_cond_signal(&inst->wake);
 	pthread_mutex_unlock(&inst->lock);
@@ -576,7 +579,7 @@ audio_exit:
 	}
 
 	/* free any remaining packets */
-	mb_audio_stream_flushqueue(inst);
+	mb_audio_stream_dropqueue(inst);
 
 	inst->playback_running = 0;
 
@@ -701,6 +704,7 @@ mb_audio_stream_setclock(struct mb_audio_stream * const stream, const int64_t cl
 	assert(stream != NULL);
 	stream->clock_offset = clock;
 	stream->xruntime = clock;
+	stream->lasttime = clock;
 	return 0;
 }
 
@@ -756,7 +760,7 @@ mb_audio_stream_destroy(struct mb_audio_stream * const stream)
 	pthread_mutex_unlock(&stream->lock);
 
 	/* free any remaining packets */
-	mb_audio_stream_flushqueue(stream);
+	mb_audio_stream_dropqueue(stream);
 
 	/* free stream object */
 	free(stream);

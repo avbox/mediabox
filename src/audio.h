@@ -12,7 +12,7 @@ struct mb_audio_stream;
  * Flush an audio stream.
  */
 void
-mb_audio_stream_flush(struct mb_audio_stream * const inst);
+mb_audio_stream_drop(struct mb_audio_stream * const inst);
 
 
 /**
