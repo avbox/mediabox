@@ -395,6 +395,14 @@ public class RemoteActivity extends AppCompatActivity
         {
             sendMessage("VOLDOWN");
         }
+        else if (view == this.findViewById(R.id.btnSubtitles))
+        {
+            sendMessage("SUBS");
+        }
+        else if (view == this.findViewById(R.id.btnMute))
+        {
+            sendMessage("MUTE");
+        }
     }
 
 

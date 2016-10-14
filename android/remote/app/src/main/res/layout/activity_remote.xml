@@ -232,4 +232,29 @@
         android:background="@android:color/holo_purple"
         android:textColor="#ffffff"
         android:onClick="onButtonPressed"/>
+
+    <Button
+        android:text="SUBTITLES"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:id="@+id/btnSubtitles"
+        android:background="@android:color/holo_blue_light"
+        android:textColor="@android:color/background_light"
+        android:layout_alignBaseline="@+id/btnUp"
+        android:layout_alignBottom="@+id/btnUp"
+        android:layout_alignParentRight="true"
+        android:layout_alignParentEnd="true"
+        android:onClick="onButtonPressed"/>
+
+    <Button
+        android:text="MUTE"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignTop="@+id/btnDown"
+        android:layout_alignParentRight="true"
+        android:layout_alignParentEnd="true"
+        android:id="@+id/btnMute"
+        android:background="@android:color/holo_red_dark"
+        android:textColor="@android:color/background_light"
+        android:onClick="onButtonPressed"/>
 </RelativeLayout>
