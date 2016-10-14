@@ -1,5 +1,5 @@
 AC_PREREQ([2.69])
-AC_INIT([mediabox], [0.01], [https://github.com/mediabox/])
+AC_INIT([mediabox], [0.01], [https://github.com/avbox/mediabox/])
 
 AC_CONFIG_HEADERS(src/config.h)
 AC_CONFIG_SRCDIR(src/main.c)
@@ -76,6 +76,10 @@ if test x"$enable_bluetooth" = xyes; then
 	AC_DEFINE([ENABLE_BLUETOOTH], 1, [Define to 1 to enable Bluetooth support])
 fi
 
+AC_ARG_ENABLE([branch-optimization], [Define to 1 to enable branch optimizations])
+if test x"$enable_branch_optimization" = xyes; then
+	AC_DEFINE([ENABLE_BRANCH_OPTIMIZATION], 1, [Define to 1 to enable branch optimization])
+fi
 
 
 #AC_SUBST(DAEMON_ARGS)
