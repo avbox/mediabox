@@ -511,7 +511,7 @@ mb_audio_stream_output(void *arg)
 				const int64_t waitusecs =
 					(n_frames * 1000L * 1000L) / inst->framerate;
 				struct timespec waittime = { .tv_sec = 0, .tv_nsec = 0 };
-				utimeadd(&waittime, waitusecs);
+				timeaddu(&waittime, waitusecs);
 				delay2abstime(&waittime);
 				pthread_cond_timedwait(&inst->wake, &inst->lock, &waittime);
 				pthread_mutex_unlock(&inst->lock);

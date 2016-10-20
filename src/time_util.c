@@ -134,7 +134,7 @@ utimediff(const struct timespec * a, const struct timespec * b)
  * struct.
  */
 void
-utimeadd(struct timespec * const tv, const int64_t usecs)
+timeaddu(struct timespec * const tv, const int64_t usecs)
 {
 	tv->tv_sec += usecs / (1000L * 1000L);
 	tv->tv_nsec += (usecs % (1000L * 1000L)) * 1000L;;
