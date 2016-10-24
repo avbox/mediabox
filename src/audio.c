@@ -452,7 +452,7 @@ mb_audio_stream_output(void *arg)
 			snd_strerror(ret));
 	}
 
-	frames_write_max = period_frames / 2;
+	frames_write_max = period_frames / 4;
 
 	DEBUG_VPRINT("audio", "ALSA buffer size: %lu", (unsigned long) inst->buffer_size);
 	DEBUG_VPRINT("audio", "ALSA period size: %lu", (unsigned long) period_frames);
@@ -505,7 +505,7 @@ mb_audio_stream_output(void *arg)
 			if (UNLIKELY(frames == -EAGAIN)) {
 				/* the ring buffer is full so we sleep for as long as it
 				 * takes to play the current fragment to ensure there's enough
-				 * room next time we try. Since the max fragment size is half
+				 * room next time we try. Since the max fragment size is 1/4
 				 * the buffer size this will ensure the buffer never gets much
 				 * more than half empty */
 				const int64_t waitusecs =
