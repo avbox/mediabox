@@ -78,6 +78,8 @@ mb_library_backend_init(void)
 	char * const avargs[] =
 	{
 		AVMOUNT_BIN,
+		"-l",
+		"/var/log/avmount.log",
 		"--lobind",
 		"-f",
 		"-p",
