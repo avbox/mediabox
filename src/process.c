@@ -37,6 +37,7 @@ LISTABLE_STRUCT(mb_process,
 	int stderr;
 	int exit_status;
 	int exitted;
+	unsigned force_kill_delay;
 	enum mb_process_flags flags;
 	const char *name;
 	const char *binary;
@@ -584,6 +585,23 @@ mb_process_openfd(int id, int std_fileno)
 
 
 /**
+ * Set the amount of time, in seconds, to wait for a process
+ * to exit after sending SIGTERM before sending SIGKILL.
+ */
+int
+mb_process_setsigkilldelay(int procid, unsigned delay)
+{
+	struct mb_process * const proc =
+		mb_process_getbyid(procid, 0);
+	if (proc == NULL) {
+		return -ENOENT;
+	}
+	proc->force_kill_delay = delay;
+	return 0;
+}
+
+
+/**
  * mb_process_start() -- Starts and monitors a child process.
  */
 int
@@ -634,6 +652,7 @@ mb_process_start(const char *binary, char * const argv[],
 	proc->exitted = 0;
 	proc->stopping = 0;
 	proc->flags = flags;
+	proc->force_kill_delay = 30;
 	proc->args = mb_process_clone_args(argv);
 	proc->name = strdup(name);
 	proc->binary = strdup(binary);
@@ -779,9 +798,8 @@ mb_process_stop(int id)
 				return -1;
 			}
 
-			/* register a timer to SIGKILL the process in 5 minutes if it
-			 * hasn't exited by then */
-			tv.tv_sec = 5;
+			/* register a timer to SIGKILL the process if it fails to exit */
+			tv.tv_sec = proc->force_kill_delay;
 			tv.tv_nsec = 0;
 			*id_copy = id;
 			if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, -1, mb_process_force_kill, id_copy) == -1) {
