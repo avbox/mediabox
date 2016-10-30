@@ -531,7 +531,6 @@ mb_audio_stream_output(void *arg)
 				if ((frames = snd_pcm_recover(inst->pcm_handle, frames, 0)) < 0) {
 					LOG_VPRINT_ERROR("Could not recover from ALSA underrun: %s",
 						snd_strerror(frames));
-					free(packet);
 					pthread_mutex_unlock(&inst->lock);
 					goto audio_exit;
 				}
@@ -542,7 +541,6 @@ mb_audio_stream_output(void *arg)
 		if (UNLIKELY(frames < 0)) {
 			LOG_VPRINT_ERROR("Unable to recover from ALSA underrun: %s",
 				snd_strerror(frames));
-			free(packet);
 			pthread_mutex_unlock(&inst->lock);
 			goto audio_exit;
 		}
