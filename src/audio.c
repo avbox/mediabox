@@ -552,8 +552,8 @@ mb_audio_stream_output(void *arg)
 		pthread_mutex_unlock(&inst->lock);
 
 		/* update the packet structure */
-		packet->n_frames -= n_frames;
-		packet->data += mb_audio_stream_frames2size(inst, n_frames);
+		packet->n_frames -= frames;
+		packet->data += mb_audio_stream_frames2size(inst, frames);
 
 		/* if there's no samples left in the packet then
 		 * remove it from the queue and free it */
