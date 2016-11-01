@@ -233,7 +233,6 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 			inst->clock_offset, inst->xruntime, inst->lasttime);
 		inst->paused = 1;
 		inst->clock_offset = inst->xruntime;
-		snd_pcm_drain(inst->pcm_handle);
 		ret = 0;
 		goto end;
 	case SND_PCM_STATE_RUNNING:
