@@ -451,12 +451,13 @@ mb_audio_stream_output(void *arg)
 			snd_strerror(ret));
 	}
 
-	frames_write_max = period_frames / 4;
+	frames_write_max = inst->buffer_size / (mb_audio_stream_frames2size(inst, 1) * 4);
 
 	DEBUG_VPRINT("audio", "ALSA buffer size: %lu", (unsigned long) inst->buffer_size);
 	DEBUG_VPRINT("audio", "ALSA period size: %lu", (unsigned long) period_frames);
 	DEBUG_VPRINT("audio", "ALSA period time: %u", period_usecs);
 	DEBUG_VPRINT("audio", "ALSA framerate: %u", inst->framerate);
+	DEBUG_VPRINT("audio", "ALSA fragment size: %lu", frames_write_max);
 
 	/* dump ALSA status */
 	mb_audio_stream_dumpstatus(inst);
