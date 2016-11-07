@@ -103,7 +103,7 @@ mb_downloadmanager_init(void)
 		"-p",
 		"58846",
 		"-c",
-		"/var/lib/mediabox/deluge/",
+		LOCALSTATEDIR "/mediabox/deluge/",
 		NULL
 	};
 
@@ -111,12 +111,12 @@ mb_downloadmanager_init(void)
 
 	/* create all config files for deluged */
 	umask(000);
-	mkdir("/var/lib/mediabox", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	mkdir("/var/lib/mediabox/deluge", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	mkdir("/var/lib/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	cp("/usr/local/share/mediabox/deluge-core.conf", "/var/lib/mediabox/deluge/core.conf");
-	cp("/usr/local/share/mediabox/deluge-auth", "/var/lib/mediabox/deluge/auth");
-	unlink("/var/lib/mediabox/deluge/deluged.pid");
+	mkdir(LOCALSTATEDIR "/mediabox", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	mkdir(LOCALSTATEDIR "/mediabox/deluge", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	mkdir(LOCALSTATEDIR "/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	cp(DATADIR "/mediabox/deluge/deluge-core.conf", LOCALSTATEDIR "/mediabox/deluge/core.conf");
+	cp(DATADIR "/mediabox/deluge/deluge-auth", LOCALSTATEDIR "/mediabox/deluge/auth");
+	unlink(LOCALSTATEDIR "/mediabox/deluge/deluged.pid");
 
 	/* launch the deluged process */
 	if ((daemon_id = mb_process_start(DELUGED_BIN, args,
@@ -125,8 +125,7 @@ mb_downloadmanager_init(void)
 		fprintf(stderr, "download-backend: Could not start deluge daemon\n");
 		return -1;
 	}
-
-	return 0;
+return 0;
 }
 
 

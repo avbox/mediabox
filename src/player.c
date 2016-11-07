@@ -1902,10 +1902,9 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 
 	const int64_t seek_to = av_rescale_q(inst->fmt_ctx->chapters[i]->start,
 		inst->fmt_ctx->chapters[i]->time_base, AV_TIME_BASE_Q);
-	const int64_t offset = seek_to - pos;
 
 	DEBUG_VPRINT("player", "Seeking (pos=%li, seek_to=%li, offset=%li)",
-		pos, seek_to, offset);
+		pos, seek_to, (seek_to - pos));
 
 	inst->seek_to = seek_to;
 

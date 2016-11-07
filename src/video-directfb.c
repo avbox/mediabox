@@ -5,7 +5,6 @@
 #include <unistd.h>
 #include <string.h>
 #include <directfb.h>
-#include <directfb_windows.h>
 #include <cairo/cairo.h>
 
 /* for direct rendering */

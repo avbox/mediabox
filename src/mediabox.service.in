@@ -1,0 +1,17 @@
+[Unit]
+Description=MediaBox
+After=syslog.target network.target auditd.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/mediabox.env
+User=root
+ExecStart=@prefix@/bin/mediabox --dfb:no-sighandler
+#ExecReload=/bin/kill -HUP $MAINPID
+KillMode=process
+TimeoutStopSec=30
+StandardError=journal
+StandardOutput=null
+
+[Install]
+WantedBy=multi-user.target

@@ -72,6 +72,7 @@ if test x"$enable_ionice" = xyes; then
 fi
 
 AC_ARG_ENABLE([bluetooth], [Define to 1 to enable Bluetooth support])
+AM_CONDITIONAL([ENABLE_BLUETOOTH], [test x$enable_bluetooth = xyes])
 if test x"$enable_bluetooth" = xyes; then
 	AC_DEFINE([ENABLE_BLUETOOTH], 1, [Define to 1 to enable Bluetooth support])
 fi
@@ -94,42 +95,25 @@ AX_PTHREAD([],[AC_MSG_ERROR([POSIX threads are required to build this program])]
 # to the default compilation variables. This will also allow the tests below
 # (fuse, libupnp, ...) to pick these flags.
 LIBS="$PTHREAD_LIBS $LIBS"
-
-LDFLAGS="$LDFLAGS $PTHREAD_CFLAGS"
-CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 CC="$PTHREAD_CC"
 
 PKG_CHECK_MODULES([PANGOCAIRO], [pangocairo], ,
-AC_MSG_ERROR('Unable to find pango library. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $PANGOCAIRO_CFLAGS"
-LDFLAGS="$LDFLAGS $PANGOCAIRO_LIBS"
+	AC_MSG_ERROR('Unable to find pango library. Please make sure library and header files are installed.'))
 
-PKG_CHECK_MODULES(DIRECTFB, [directfb >= 1.7.6], ,
-AC_MSG_ERROR('Unable to find DirectFB. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $DIRECTFB_CFLAGS"
-LDFLAGS="$LDFLAGS $DIRECTFB_LIBS"
+PKG_CHECK_MODULES(DIRECTFB, [directfb >= 1.4.9], ,
+	AC_MSG_ERROR('Unable to find DirectFB. Please make sure library and header files are installed.'))
 
 PKG_CHECK_MODULES(ALSA, [alsa], ,
-AC_MSG_ERROR('Unable to find libasound. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $ALSA_CFLAGS"
-LDFLAGS="$LDFLAGS $ALSA_LIBS"
+	AC_MSG_ERROR('Unable to find libasound. Please make sure library and header files are installed.'))
 
 PKG_CHECK_MODULES(LIBAVUTIL, [libavutil], ,
-AC_MSG_ERROR('Unable to find libavutil. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $LIBAVUTIL_CFLAGS"
-LDFLAGS="$LDFLAGS $LIBAVUTIL_LIBS"
+	AC_MSG_ERROR('Unable to find libavutil. Please make sure library and header files are installed.'))
 PKG_CHECK_MODULES(LIBAVFORMAT, [libavformat], ,
-AC_MSG_ERROR('Unable to find libavformat. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $LIBAVFORMAT_CFLAGS"
-LDFLAGS="$LDFLAGS $LIBAVFORMAT_LIBS"
+	AC_MSG_ERROR('Unable to find libavformat. Please make sure library and header files are installed.'))
 PKG_CHECK_MODULES(LIBAVCODEC, [libavcodec], ,
-AC_MSG_ERROR('Unable to find libavcodec. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $LIBAVCODEC_CFLAGS"
-LDFLAGS="$LDFLAGS $LIBAVCODEC_LIBS"
+	AC_MSG_ERROR('Unable to find libavcodec. Please make sure library and header files are installed.'))
 PKG_CHECK_MODULES(LIBAVFILTER, [libavfilter], ,
-AC_MSG_ERROR('Unable to find libavfilter. Please make sure library and header files are installed.'))
-CFLAGS="$CFLAGS $LIBAVFILTER_CFLAGS"
-LDFLAGS="$LDFLAGS $LIBAVFILTER_LIBS"
+	AC_MSG_ERROR('Unable to find libavfilter. Please make sure library and header files are installed.'))
 
 
 #
@@ -138,18 +122,12 @@ LDFLAGS="$LDFLAGS $LIBAVFILTER_LIBS"
 if test x"$enable_bluetooth" = xyes; then
 	PKG_CHECK_MODULES(BLUEZ, [bluez], ,
 		AC_MSG_ERROR('Unable to find bluez. Please make sure library and header files are installed.'))
-	CFLAGS="$CFLAGS $BLUEZ_CFLAGS"
-	LDFLAGS="$LDFLAGS $BLUEZ_LIBS"
 
 	PKG_CHECK_MODULES(GLIB, [glib-2.0], ,
 		AC_MSG_ERROR('Unable to find glib. Please make sure library and header files are installed.'))
-	CFLAGS="$CFLAGS $GLIB_CFLAGS"
-	LDFLAGS="$LDFLAGS $GLIB_LIBS"
 
 	PKG_CHECK_MODULES(GIO, [gio-2.0], ,
 		AC_MSG_ERROR('Unable to find gio. Please make sure library and header files are installed.'))
-	CFLAGS="$CFLAGS $GIO_CFLAGS"
-	LDFLAGS="$LDFLAGS $GIO_LIBS"
 fi
 
 
@@ -159,12 +137,12 @@ fi
 #
 AX_LIB_CURL([7.45.0],,
 	[AC_MSG_ERROR([Your system lacks libcurl >= 7.45.0])])
-LDFLAGS="$LDFLAGS -lcurl"
 AC_DEFINE([USE_CURL], 1, [Define to 1 to use libcurl])
 
 
 AC_SUBST(PREFIX)
 
 AC_CONFIG_FILES([Makefile
-                 src/Makefile])
+                 src/Makefile
+		 src/mediabox.service])
 AC_OUTPUT
