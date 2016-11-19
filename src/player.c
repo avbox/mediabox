@@ -1122,6 +1122,11 @@ mb_player_video_decode(void *arg)
 					}
 				}
 
+				if (video_frame_flt->repeat_pict) {
+					DEBUG_VPRINT("player", "repeat_pict = %i",
+						video_frame_flt->repeat_pict);
+				}
+
 				/* copy picture to buffer */
 				avpicture_layout((const AVPicture*) video_frame_flt,
 					MB_DECODER_PIX_FMT, inst->width, inst->height,
