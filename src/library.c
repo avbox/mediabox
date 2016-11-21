@@ -353,7 +353,7 @@ mb_library_init(void)
 	window = mbv_window_new("MEDIA LIBRARY",
 		(resx / 2) - (width / 2),
 		(resy / 2) - (height / 2),
-		width, height);
+		width, height, NULL);
 	if (window == NULL) {
 		fprintf(stderr, "mb_mainmenu: Could not create new window!\n");
 		return -1;

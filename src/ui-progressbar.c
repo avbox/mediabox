@@ -37,13 +37,15 @@ mb_ui_progressbar_setvalue(struct mb_ui_progressbar *inst, int value)
 
 
 /**
- * mb_ui_progressbar_update() -- Repaint the progressbar.
+ * Repaint the progressbar.
  */
-int
-mb_ui_progressbar_update(struct mb_ui_progressbar *inst)
+static int
+mb_ui_progressbar_repaint(struct mbv_window *window)
 {
 	int bar_width;
 	int w, h;
+	struct mb_ui_progressbar *inst = (struct mb_ui_progressbar*)
+		mbv_window_getusercontext(window);
 
 	assert(inst != NULL);
 	assert(inst->window != NULL);
@@ -56,11 +58,17 @@ mb_ui_progressbar_update(struct mb_ui_progressbar *inst)
 	mbv_window_clear(inst->window, MBV_DEFAULT_BACKGROUND);
 	mbv_window_setcolor(inst->window, MBV_DEFAULT_FOREGROUND);
 	mbv_window_fillrectangle(inst->window, 0, 0, bar_width, h);
-	mbv_window_update(inst->window);
 
-	return 0;
+	return 1;
 }
 
+
+int
+mb_ui_progressbar_update(struct mb_ui_progressbar *inst)
+{
+	mbv_window_update(inst->window);
+	return 0;
+}
 
 void
 mb_ui_progressbar_show(struct mb_ui_progressbar *inst)
@@ -90,7 +98,7 @@ mb_ui_progressbar_new(struct mbv_window *parent,
 	}
 
 	/* create widget window */
-	if ((inst->window = mbv_window_getchildwindow(parent, x, y, w, h)) == NULL) {
+	if ((inst->window = mbv_window_getchildwindow(parent, x, y, w, h, &mb_ui_progressbar_repaint, inst)) == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "ui-progressbar",
 			"Could not create window");
 		free(inst);

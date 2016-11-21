@@ -17,38 +17,14 @@ struct mb_ui_textview
 };
 
 
-/**
- * Sets the textview text.
- */
-int
-mb_ui_textview_settext(struct mb_ui_textview * const inst,
-	const char * const text)
+static int
+mb_ui_textview_repaint(struct mbv_window *window)
 {
-	assert(inst != NULL);
-
-	if (inst->text != NULL) {
-		free((void*) inst->text);
-	}
-	if ((inst->text = strdup(text)) == NULL) {
-		LOG_PRINT_ERROR("Could not set text");
-		return -1;
-	}
-	return 0;
-}
-
-
-/**
- * Repaint the widget.
- */
-int
-mb_ui_textview_update(struct mb_ui_textview * const inst)
-{
-	int ret = -1, w, h;
+	int w, h;
 	cairo_t *context;
 	PangoLayout *layout;
-
-	assert(inst != NULL);
-	assert(inst->window != NULL);
+	struct mb_ui_textview * const inst = (struct mb_ui_textview*)
+		mbv_window_getusercontext(window);
 
 	/* if there's nothing to draw return success */
 	if (inst->text == NULL || strlen(inst->text) == 0) {
@@ -90,11 +66,48 @@ mb_ui_textview_update(struct mb_ui_textview * const inst)
 	/* cleanup */
 	g_object_unref(layout);
 
-	ret = 0;
 end:
 	mbv_window_cairo_end(inst->window);
+
+	return 1;
+}
+
+/**
+ * Sets the textview text.
+ */
+int
+mb_ui_textview_settext(struct mb_ui_textview * const inst,
+	const char * const text)
+{
+	assert(inst != NULL);
+
+	if (inst->text != NULL) {
+		free((void*) inst->text);
+	}
+	if ((inst->text = strdup(text)) == NULL) {
+		LOG_PRINT_ERROR("Could not set text");
+		return -1;
+	}
+	return 0;
+}
+
+
+/**
+ * Repaint the widget.
+ */
+int
+mb_ui_textview_update(struct mb_ui_textview * const inst)
+{
+	assert(inst != NULL);
+	assert(inst->window != NULL);
+
+	/* if there's nothing to draw return success */
+	if (inst->text == NULL || strlen(inst->text) == 0) {
+		return 0;
+	}
+
 	mbv_window_update(inst->window);
-	return ret;
+	return 0;
 }
 
 
@@ -118,7 +131,7 @@ mb_ui_textview_new(struct mbv_window * const parent,
 	}
 
 	/* create a sub-window for the widget */
-	if ((inst->window = mbv_window_getchildwindow(parent, x, y, w, h)) == NULL) {
+	if ((inst->window = mbv_window_getchildwindow(parent, x, y, w, h, &mb_ui_textview_repaint, inst)) == NULL) {
 		LOG_PRINT_ERROR("Could not create widget window");
 		free(inst);
 		errno = EFAULT;

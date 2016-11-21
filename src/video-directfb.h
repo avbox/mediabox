@@ -47,16 +47,18 @@ mbv_dfb_window_blit_buffer(
 
 struct mbv_dfb_window*
 mbv_dfb_window_new(
-        char *title,
+	struct mbv_window *window,
         int x,
         int y,
         int width,
-        int height);
+        int height,
+	mbv_repaint_handler repaint_handler);
 
 
 struct mbv_dfb_window*
 mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
-	int x, int y, int width, int height);
+	int x, int y, int width, int height,
+	mbv_repaint_handler repaint_handler);
 
 
 void
@@ -77,7 +79,7 @@ mbv_dfb_getrootwindow(void);
  * mbv_init() -- Initialize video device
  */
 struct mbv_dfb_window *
-mbv_dfb_init(int argc, char **argv);
+mbv_dfb_init(struct mbv_window *root_window, int argc, char **argv);
 
 void
 mbv_dfb_destroy();

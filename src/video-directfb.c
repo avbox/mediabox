@@ -29,13 +29,14 @@
 struct mbv_dfb_window
 {
 	struct mbv_dfb_window *parent;
-	IDirectFBWindow *dfb_window;
 	IDirectFBSurface *surface;
 	DFBRectangle rect;
 	cairo_t *cairo_context;
 	pthread_mutex_t cairo_lock;
 	int visible;
 	uint8_t opacity;
+	mbv_repaint_handler repaint_handler;
+	struct mbv_window *window;
 };
 
 
@@ -402,30 +403,14 @@ mbv_dfb_window_resize(struct mbv_dfb_window* window, int w, int h)
  */
 struct mbv_dfb_window*
 mbv_dfb_window_new(
-	char *title,
+	struct mbv_window *window,
 	int posx,
 	int posy,
 	int width,
-	int height)
+	int height,
+	void *repaint_handler)
 {
 	struct mbv_dfb_window *win;
-	DFBWindowDescription window_desc = {
-		.flags = DWDESC_POSX | DWDESC_POSY | DWDESC_WIDTH | DWDESC_HEIGHT |
-			 DWDESC_CAPS | DWDESC_SURFACE_CAPS,
-		.caps = /*DWCAPS_ALPHACHANNEL | |*/ /*DWCAPS_DOUBLEBUFFER | */DWCAPS_NODECORATION,
-		.surface_caps = DSCAPS_NONE |  DSCAPS_FLIPPING,
-		.posx = posx,
-		.posy = posy,
-		.width = width,
-		.height = height
-	};
-
-	assert(title == NULL);
-
-	/* if this is the root window set as primary */
-	if (root_window == NULL) {
-		window_desc.surface_caps |= DSCAPS_PRIMARY;
-	}
 
 	/* first allocate the window structure */
 	win = malloc(sizeof(struct mbv_dfb_window));
@@ -434,9 +419,9 @@ mbv_dfb_window_new(
 		return NULL;
 	}
 
-
 	/* initialize window structure */
 	win->parent = NULL;
+	win->window = window;
 	win->visible = 0;
 	win->rect.w = width;
 	win->rect.h = height;
@@ -444,6 +429,7 @@ mbv_dfb_window_new(
 	win->rect.y = posy;
 	win->opacity = (uint8_t) ((0xFF * DEFAULT_OPACITY) / 100);
 	win->cairo_context = NULL;
+	win->repaint_handler = repaint_handler;
 
 	if (pthread_mutex_init(&win->cairo_lock, NULL) != 0) {
 		fprintf(stderr, "video-dfb: Could not initialize mutex\n");
@@ -451,21 +437,12 @@ mbv_dfb_window_new(
 		return NULL;
 	}
 
-	if (0 && root_window == NULL) {
-		DFBCHECK(layer->GetWindow(layer, 1, &win->dfb_window));
-	} else {
-		DFBCHECK(layer->CreateWindow(layer, &window_desc, &win->dfb_window));
-	}
-
-	/* set opacity to 100% */
 	if (root_window == NULL) {
-		DFBCHECK(win->dfb_window->SetOpacity(win->dfb_window, 0xff));
+		DFBCHECK(layer->GetSurface(layer, &win->surface));
 	} else {
-		DFBCHECK(win->dfb_window->SetOpacity(win->dfb_window, win->opacity));
+		DFBCHECK(root_window->surface->GetSubSurface(
+			root_window->surface, &win->rect, &win->surface));
 	}
-
-	/* get the window surface */
-	DFBCHECK(win->dfb_window->GetSurface(win->dfb_window, &win->surface));
 
 	/* set basic drawing flags */
 	DFBCHECK(win->surface->SetBlittingFlags(win->surface, DSBLIT_NOFX));
@@ -535,7 +512,7 @@ mbv_dfb_window_cairo_end(struct mbv_dfb_window *window)
  */
 struct mbv_dfb_window*
 mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
-	int x, int y, int width, int height)
+	int x, int y, int width, int height, mbv_repaint_handler repaint_handler)
 {
 	struct mbv_dfb_window *inst;
 
@@ -552,7 +529,8 @@ mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
 
 	/* initialize new window object */
 	inst->parent = window;
-	inst->dfb_window = window->dfb_window;
+	inst->window = window->window;
+	inst->repaint_handler = repaint_handler;
 	inst->visible = 1;
 	inst->cairo_context = NULL;
 	inst->rect.w = width;
@@ -579,6 +557,12 @@ mbv_dfb_window_update(struct mbv_dfb_window *window)
 {
 	assert(window != NULL);
 
+	if (window->repaint_handler) {
+		if (!window->repaint_handler(window->window)) {
+			return;
+		}
+	}
+
 	if (mbv_dfb_window_isvisible(window)) {
 		DFBCHECK(window->surface->Flip(window->surface, NULL, DSFLIP_BLIT));
 	}
@@ -588,20 +572,9 @@ mbv_dfb_window_update(struct mbv_dfb_window *window)
 void
 mbv_dfb_window_show(struct mbv_dfb_window *window)
 {
-	int visible_changed = 0;
-
 	assert(window != NULL);
-
-	if (!window->visible) {
-		window->visible = 1;
-		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, window->opacity));
-		visible_changed = 1;
-	}
-
-	if (visible_changed) {
-		mbv_dfb_addwindowmask(window);
-	}
-
+	window->visible = 1;
+	mbv_dfb_addwindowmask(window);
 	mbv_dfb_window_update(window);
 }
 
@@ -609,18 +582,9 @@ mbv_dfb_window_show(struct mbv_dfb_window *window)
 void
 mbv_dfb_window_hide(struct mbv_dfb_window *window)
 {
-	int visible_changed = 0;
-	if (window->visible) {
-		DFBCHECK(window->dfb_window->SetOpacity(window->dfb_window, 0x00));
-		window->visible = 0;
-		visible_changed = 1;
-	}
-	if (visible_changed) {
-		mbv_dfb_removewindowmask(window);
-	}
-
+	window->visible = 0;
+	mbv_dfb_removewindowmask(window);
 	mbv_dfb_window_update(window);
-
 }
 
 
@@ -637,12 +601,6 @@ mbv_dfb_window_destroy(struct mbv_dfb_window *window)
 
 	/* release window surfaces */
 	window->surface->Release(window->surface);
-
-	/* if this is not a subwindow then destroy the directfb
-	 * window object as well */
-	if (window->parent == NULL) {
-		window->dfb_window->Release(window->dfb_window);
-	}
 
 	/* free window object */
 	free(window);
@@ -683,7 +641,7 @@ mbv_dfb_video_mode_callback(int width, int height, int bpp, void *arg)
  * mbv_init() -- Initialize video device
  */
 struct mbv_dfb_window *
-mbv_dfb_init(int argc, char **argv)
+mbv_dfb_init(struct mbv_window *rootwin, int argc, char **argv)
 {
 	int i;
 	DFBCHECK(DirectFBInit(&argc, &argv));
@@ -712,7 +670,7 @@ mbv_dfb_init(int argc, char **argv)
 	
 	/* create root window */
 	root_window = mbv_dfb_window_new(
-		NULL, 0, 0, screen_width, screen_height);
+		rootwin, 0, 0, screen_width, screen_height, NULL);
 	if (root_window == NULL) {
 		fprintf(stderr, "Could not create root window\n");
 		abort();

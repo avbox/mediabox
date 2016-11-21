@@ -445,7 +445,7 @@ mb_mediasearch_init(void)
 	window = mbv_window_new("FIND MEDIA",
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
-		window_width, window_height);
+		window_width, window_height, NULL);
 	if (window == NULL) {
 		fprintf(stderr, "mediasearch: Could not create new window!\n");
 		return -1;

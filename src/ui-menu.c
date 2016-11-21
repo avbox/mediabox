@@ -14,6 +14,7 @@
 LISTABLE_TYPE(mb_ui_menuitem,
 	struct mbv_window *window;
 	char *name;
+	int dirty;;
 	void *data;
 );
 
@@ -35,13 +36,40 @@ struct mb_ui_menu
 };
 
 
-static void
-mb_ui_menuitem_update(struct mb_ui_menu *inst, mb_ui_menuitem *item)
+/**
+ * Gets the menuitem instance that corresponds to
+ * a window
+ */
+static mb_ui_menuitem *
+mb_ui_menu_getwindowitem(struct mb_ui_menu *inst, struct mbv_window *window)
+{
+	mb_ui_menuitem *item;
+	LIST_FOREACH(mb_ui_menuitem*, item, &inst->items) {
+		if (item->window == window) {
+			return item;
+		}
+	}
+	return NULL;
+}
+
+
+/**
+ * Repaints a menu item.
+ */
+static int
+mb_ui_menuitem_repaint(struct mbv_window *window)
 {
 	int canvas_width, canvas_height;
+	struct mb_ui_menu * const inst = (struct mb_ui_menu*)
+		mbv_window_getusercontext(window);
+	mb_ui_menuitem * const item = (mb_ui_menuitem*)
+		mb_ui_menu_getwindowitem(inst, window);
 
 	assert(inst != NULL);
-	assert(item != NULL);
+
+	if (item == NULL) {
+		return 0;
+	}
 
 	/* get canvas size */
 	mbv_window_getcanvassize(item->window, &canvas_width, &canvas_height);
@@ -55,8 +83,8 @@ mb_ui_menuitem_update(struct mb_ui_menu *inst, mb_ui_menuitem *item)
 		mbv_window_setcolor(item->window, MBV_DEFAULT_FOREGROUND);
 		mbv_window_drawstring(item->window, item->name, canvas_width / 2, 5);
 	}
+	return 1;
 }
-
 
 
 /**
@@ -73,16 +101,8 @@ mb_ui_menu_setselected(struct mb_ui_menu *inst, mb_ui_menuitem *item)
 		return 0;
 	}
 
-	/* if there is a selected item then unselect it */
-	if (inst->selected != NULL && inst->selected->window != NULL) {
-		mb_ui_menuitem *selected = inst->selected;
-		inst->selected = NULL;
-		mb_ui_menuitem_update(inst, selected);
-	}
-
 	/* select the new item */
 	inst->selected = item;
-	mb_ui_menuitem_update(inst, inst->selected);
 
 	/* this is where we invoke the callback function. For now
 	 * we just SIGABRT if it's set since it's not implemented yet. */
@@ -112,10 +132,8 @@ mb_ui_menu_setitemtext(struct mb_ui_menu *inst, void *item, char *text)
 				fprintf(stderr, "downloads: Out of memory\n");
 				return -1;
 			}
-			mb_ui_menuitem_update(inst, menuitem);
 			return 0;
 		}
-		
 	}
 	return -1;
 }
@@ -172,7 +190,6 @@ mb_ui_menu_scrollitems(struct mb_ui_menu *inst, int direction)
 			item->window = NULL;
 		} else if (j < inst->visible_items) {
 			item->window = inst->item_windows[j++];
-			mb_ui_menuitem_update(inst, item);
 		} else {
 			item->window = NULL;
 		}
@@ -431,7 +448,7 @@ mb_ui_menu_new(struct mbv_window *window)
 	/* preallocate a window for each visible item */
 	for (i = 0; i < inst->visible_items; i++) {
 		inst->item_windows[i] = mbv_window_getchildwindow(inst->window, 0,
-			itemheight * i, -1, itemheight);
+			itemheight * i, -1, itemheight, &mb_ui_menuitem_repaint, inst);
 		if (inst->item_windows[i] == NULL) {
 			int j;
 			for (j = 0; j < i; j++) {

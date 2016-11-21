@@ -63,7 +63,7 @@ mb_mainmenu_init(void)
 	window = mbv_window_new("MAIN MENU",
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
-		window_width, window_height);
+		window_width, window_height, NULL);
 	if (window == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "mainmenu",
 			"Could not create new window!");

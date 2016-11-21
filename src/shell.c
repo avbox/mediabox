@@ -199,7 +199,7 @@ mbs_volumechanged(int volume)
 		y = h - 150;
 
 		/* create a new window with a progressbar widget */
-		volumebar_window = mbv_window_new(NULL, x, y, bar_width, 60);
+		volumebar_window = mbv_window_new(NULL, x, y, bar_width, 60, NULL);
 		if (volumebar_window == NULL) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
 				"Could not create volume indicator window");
@@ -329,7 +329,7 @@ mbs_playerstatuschanged(struct mbp *inst,
 				py = (sh / 2) - (ph / 2);
 
 				/* create a window for the progress bar */
-				if ((progress = mbv_window_new(NULL, px, py, pw, ph)) == NULL) {
+				if ((progress = mbv_window_new(NULL, px, py, pw, ph, NULL)) == NULL) {
 					LOG_PRINT_ERROR("Could not create progressbar window");
 					break;
 				}

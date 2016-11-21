@@ -27,6 +27,10 @@
 struct mbv_window;
 struct mbv_font;
 
+
+typedef int (*mbv_repaint_handler)(struct mbv_window *window);
+
+
 enum mbv_alignment
 {
 	MBV_ALIGN_LEFT = 1,
@@ -56,6 +60,13 @@ mbv_getdefaultfont(void);
 
 void
 mbv_window_cairo_end(struct mbv_window *window);
+
+
+/**
+ * Gets the window's user context
+ */
+void *
+mbv_window_getusercontext(const struct mbv_window * const window);
 
 
 void
@@ -119,12 +130,15 @@ mbv_window_blit_buffer(
 
 struct mbv_window*
 mbv_window_new(char *title,
-	int x, 	int y, int width, int height);
+	int x, 	int y, int width, int height,
+	mbv_repaint_handler repaint_handler);
 
 
 struct mbv_window*
 mbv_window_getchildwindow(struct mbv_window *window,
-	int x, int y, int width, int height);
+	int x, int y, int width, int height,
+	mbv_repaint_handler repaint_handler,
+	void *user_context);
 
 
 void
