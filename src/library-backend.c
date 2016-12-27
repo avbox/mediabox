@@ -73,23 +73,8 @@ mb_library_backend_startmediatomb(const char * iface_name, void  *data)
  * mb_library_backend_init() -- Initialize the library backend.
  */
 int
-mb_library_backend_init(void)
+mb_library_backend_init(const int launch_avmount)
 {
-	char * const avargs[] =
-	{
-		AVMOUNT_BIN,
-		"-l",
-		"/var/log/avmount.log",
-		"--lobind",
-		"-f",
-		"-p",
-		"49153",
-		"-o",
-		"allow_other",
-		"/media/UPnP",
-		NULL
-	};
-
 	DEBUG_PRINT("library-backend", "Starting library backend");
 
 	/* initialize a linked list to hold mediatomb instances */
@@ -99,12 +84,29 @@ mb_library_backend_init(void)
 	ifaceutil_enumifaces(mb_library_backend_startmediatomb, NULL);
 
 	/* launch the avmount process */
-	if ((avmount_process_id = mb_process_start(AVMOUNT_BIN, avargs,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE |
-		MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDERR_LOG,
-		"avmount", NULL, NULL)) == -1) {
-		LOG_PRINT(MB_LOGLEVEL_ERROR, "library-backend", "Could not start avmount daemon");
-		return -1;
+	if (launch_avmount) {
+		char * const avargs[] =
+		{
+			AVMOUNT_BIN,
+			"-l",
+			"/var/log/avmount-mediabox.log",
+			"--lobind",
+			"-f",
+			"-p",
+			"49153",
+			"-o",
+			"allow_other",
+			"/media/UPnP",
+			NULL
+		};
+
+		if ((avmount_process_id = mb_process_start(AVMOUNT_BIN, avargs,
+			MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE |
+			MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDERR_LOG,
+			"avmount", NULL, NULL)) == -1) {
+			LOG_PRINT(MB_LOGLEVEL_ERROR, "library-backend", "Could not start avmount daemon");
+			return -1;
+		}
 	}
 
 	return 0;

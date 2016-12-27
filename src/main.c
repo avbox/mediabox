@@ -33,6 +33,7 @@
 
 #define WORKDIR  "/var/lib/mediabox"
 
+const char *prog;
 
 /**
  * Signal handler
@@ -61,10 +62,36 @@ signal_handler(int signum)
 }
 
 
+/**
+ * Print usage.
+ */
+static void
+print_usage()
+{
+	printf("%s: mediabox [options]\n", prog);
+	printf("\n");
+	printf(" --version\t\tPrint version information\n");
+	printf(" --no-direct\t\tDon't use direct rendering\n");
+	printf(" --dont-launch-avmount\tAssume avmount is already mounted\n");
+	printf(" --dfb:XXX\t\tDirectFB options. See directfbrc(5)\n");
+	printf(" --help\t\t\tShow this help\n");
+	printf("\n");
+}
+
+
 int
 main (int argc, char **argv)
 {
 	int i;
+	int launch_avmount = 1;
+	char *progmem;
+
+	/* save program name */
+	if ((progmem = strdup(argv[0])) == NULL) {
+		prog = argv[0];
+	} else {
+		prog = basename(progmem);
+	}
 
 	/* parse command line */
 	for (i = 1; i < argc; i++) {
@@ -72,7 +99,7 @@ main (int argc, char **argv)
 			fprintf(stderr, "main: Disabling of direct rendering not implemented.\n");
 
 		} else if (!strcmp(argv[i], "--help")) {
-			fprintf(stderr, "main: No help available yet.\n");
+			print_usage();
 			exit(EXIT_SUCCESS);
 
 		} else if (!strcmp(argv[i], "--version")) {
@@ -81,8 +108,11 @@ main (int argc, char **argv)
 			exit(EXIT_SUCCESS);
 		} else if (!memcmp(argv[i], "--dfb:", 6)) {
 			/* let dfb args pass */
+		} else if (!strcmp(argv[i], "--dont-launch-avmount")) {
+			launch_avmount = 0;
 		} else {
 			fprintf(stderr, "main: Invalid argument %s\n", argv[i]);
+			print_usage();
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -131,7 +161,7 @@ main (int argc, char **argv)
 	}
 
 	/* initialize the library backend */
-	if (mb_library_backend_init() == -1) {
+	if (mb_library_backend_init(launch_avmount) == -1) {
 		fprintf(stderr, "Could not initialize library backend\n");
 		exit(EXIT_FAILURE);
 	}
@@ -170,6 +200,10 @@ main (int argc, char **argv)
 	mbv_destroy();
 
 	snd_config_update_free_global();
+
+	if (progmem != NULL) {
+		free(progmem);
+	}
 
 	return 0;
 }

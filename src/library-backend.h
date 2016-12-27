@@ -6,7 +6,7 @@
  * mb_library_backend_init() -- Initialize the library backend.
  */
 int
-mb_library_backend_init(void);
+mb_library_backend_init(const int launch_avmount);
 
 
 /**
