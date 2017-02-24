@@ -350,7 +350,7 @@ mb_library_init(void)
 	}
 
 	/* create a new window for the library dialog */
-	window = mbv_window_new("MEDIA LIBRARY",
+	window = mbv_window_new("library", "MEDIA LIBRARY",
 		(resx / 2) - (width / 2),
 		(resy / 2) - (height / 2),
 		width, height, NULL);

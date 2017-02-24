@@ -442,7 +442,7 @@ mb_mediasearch_init(void)
 	}
 
 	/* create a new window for the menu dialog */
-	window = mbv_window_new("FIND MEDIA",
+	window = mbv_window_new("mediasearch", "FIND MEDIA",
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
 		window_width, window_height, NULL);

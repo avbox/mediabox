@@ -62,7 +62,8 @@ mediabox_SOURCES = \
 	library.c \
 	timers.c \
 	alsa-volume.c \
-	process.c
+	process.c \
+	proc_util.c
 
 if ENABLE_BLUETOOTH
 AM_CFLAGS += @BLUEZ_CFLAGS@

@@ -73,6 +73,7 @@ print_usage()
 	printf(" --version\t\tPrint version information\n");
 	printf(" --no-direct\t\tDon't use direct rendering\n");
 	printf(" --dont-launch-avmount\tAssume avmount is already mounted\n");
+	printf(" --dont-launch-mediatomb\tDon't launch mediatomb\n");
 	printf(" --dfb:XXX\t\tDirectFB options. See directfbrc(5)\n");
 	printf(" --help\t\t\tShow this help\n");
 	printf("\n");
@@ -84,6 +85,7 @@ main (int argc, char **argv)
 {
 	int i;
 	int launch_avmount = 1;
+	int launch_mediatomb = 1;
 	char *progmem;
 
 	/* save program name */
@@ -110,6 +112,8 @@ main (int argc, char **argv)
 			/* let dfb args pass */
 		} else if (!strcmp(argv[i], "--dont-launch-avmount")) {
 			launch_avmount = 0;
+		} else if (!strcmp(argv[i], "--dont-launch-mediatomb")) {
+			launch_mediatomb = 0;
 		} else {
 			fprintf(stderr, "main: Invalid argument %s\n", argv[i]);
 			print_usage();
@@ -161,7 +165,7 @@ main (int argc, char **argv)
 	}
 
 	/* initialize the library backend */
-	if (mb_library_backend_init(launch_avmount) == -1) {
+	if (mb_library_backend_init(launch_avmount, launch_mediatomb) == -1) {
 		fprintf(stderr, "Could not initialize library backend\n");
 		exit(EXIT_FAILURE);
 	}

@@ -7,12 +7,8 @@
 struct mbv_dfb_window;
 
 
-int
-mbv_dfb_isfbdev(void);
-
-
 /**
- * mbv_dfb_window_cairo_begin() -- Gets a cairo context for drawing
+ * Gets a cairo context for drawing
  * to the window
  */
 cairo_t *
@@ -20,7 +16,7 @@ mbv_dfb_window_cairo_begin(struct mbv_dfb_window *window);
 
 
 /**
- * mbv_dfb_window_cairo_end() -- Ends a cairo drawing session and
+ * Ends a cairo drawing session and
  * unlocks the surface
  */
 void
@@ -31,12 +27,9 @@ void
 mbv_dfb_getscreensize(int *width, int *height);
 
 
-int
-mbv_dfb_window_isvisible(struct mbv_dfb_window *window);
-
-
 void
-mbv_dfb_window_update(struct mbv_dfb_window *window);
+mbv_dfb_window_update(struct mbv_dfb_window * const window,
+	int update);
 
 
 int
@@ -60,12 +53,6 @@ mbv_dfb_window_getchildwindow(struct mbv_dfb_window *window,
 	int x, int y, int width, int height,
 	mbv_repaint_handler repaint_handler);
 
-
-void
-mbv_dfb_window_show(struct mbv_dfb_window *win);
-
-void
-mbv_dfb_window_hide(struct mbv_dfb_window *win);
 
 void
 mbv_dfb_window_destroy(struct mbv_dfb_window *win);

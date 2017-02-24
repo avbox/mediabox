@@ -18,6 +18,7 @@
 #include "process.h"
 #include "debug.h"
 #include "log.h"
+#include "file_util.h"
 
 #define DELUGE_BIN "/usr/bin/deluge-console"
 #define DELUGED_BIN "/usr/bin/deluged"
@@ -25,33 +26,6 @@
 
 
 int daemon_id = -1;
-
-
-static int
-cp(const char *src, const char *dst)
-{
-	int fdr, fdw, ret = -1;
-	struct stat st;
-
-	if (stat(src, &st) == 0) {
-		if ((fdr = open(src, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) != -1) {
-			if ((fdw = open(dst, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) != -1) {
-				if (sendfile(fdw, fdr, 0, st.st_size) != -1) {
-					ret = 0;
-				} else {
-					fprintf(stderr, "download-manager: sendfile() failed. errno=%i\n", errno);
-				}
-				close(fdw);
-			} else {
-				fprintf(stderr, "download-manager: Could not open %s\n", dst);
-			}
-			close(fdr);
-		} else {
-			fprintf(stderr, "download-manager: Could not open %s (errno=%i)\n", src, errno);
-		}
-	}
-	return ret;
-}
 
 
 /**
@@ -103,7 +77,7 @@ mb_downloadmanager_init(void)
 		"-p",
 		"58846",
 		"-c",
-		LOCALSTATEDIR "/mediabox/deluge/",
+		"/tmp/mediabox/deluge/",
 		NULL
 	};
 
@@ -111,12 +85,11 @@ mb_downloadmanager_init(void)
 
 	/* create all config files for deluged */
 	umask(000);
-	mkdir(LOCALSTATEDIR "/mediabox", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	mkdir(LOCALSTATEDIR "/mediabox/deluge", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	mkdir(LOCALSTATEDIR "/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	cp(DATADIR "/mediabox/deluge/deluge-core.conf", LOCALSTATEDIR "/mediabox/deluge/core.conf");
-	cp(DATADIR "/mediabox/deluge/deluge-auth", LOCALSTATEDIR "/mediabox/deluge/auth");
-	unlink(LOCALSTATEDIR "/mediabox/deluge/deluged.pid");
+
+	mkdir_p("/tmp/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	cp(DATADIR "/mediabox/deluge/deluge-core.conf", "/tmp/mediabox/deluge/core.conf");
+	cp(DATADIR "/mediabox/deluge/deluge-auth", "/tmp/mediabox/deluge/auth");
+	unlink("/tmp/mediabox/deluge/deluged.pid");
 
 	/* launch the deluged process */
 	if ((daemon_id = mb_process_start(DELUGED_BIN, args,

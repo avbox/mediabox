@@ -24,7 +24,7 @@
 
 
 static int pw = 0, ph = 0;
-static struct mbv_window *root_window = NULL;
+static struct mbv_window *main_window = NULL;
 static struct mbv_window *progress = NULL;
 static struct mb_ui_progressbar *progressbar = NULL;
 static struct mbp *player = NULL;
@@ -33,6 +33,8 @@ static struct mb_ui_progressbar *volumebar = NULL;
 static int volumebar_timer_id = -1;
 static int input_fd = -1;
 static int clock_timer_id = 0;
+static char time_string[256] = "";
+static char date_string[256] = "";
 
 
 /**
@@ -55,48 +57,28 @@ mbs_getqueue(void)
 }
 
 
-static enum mbt_result
-mbs_welcomescreen(int id, void *data)
+/**
+ * Draws the welcome screen.
+ */
+static int
+mbs_welcomescreen_paint(struct mbv_window *window)
 {
 	int w, h;
-	time_t now;
-	char time_string[256];
-	char date_string[256];
 	cairo_t *context;
 	PangoLayout *layout_time, *layout_date;
 	PangoFontDescription *font_desc;
 
-	static char old_time_string[256] = { 0 };
+	DEBUG_VPRINT("shell", "mbs_welcomescreen_paint(0x%p)",
+		window);
 
-	(void) id;
-	(void) data;
+	assert(mbv_window_isvisible(window));
 
-	/* format the time string */
-	now = time(NULL);
-	strftime(time_string, sizeof(time_string), "%I:%M %p",
-		localtime(&now));
+	mbv_window_getcanvassize(window, &w, &h);
+	mbv_window_clear(window, 0x000000ff);
+	mbv_window_setcolor(window, 0x8080ffff);
+	mbv_window_drawline(window, 0, h / 2, w - 1, h / 2);
 
-	/* if the time has not changed there's no need to repaint */
-	if (!strcmp(old_time_string, time_string)) {
-		return MB_TIMER_CALLBACK_RESULT_CONTINUE;
-	} else {
-		/* save the time string */
-		strcpy(old_time_string, time_string);
-	}
-
-	/* format date string */
-	strftime(date_string, sizeof(time_string), "%B %d, %Y",
-		localtime(&now));
-
-	/* mbv_getscreensize(&w, &h); */
-	mbv_window_getcanvassize(root_window, &w, &h);
-
-	/* redraw the whole screen */
-	mbv_window_clear(root_window, 0x000000ff);
-	mbv_window_setcolor(root_window, 0x8080ffff);
-	mbv_window_drawline(root_window, 0, h / 2, w - 1, h / 2);
-
-	if ((context = mbv_window_cairo_begin(root_window)) != NULL) {
+	if ((context = mbv_window_cairo_begin(window)) != NULL) {
 		if ((layout_time = pango_cairo_create_layout(context)) != NULL) {
 			if ((font_desc = pango_font_description_from_string("Sans Bold 128px")) != NULL) {
 				pango_layout_set_font_description(layout_time, font_desc);
@@ -130,12 +112,47 @@ mbs_welcomescreen(int id, void *data)
 		if (layout_date != NULL) {
 			g_object_unref(layout_date);
 		}
-		mbv_window_cairo_end(root_window);
+		mbv_window_cairo_end(window);
 	} else {
 		DEBUG_PRINT("about", "Could not get cairo context");
 	}
 
-        mbv_window_show(root_window);
+	return 0;
+}
+
+
+/**
+ * This is the callback function for the timer
+ * that updates the clock on the welcome screen.
+ */
+static enum mbt_result
+mbs_welcomescreen(int id, void *data)
+{
+	time_t now;
+	static char old_time_string[256] = { 0 };
+
+	(void) id;
+	(void) data;
+
+	/* format the time string */
+	now = time(NULL);
+	strftime(time_string, sizeof(time_string), "%I:%M %p",
+		localtime(&now));
+
+	/* if the time has not changed there's no need to repaint */
+	if (!strcmp(old_time_string, time_string)) {
+		return MB_TIMER_CALLBACK_RESULT_CONTINUE;
+	} else {
+		/* save the time string */
+		strcpy(old_time_string, time_string);
+	}
+
+	/* format date string */
+	strftime(date_string, sizeof(time_string), "%B %d, %Y",
+		localtime(&now));
+
+	/* repaint the window */
+        mbv_window_update(main_window);
 
 	return MB_TIMER_CALLBACK_RESULT_CONTINUE;
 }
@@ -180,6 +197,9 @@ mbs_dismissvolumebar(int id, void *data)
 }
 
 
+/**
+ * Handles volume changes.
+ */
 static void
 mbs_volumechanged(int volume)
 {
@@ -189,17 +209,19 @@ mbs_volumechanged(int volume)
 	const int bar_width = 800;
 
 	if (volumebar_timer_id == -1) {
+		struct mbv_window *root_window;
 
 		assert(volumebar == NULL);
 		assert(volumebar_window == NULL);
 
 		/* calculate volumebar size and location */
+		root_window = mbv_getrootwindow();
 		mbv_window_getcanvassize(root_window, &w, &h);
 		x = (w / 2) - (bar_width / 2);
 		y = h - 150;
 
 		/* create a new window with a progressbar widget */
-		volumebar_window = mbv_window_new(NULL, x, y, bar_width, 60, NULL);
+		volumebar_window = mbv_window_new("volumebar", NULL, x, y, bar_width, 60, NULL);
 		if (volumebar_window == NULL) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
 				"Could not create volume indicator window");
@@ -261,7 +283,8 @@ mbs_playerstatuschanged(struct mbp *inst,
 	enum mb_player_status status, enum mb_player_status last_status)
 {
 	if (inst == player) {
-		if (last_status == MB_PLAYER_STATUS_BUFFERING && status != MB_PLAYER_STATUS_BUFFERING) {
+		if (last_status == MB_PLAYER_STATUS_BUFFERING &&
+			status != MB_PLAYER_STATUS_BUFFERING) {
 
 			DEBUG_PRINT("shell", "Destroying progress bar");
 
@@ -277,7 +300,8 @@ mbs_playerstatuschanged(struct mbp *inst,
 				progress = NULL;
 			}
 
-		} else if (last_status == MB_PLAYER_STATUS_PAUSED && status != MB_PLAYER_STATUS_PAUSED) {
+		} else if (last_status == MB_PLAYER_STATUS_PAUSED &&
+			status != MB_PLAYER_STATUS_PAUSED) {
 			mb_player_showoverlaytext(player, "", 1,
 				MBV_ALIGN_LEFT);
 		}
@@ -285,6 +309,9 @@ mbs_playerstatuschanged(struct mbp *inst,
 		/* if we're out of the READY state then cancel the clock
 		 * timer */
 		if (clock_timer_id != 0 && status != MB_PLAYER_STATUS_READY) {
+			/* hide the welcome screen window */
+			mbv_window_hide(main_window);
+
 			DEBUG_PRINT("shell", "Stoping clock timer");
 			if (mbt_cancel(clock_timer_id) == 0) {
 				DEBUG_PRINT("shell", "Cancelled clock timer");
@@ -299,6 +326,8 @@ mbs_playerstatuschanged(struct mbp *inst,
 		case MB_PLAYER_STATUS_READY:
 			DEBUG_PRINT("shell", "Player state changed to READY");
 			if (clock_timer_id == 0) {
+				assert(!mbv_window_isvisible(main_window));
+				mbv_window_show(main_window);
 				mbs_start_clock();
 			}
 			break;
@@ -313,11 +342,16 @@ mbs_playerstatuschanged(struct mbp *inst,
 			 * next time */
 			if (progress == NULL) {
 				int sw, sh, px, py;
+				struct mbv_window *root_window;
 
 				DEBUG_PRINT("shell", "Initializing progress bar");
 
 				assert(progressbar == NULL);
 
+				/* clear the root window */
+				/* TODO: This is not needed now */
+				root_window = mbv_getrootwindow();
+				assert(root_window != NULL);
 				mbv_window_clear(root_window, 0x000000ff);
 				mbv_window_update(root_window);
 
@@ -329,7 +363,7 @@ mbs_playerstatuschanged(struct mbp *inst,
 				py = (sh / 2) - (ph / 2);
 
 				/* create a window for the progress bar */
-				if ((progress = mbv_window_new(NULL, px, py, pw, ph, NULL)) == NULL) {
+				if ((progress = mbv_window_new("progressbar", NULL, px, py, pw, ph, NULL)) == NULL) {
 					LOG_PRINT_ERROR("Could not create progressbar window");
 					break;
 				}
@@ -375,14 +409,24 @@ mbs_playerstatuschanged(struct mbp *inst,
 
 
 /**
- * mbs_init() -- Initialize the MediaBox shell
+ * Initialize the MediaBox shell
  */
 int
 mbs_init(void)
 {
-	/* create the root window */
-        root_window = mbv_getrootwindow();
-	if (root_window == NULL) {
+	int w, h;
+	struct mbv_window *root_window;
+
+	/* get the screen size in pixels (that's the
+	 * size of the root window */
+	root_window = mbv_getrootwindow();
+	assert(root_window != NULL);
+	mbv_window_getcanvassize(root_window, &w, &h);
+
+	/* create the welcome screen window */
+        main_window = mbv_window_new("welcome", NULL, 0, 0, w, h,
+		&mbs_welcomescreen_paint);
+	if (main_window == NULL) {
 		fprintf(stderr, "Could not create root window\n");
 		return -1;
 	}
@@ -400,9 +444,6 @@ mbs_init(void)
 		return -1;
 	}
 
-
-	mbv_window_show(root_window);
-
 	return 0;
 }
 
@@ -414,6 +455,7 @@ mbs_showdialog(void)
 	struct mb_message *message;
 
 	/* start the clock timer */
+	mbv_window_show(main_window);
 	mbs_start_clock();
 
 	/* initialize the volume control */
@@ -438,8 +480,12 @@ mbs_showdialog(void)
 			quit = 1;
 			break;
 		}
+		case MBI_EVENT_KBD_SPACE:
 		case MBI_EVENT_MENU:
 		{
+
+			DEBUG_PRINT("shell", "MENU key pressed");
+
 			if (mb_mainmenu_init() == -1) {
 				fprintf(stderr, "Could not initialize main menu\n");
 				break;
@@ -581,7 +627,7 @@ mbs_showdialog(void)
 			DEBUG_VPRINT("shell", "Received event %i", (int) message->msg);
 			break;
 		}
-		mb_player_update(player);
+		/* mb_player_update(player); */
 		free(message);
 	}
 
@@ -609,11 +655,17 @@ mbs_reboot(void)
 }
 
 
+/**
+ * Destroy the shell.
+ */
 void
 mbs_destroy(void)
 {
 	if (player != NULL) {
 		mb_player_destroy(player);
 	}
+
+	/* destroy the main window */
+	mbv_window_destroy(main_window);
 }
 

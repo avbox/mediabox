@@ -51,10 +51,10 @@
   </server>
   <import hidden-files="no">
     <scripting script-charset="UTF-8">
-      <common-script>/etc/mediatomb/common.js</common-script>
-      <playlist-script>/etc/mediatomb/playlists.js</playlist-script>
+      <common-script>/tmp/mediabox/mediatomb/common.js</common-script>
+      <playlist-script>/tmp/mediabox/mediatomb/playlists.js</playlist-script>
       <virtual-layout type="js">
-        <import-script>/etc/mediatomb/import.js</import-script>
+      <import-script>/tmp/mediabox/mediatomb/import.js</import-script>
       </virtual-layout>
     </scripting>
     <mappings>

@@ -28,7 +28,7 @@ struct mbv_window;
 struct mbv_font;
 
 
-typedef int (*mbv_repaint_handler)(struct mbv_window *window);
+typedef int (*mbv_repaint_handler)(struct mbv_window * const window);
 
 
 enum mbv_alignment
@@ -107,10 +107,6 @@ mbv_window_settitle(struct mbv_window *window, const char *title);
 
 
 int
-mbv_isfbdev(void);
-
-
-int
 mbv_getdefaultfontheight(void);
 
 
@@ -129,13 +125,15 @@ mbv_window_blit_buffer(
 
 
 struct mbv_window*
-mbv_window_new(char *title,
+mbv_window_new(
+	const char * const identifier, char *title,
 	int x, 	int y, int width, int height,
 	mbv_repaint_handler repaint_handler);
 
 
 struct mbv_window*
 mbv_window_getchildwindow(struct mbv_window *window,
+	const char * const identifier,
 	int x, int y, int width, int height,
 	mbv_repaint_handler repaint_handler,
 	void *user_context);
@@ -156,8 +154,11 @@ void
 mbv_window_clear(struct mbv_window *win, uint32_t color);
 
 
+/**
+ * Show the window.
+ */
 void
-mbv_window_show(struct mbv_window *win);
+mbv_window_show(struct mbv_window * const window);
 
 
 void

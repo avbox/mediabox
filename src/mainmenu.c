@@ -60,7 +60,7 @@ mb_mainmenu_init(void)
 	}
 
 	/* create a new window for the menu dialog */
-	window = mbv_window_new("MAIN MENU",
+	window = mbv_window_new("mainmenu", "MAIN MENU",
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
 		window_width, window_height, NULL);
@@ -102,6 +102,8 @@ int
 mb_mainmenu_showdialog(void)
 {
 	int quit = 0;
+
+	DEBUG_PRINT("mainmenu", "Showing dialog");
 
 	/* show the menu window */
         mbv_window_show(window);

@@ -131,7 +131,8 @@ mb_ui_textview_new(struct mbv_window * const parent,
 	}
 
 	/* create a sub-window for the widget */
-	if ((inst->window = mbv_window_getchildwindow(parent, x, y, w, h, &mb_ui_textview_repaint, inst)) == NULL) {
+	if ((inst->window = mbv_window_getchildwindow(parent,
+		"textview", x, y, w, h, &mb_ui_textview_repaint, inst)) == NULL) {
 		LOG_PRINT_ERROR("Could not create widget window");
 		free(inst);
 		errno = EFAULT;

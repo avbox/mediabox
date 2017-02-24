@@ -108,11 +108,17 @@ struct mbp
 	pthread_mutex_t audio_decoder_lock;
 	pthread_t audio_decoder_thread;
 
+	/* FIXME: We shouldn't save a copy of the last frame but
+	 * instead keep a reference to it. Hopefully we can come
+	 * up with a solution that does not require a lock to
+	 * handle mb_player_update() */
+	void *video_last_frame;
+	pthread_mutex_t update_lock;
+
 	int video_stream_index;
 	AVCodecContext *video_codec_ctx;
 	AVPacket video_packet[MB_VIDEO_BUFFER_PACKETS];
 	char video_packet_state[MB_VIDEO_BUFFER_PACKETS];
-	void *video_last_frame;
 	uint8_t *frame_data[MB_VIDEO_BUFFER_FRAMES];
 	char frame_state[MB_VIDEO_BUFFER_FRAMES];
 	int64_t frame_pts[MB_VIDEO_BUFFER_FRAMES];
@@ -577,8 +583,9 @@ mb_player_video(void *arg)
 			}
 		}
 
-		/* blit the frame to window  */
+		/* blit the frame to window surface  */
 		mbv_window_blit_buffer(inst->window, buf, inst->width, inst->height, 0, 0);
+		mbv_window_update(inst->window);
 
 #ifdef MB_DECODER_PRINT_FPS
 		/* calculate fps */
@@ -612,6 +619,7 @@ video_exit:
 	/* clear screen */
 	memset(inst->frame_data[0], 0, inst->bufsz);
 	mbv_window_blit_buffer(inst->window, inst->frame_data[0], inst->width, inst->height, 0, 0);
+	mbv_window_update(inst->window);
 
 	inst->video_playback_running = 0;
 	inst->video_renderer_pts = 0;
@@ -634,27 +642,27 @@ mb_player_update(struct mbp *inst)
 	/* DEBUG_PRINT("player", "Updating surface"); */
 
 	assert(inst != NULL);
-
-	/* if the last frame buffer is NULL it means that we're not
-	 * currently playing
-	 *
-	 * FIXME: There is a race condition here. If the last frame
-	 * if freed after this check we may crash or at least get a video
-	 * glitch. Probably not worth fixing as once the DRM compositor
-	 * is working and the overlays move to the shell it won't be
-	 * necessary to cache the last frame here.
-	 */
-	if (inst->video_last_frame == NULL) {
-		return;
-	}
-
 	if ((frame_data = av_malloc(inst->bufsz)) == NULL) {
 		return;
 	}
 
+	pthread_mutex_lock(&inst->update_lock);
+
+	/* if the last frame buffer is NULL it means that we're not
+	 * currently playing
+	 */
+	if (inst->video_last_frame == NULL || inst->status == MB_PLAYER_STATUS_READY) {
+		pthread_mutex_unlock(&inst->update_lock);
+		return;
+	}
+
 	memcpy(frame_data, inst->video_last_frame, inst->bufsz);
+
+	pthread_mutex_unlock(&inst->update_lock);
+
 	mb_player_postproc(inst, frame_data);
 	mbv_window_blit_buffer(inst->window, frame_data, inst->width, inst->height, 0, 0);
+	mbv_window_update(inst->window);
 	free(frame_data);
 }
 
@@ -1185,8 +1193,12 @@ decoder_exit:
 	}
 
 	if (inst->video_last_frame != NULL) {
+		/* make sure we're not in the middle of a
+		 * repaint */
+		pthread_mutex_lock(&inst->update_lock);
 		free(inst->video_last_frame);
 		inst->video_last_frame = NULL;
+		pthread_mutex_unlock(&inst->update_lock);
 	}
 
 #ifdef ENABLE_DOUBLE_BUFFERING
@@ -2333,7 +2345,8 @@ mb_player_new(struct mbv_window *window)
 		pthread_cond_init(&inst->audio_decoder_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->video_output_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->stream_signal, NULL) != 0 ||
-		pthread_mutex_init(&inst->top_overlay_lock, NULL) != 0) {
+		pthread_mutex_init(&inst->top_overlay_lock, NULL) != 0 ||
+		pthread_mutex_init(&inst->update_lock, NULL) != 0) {
 		LOG_PRINT_ERROR("Cannot create player instance. Pthreads error");
 		free(inst);
 		return NULL;

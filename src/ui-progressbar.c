@@ -98,7 +98,8 @@ mb_ui_progressbar_new(struct mbv_window *parent,
 	}
 
 	/* create widget window */
-	if ((inst->window = mbv_window_getchildwindow(parent, x, y, w, h, &mb_ui_progressbar_repaint, inst)) == NULL) {
+	if ((inst->window = mbv_window_getchildwindow(parent,
+		"ui.progressbar", x, y, w, h, &mb_ui_progressbar_repaint, inst)) == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "ui-progressbar",
 			"Could not create window");
 		free(inst);

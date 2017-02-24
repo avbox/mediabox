@@ -279,7 +279,7 @@ mb_downloads_init(void)
 	}
 
 	/* create a new window for the menu dialog */
-	window = mbv_window_new("DOWNLOADS",
+	window = mbv_window_new("downloads", "DOWNLOADS",
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
 		window_width, window_height, NULL);

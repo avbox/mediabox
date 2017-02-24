@@ -12,6 +12,21 @@
 #include "log.h"
 
 
+/**
+ * Represents a rectangle.
+ */
+struct mbv_rect
+{
+	int x;
+	int y;
+	int w;
+	int h;
+};
+
+
+/**
+ * Represents a window object.
+ */
 struct mbv_window
 {
 	struct mbv_dfb_window *native_window;
@@ -19,8 +34,8 @@ struct mbv_window
 	struct mbv_window *parent;
 	mbv_repaint_handler repaint_handler;
 	const char *title;
-	int width;
-	int height;
+	const char *identifier; /* used for debugging purposes */
+	struct mbv_rect rect;
 	int visible;
 	uint32_t foreground_color;
 	uint32_t background_color;
@@ -36,6 +51,26 @@ LISTABLE_STRUCT(mbv_childwindow,
 static struct mbv_window root_window;
 static PangoFontDescription *font_desc;
 static int default_font_height = 32;
+
+
+/**
+ * Checks if inner is inside outter. Returns 1 if
+ * it is, 0 otherwise
+ */
+static int
+mbv_rect_isinside(const struct mbv_rect * const inner,
+	const struct mbv_rect * const outter)
+{
+	if (inner->x >= outter->x && inner->y >= outter->y) {
+		if ((inner->x + inner->w) <= (outter->x + outter->w)) {
+			if ((inner->y + inner->h) <= (outter->y + outter->h)) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
 
 
 /**
@@ -69,7 +104,7 @@ mbv_window_getusercontext(const struct mbv_window * const window)
 
 
 #ifndef NDEBUG
-static int
+static inline int
 mbv_getfontsize(PangoFontDescription *desc)
 {
 	int sz;
@@ -99,15 +134,15 @@ mbv_getdefaultfont(void)
 int
 mbv_window_isvisible(struct mbv_window *window)
 {
-	return mbv_dfb_window_isvisible(window->native_window);
+	return window->visible;
 }
 
 
 int
 mbv_window_getsize(struct mbv_window *window, int *width, int *height)
 {
-	*width = window->width;
-	*height = window->height;
+	*width = window->rect.w;
+	*height = window->rect.h;
 	return 0;
 }
 
@@ -171,36 +206,60 @@ mbv_getdefaultfontheight(void)
 }
 
 
-int
-mbv_isfbdev(void)
-{
-	return mbv_dfb_isfbdev();
-}
-
-
+/**
+ * Blits a buffer into a window's surface.
+ */
 int
 mbv_window_blit_buffer(
 	struct mbv_window *window, void *buf, int width, int height,
 	int x, int y)
 {
-	return mbv_dfb_window_blit_buffer(window->content_window->native_window, buf, width, height, x, y);
+	int ret;
+	ret = mbv_dfb_window_blit_buffer(
+		window->content_window->native_window,
+		buf, width, height, x, y);
+	return ret;
 }
 
 
 /**
- * This is the internal redraw handler
+ * This is the internal repaint handler
  */
 static int
-mbv_window_redraw_handler(struct mbv_window *window)
+__mbv_window_repaint_handler(struct mbv_window * const window, int update)
 {
+	/* DEBUG_VPRINT("video", "mbv_window_repaint_handler(\"%s\")",
+		window->identifier); */
+
 	if (!window->visible) {
 		return 0;
 	}
-	if (window->repaint_handler == NULL) {
-		return 1;
-	}
 
-	return window->repaint_handler(window);
+	/* if the window has no repaint handler then
+	 * just invoke the repaint handler for all child
+	 * windows */
+	if (window->repaint_handler == NULL) {
+		struct mbv_childwindow *child;
+		LIST_FOREACH(struct mbv_childwindow *, child, &window->children) {
+			__mbv_window_repaint_handler(child->window, update);
+		}
+
+		/* blit window */
+		mbv_dfb_window_update(window->native_window, update);
+		return 0;
+	} else {
+		/* invoke the user-defined repaint handler */
+		window->repaint_handler(window);
+		mbv_dfb_window_update(window->native_window, update);
+		return 0;
+	}
+}
+
+
+static int
+mbv_window_repaint_handler(struct mbv_window * const window)
+{
+	return __mbv_window_repaint_handler(window, 1);
 }
 
 
@@ -216,24 +275,27 @@ mbv_window_repaint_decoration(struct mbv_window *window)
 
 	assert(window->content_window != window); /* is a window WITH title */
 
+	/* DEBUG_VPRINT("video", "mbv_window_repaint_decoration(\"%s\")",
+		window->identifier); */
+
 	if ((context = mbv_dfb_window_cairo_begin(window->native_window)) != NULL) {
 
 		/* first clear the title window */
 		cairo_move_to(context, 0, 0);
-		cairo_line_to(context, window->width, 0);
-		cairo_line_to(context, window->width, window->height);
-		cairo_line_to(context, 0, window->height);
+		cairo_line_to(context, window->rect.w, 0);
+		cairo_line_to(context, window->rect.w, window->rect.h);
+		cairo_line_to(context, 0, window->rect.h);
 		cairo_line_to(context, 0, 0);
 		cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->background_color));
 		cairo_fill(context);
 
 		if ((layout = pango_cairo_create_layout(context)) != NULL) {
 
-			DEBUG_VPRINT("video", "Font size %i",
-				mbv_getfontsize(font_desc) / PANGO_SCALE);
+			/* DEBUG_VPRINT("video", "Font size %i",
+				mbv_getfontsize(font_desc) / PANGO_SCALE); */
 
 			pango_layout_set_font_description(layout, font_desc);
-			pango_layout_set_width(layout, window->width * PANGO_SCALE);
+			pango_layout_set_width(layout, window->rect.w * PANGO_SCALE);
 			pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
 			pango_layout_set_text(layout, window->title, -1);
 
@@ -248,7 +310,7 @@ mbv_window_repaint_decoration(struct mbv_window *window)
 			/* draw line after title */
 			cairo_set_line_width(context, 2.0);
 			cairo_move_to(context, 0, font_height + 6);
-			cairo_line_to(context, window->width, font_height + 6);
+			cairo_line_to(context, window->rect.w, font_height + 6);
 			cairo_stroke(context);
 		} else {
 			DEBUG_PRINT("video", "Could not create layout");
@@ -257,8 +319,8 @@ mbv_window_repaint_decoration(struct mbv_window *window)
 		mbv_dfb_window_cairo_end(window->native_window);
 	}
 
-	return 0;
-
+	/* invoke the content window repaint handler */
+	return __mbv_window_repaint_handler(window->content_window, 1);
 }
 
 
@@ -267,6 +329,7 @@ mbv_window_repaint_decoration(struct mbv_window *window)
  */
 struct mbv_window*
 mbv_window_new(
+	const char * const identifier,
 	char *title,
 	int x,
 	int y,
@@ -276,6 +339,9 @@ mbv_window_new(
 {
 	struct mbv_window *window;
 	struct mbv_childwindow *window_node;
+
+	DEBUG_VPRINT("video", "mbv_window_new(\"%s\")",
+		identifier);
 
 	/* allocate memory for the window and it's node on the
 	 * parent window */
@@ -291,7 +357,7 @@ mbv_window_new(
 
 	/* initialize a native window object */
 	window->native_window = mbv_dfb_window_new(window, x, y, width, height,
-		&mbv_window_redraw_handler);
+		&mbv_window_repaint_handler);
 	if (window->native_window == NULL) {
 		fprintf(stderr, "video: Could not create native window. Out of memory\n");
 		free(window);
@@ -300,8 +366,10 @@ mbv_window_new(
 
 	window->content_window = window;
 	window->title = NULL;
-	window->width = width;
-	window->height = height;
+	window->rect.x = x;
+	window->rect.y = y;
+	window->rect.w = width;
+	window->rect.h = height;
 	window->foreground_color = MBV_DEFAULT_FOREGROUND;
 	window->background_color = MBV_DEFAULT_BACKGROUND;
 	window->user_context = NULL;
@@ -309,15 +377,32 @@ mbv_window_new(
 	window->visible = 0;
 	LIST_INIT(&window->children);
 
+	/* save a copy of the identifier if provided */
+	if (identifier != NULL) {
+		window->identifier = strdup(identifier);
+	} else {
+		window->identifier = NULL;
+	}
+
 	/* add the window to the root window's children list */
 	window_node->window = window;
 	LIST_ADD(&root_window.children, window_node);
 
 	if (title != NULL) {
+		char *cidentifier;
 		int font_height = 36;
+
+		/* create a copy of the identifier with _content
+		 * appended */
+		if ((cidentifier = malloc(strlen(identifier) + 8 + 1)) != NULL) {
+			strcpy(cidentifier, identifier);
+			strcat(cidentifier, "_content");
+		}
+
 		window->repaint_handler = &mbv_window_repaint_decoration;
-		window->content_window = mbv_window_getchildwindow(
-			window, 0, (font_height + 11), width, height - (font_height + 11),
+		window->content_window = mbv_window_getchildwindow(window,
+			cidentifier,
+			0, (font_height + 11), width, height - (font_height + 11),
 			repaint_handler, NULL);
 		if (window->content_window == NULL) {
 			mbv_dfb_window_destroy(window->native_window);
@@ -333,13 +418,20 @@ mbv_window_new(
 }
 
 
+/**
+ * Gets a child window
+ */
 struct mbv_window*
 mbv_window_getchildwindow(struct mbv_window *window,
+	const char * const identifier,
 	int x, int y, int width, int height, mbv_repaint_handler repaint_handler,
 	void *user_context)
 {
 	struct mbv_window *new_window;
 	struct mbv_childwindow *window_node;
+
+	DEBUG_VPRINT("video", "mbv_window_getchildwindow(\"%s\")",
+		identifier);
 
 	/* allocate memory for the window and it's node */
 	if ((new_window = malloc(sizeof(struct mbv_window))) == NULL) {
@@ -379,17 +471,33 @@ mbv_window_getchildwindow(struct mbv_window *window,
 	new_window->repaint_handler = repaint_handler;
 	new_window->user_context = user_context;
 	new_window->parent = window;
-	new_window->visible = 0;
+	new_window->visible = 1;
 	new_window->title = NULL;
-	new_window->width = width;
-	new_window->height = height;
+	new_window->rect.x = x;
+	new_window->rect.y = y;
+	new_window->rect.w = width;
+	new_window->rect.h = height;
 	new_window->foreground_color = window->foreground_color;
 	new_window->background_color = window->background_color;
-	LIST_INIT(&window->children);
+	LIST_INIT(&new_window->children);
+
+	/* save a copy of the identifier for debugging */
+	if (identifier != NULL) {
+		if ((new_window->identifier = strdup(identifier)) == NULL) {
+			DEBUG_VPRINT("video", "Could not duplicate window identifier: %s",
+				identifier);
+		}
+	} else {
+		new_window->identifier = NULL;
+	}
 
 	/* add the window to the parent window children list */
 	window_node->window = new_window;
-	LIST_ADD(&window->children, window_node);
+	if (&window->content_window != NULL) {
+		LIST_ADD(&window->content_window->children, window_node);
+	} else {
+		LIST_ADD(&window->children, window_node);
+	}
 
 	return new_window;
 }
@@ -402,6 +510,9 @@ mbv_getrootwindow(void)
 }
 
 
+/**
+ * Clear the window.
+ */
 void
 mbv_window_clear(struct mbv_window *window, uint32_t color)
 {
@@ -432,29 +543,34 @@ mbv_window_clear(struct mbv_window *window, uint32_t color)
 void
 mbv_window_update(struct mbv_window *window)
 {
-	struct mbv_childwindow *child;
+	/* if we're updating the root window then we we don't
+	 * need to flip the windows to the front (screen) buffer
+	 * as the whole surface will be flipped. This value is
+	 * passed down the repaint chain so that none of the
+	 * windows get blitted. When we call mbv_dfb_window_update
+	 * bellow the whole back-buffer will be flipped */
+	const int update = (window != &root_window);
 
 	if (!window->visible) {
+		DEBUG_PRINT("video", "Not updating invisible window");
 		return;
 	}
 
-	mbv_dfb_window_update(window->native_window);
+	__mbv_window_repaint_handler(window, update);
 
-	/* repaint all child windows */
-	LIST_FOREACH(struct mbv_childwindow *, child, &window->children) {
-		if (child->window->visible) {
-			mbv_dfb_window_update(child->window->native_window);
-		}
-	}
+	mbv_dfb_window_update(window->native_window, update);
 }
 
 
+/**
+ * Gets the window's canvas size.
+ */
 void
 mbv_window_getcanvassize(struct mbv_window *window,
 	int *width, int *height)
 {
-	*width = window->content_window->width;
-	*height = window->content_window->height;
+	*width = window->content_window->rect.w;
+	*height = window->content_window->rect.h;
 }
 
 
@@ -488,6 +604,9 @@ mbv_window_getbackground(const struct mbv_window *window)
 }
 
 
+/**
+ * Draws a line on a window.
+ */
 void
 mbv_window_drawline(struct mbv_window *window,
 	int x1, int y1, int x2, int y2)
@@ -562,18 +681,80 @@ mbv_window_drawstring(struct mbv_window *window,
 }
 
 
+/**
+ * Show the window.
+ */
 void
-mbv_window_show(struct mbv_window *win)
+mbv_window_show(struct mbv_window * const window)
 {
-	win->visible = 1;
-	mbv_dfb_window_update(win->native_window);
+	DEBUG_VPRINT("video", "mbv_window_show(0x%p)",
+		window);
+
+	assert(window != &root_window);
+
+	if (window->visible) {
+		DEBUG_VPRINT("video", "WARNING!!: Called mbv_window_show(\"%s\") on visible window",
+			window->identifier);
+	}
+
+	window->visible = 1;
+	__mbv_window_repaint_handler(window, 1);
+	mbv_dfb_window_update(window->native_window, 1);
 }
 
 
-void
-mbv_window_hide(struct mbv_window *win)
+/**
+ * Find a single window that can be repainted to repair
+ * all damage caused by the window specified by the window
+ * argument. The current argument must be set to a window
+ * that is to be used as the root of the search. This is
+ * usually the root_window. As long as that window can cover
+ * all the damage (which root always does) this function
+ * is guaranteed to return a pointer to a valid window in the
+ * damaged_window argument.
+ *
+ */
+static void
+mbv_window_finddamagedwindow(
+	const struct mbv_window * const window,
+	struct mbv_window * const current,
+	struct mbv_window **damaged_window)
 {
-	win->visible = 0;
+	if (current->visible &&
+		mbv_rect_isinside(&window->rect, &current->rect)) {
+		struct mbv_childwindow *child;
+		*damaged_window = current;
+		LIST_FOREACH(struct mbv_childwindow*, child, &current->children) {
+			mbv_window_finddamagedwindow(window, child->window, damaged_window);
+		}
+	}
+}
+
+
+/**
+ * Hide the window and repair damaged regions
+ */
+void
+mbv_window_hide(struct mbv_window *window)
+{
+	struct mbv_window *damaged_window = NULL;
+
+	DEBUG_VPRINT("video", "mbv_window_hide(\"%s\")",
+		window->identifier);
+
+	assert(window != &root_window);
+
+	window->visible = 0;
+
+	/* find and repair the damaged window */
+	mbv_window_finddamagedwindow(window, &root_window, &damaged_window);
+	assert(damaged_window != NULL);
+
+	DEBUG_VPRINT("video", "Repainting damaged window \"%s\"",
+		damaged_window->identifier);
+
+	/* repaint the damaged window */
+	mbv_window_update(damaged_window);
 }
 
 
@@ -581,11 +762,21 @@ mbv_window_hide(struct mbv_window *win)
  * Destroy a window object
  */
 void
-mbv_window_destroy(struct mbv_window *window)
+mbv_window_destroy(struct mbv_window * const window)
 {
+	/* DEBUG_VPRINT("video", "mbv_window_destroy(\"%s\")",
+		window->identifier); */
+
 	assert(window != NULL);
 	assert(window->native_window != NULL);
 	assert(window->content_window != NULL);
+	assert(window != &root_window);
+
+	/* if the window is visible hide it before
+	 * destroying it */
+	if (window->visible && window->parent == &root_window) {
+		mbv_window_hide(window);
+	}
 
 	/* remove the window from the parent's children list */
 	if (window->parent != NULL) {
@@ -606,11 +797,19 @@ mbv_window_destroy(struct mbv_window *window)
 	if (window->content_window != window) {
 		mbv_window_destroy(window->content_window);
 	}
+
+	if (window->identifier) {
+		free((void*) window->identifier);
+	}
+
 	mbv_dfb_window_destroy(window->native_window);
 	free(window);
 }
 
 
+/**
+ * Initialize the video subsystem.
+ */
 void
 mbv_init(int argc, char **argv)
 {
@@ -634,11 +833,16 @@ mbv_init(int argc, char **argv)
 
 	root_window.content_window = &root_window;
 	root_window.title = NULL;
-	root_window.width = w;
-	root_window.height = h;
+	root_window.rect.x = 0;
+	root_window.rect.y = 0;
+	root_window.rect.w = w;
+	root_window.rect.h = h;
+	root_window.visible = 1;
+	root_window.identifier = strdup("root_window");
 	root_window.background_color = 0x000000FF;
 	root_window.foreground_color = 0xFFFFFFFF;
 	root_window.parent = NULL;
+
 	LIST_INIT(&root_window.children);
 
 	/* calculate default font height based on screen size */

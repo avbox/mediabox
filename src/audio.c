@@ -364,7 +364,7 @@ mb_audio_stream_output(void *arg)
 	size_t n_frames;
 	struct mb_audio_stream * const inst = (struct mb_audio_stream * const) arg;
 	struct mb_audio_packet * packet;
-	const char *device = "default";
+	const char *device = "sysdefault";
 	unsigned int period_usecs = 10;
 	int dir;
 	snd_pcm_hw_params_t *params;

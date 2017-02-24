@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "debug.h"
 #include "video.h"
 #include "input.h"
 #include "linkedlist.h"
@@ -57,8 +58,12 @@ mb_ui_menu_getwindowitem(struct mb_ui_menu *inst, struct mbv_window *window)
  * Repaints a menu item.
  */
 static int
-mb_ui_menuitem_repaint(struct mbv_window *window)
+mb_ui_menuitem_repaint(struct mbv_window * const window)
 {
+
+	/* DEBUG_VPRINT("ui-menu", "mb_ui_menuitem_repaint(0x%p)",
+		window); */
+
 	int canvas_width, canvas_height;
 	struct mb_ui_menu * const inst = (struct mb_ui_menu*)
 		mbv_window_getusercontext(window);
@@ -409,6 +414,9 @@ mb_ui_menu_new(struct mbv_window *window)
 	int i, width, height;
 	struct mb_ui_menu *inst;
 
+	DEBUG_VPRINT("ui-menu", "mb_ui_menu_new(0x%p)",
+		window);
+
 	/* allocate memory for menu instance */
 	inst = malloc(sizeof(struct mb_ui_menu));
 	if (inst == NULL) {
@@ -435,6 +443,9 @@ mb_ui_menu_new(struct mbv_window *window)
 	mbv_window_getcanvassize(window, &width, &height);
 	inst->visible_items = height / itemheight;
 
+	DEBUG_VPRINT("ui-menu", "Preallocating %i items",
+		inst->visible_items);
+
 	/* allocate memory for an array of pointers to
 	 * window objects for each visible item */
 	inst->item_windows = malloc(sizeof(struct mbv_window*) *
@@ -447,15 +458,20 @@ mb_ui_menu_new(struct mbv_window *window)
 
 	/* preallocate a window for each visible item */
 	for (i = 0; i < inst->visible_items; i++) {
-		inst->item_windows[i] = mbv_window_getchildwindow(inst->window, 0,
+		inst->item_windows[i] = mbv_window_getchildwindow(inst->window,
+			"menuitem", 0,
 			itemheight * i, -1, itemheight, &mb_ui_menuitem_repaint, inst);
 		if (inst->item_windows[i] == NULL) {
 			int j;
+
+			DEBUG_PRINT("ui-menu", "Could not create preallocated window!");
+
 			for (j = 0; j < i; j++) {
 				mbv_window_destroy(inst->item_windows[j]);
 			}
 			free(inst->item_windows);
 			free(inst);
+			inst = NULL;
 			break;
 		}
 	}

@@ -94,7 +94,7 @@ mb_about_init(void)
 	}
 
 	/* create a new window for the menu dialog */
-	window = mbv_window_new(NULL,
+	window = mbv_window_new("about", NULL,
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
 		window_width, window_height, &mb_about_repaint);

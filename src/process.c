@@ -38,6 +38,7 @@ LISTABLE_STRUCT(mb_process,
 	int exit_status;
 	int exitted;
 	unsigned force_kill_delay;
+	unsigned autorestart_delay;
 	enum mb_process_flags flags;
 	const char *name;
 	const char *binary;
@@ -200,6 +201,7 @@ end:
 	if (out[1] != -1) close(out[1]);
 	if (err[0] != -1) close(err[0]);
 	if (err[1] != -1) close(err[1]);
+
 	return ret;
 }
 
@@ -329,6 +331,19 @@ mb_process_force_kill(int id, void *data)
 
 
 /**
+ * Restarts a process that is not currently running.
+ * This is only called after a process chrashes.
+ */
+static enum mbt_result
+mb_process_autorestart(int id, void *data)
+{
+	struct mb_process * const proc = (struct mb_process * const) data;
+	proc->pid = mb_process_fork(proc);
+	return MB_TIMER_CALLBACK_RESULT_STOP;
+}
+
+
+/**
  * mb_process_io_thread() -- Runs on it's own thread and handles standard IO
  * to/from processes.
  */
@@ -419,8 +434,9 @@ mb_process_io_thread(void *arg)
 
 
 /**
- * mb_process_monitor_thread() -- This function runs on it's own thread and
- * waits for processes to exit and then handles the event appropriately.
+ * This function runs on it's own thread and
+ * waits for processes to exit and then handles
+ * the event appropriately.
  */
 static void *
 mb_process_monitor_thread(void *arg)
@@ -480,7 +496,23 @@ mb_process_monitor_thread(void *arg)
 						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 							"Auto restarting process '%s' (id=%i,pid=%i)",
 							proc->name, proc->id, pid);
-						proc->pid = mb_process_fork(proc);
+
+						if (proc->autorestart_delay == 0) {
+							/* if the process is set to restart without
+							 * delay then restart it now */
+							mb_process_autorestart(0, proc);
+						} else {
+							/* set a timer to restart the process
+							 * after a delay */
+							struct timespec tv;
+							tv.tv_sec = proc->autorestart_delay;
+							tv.tv_nsec = 0;
+							if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, -1,
+								mb_process_autorestart, proc) == -1) {
+								LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
+									"Could not register autorestart timer");
+							}
+						}
 						continue;
 					}
 				}
@@ -653,6 +685,7 @@ mb_process_start(const char *binary, char * const argv[],
 	proc->stopping = 0;
 	proc->flags = flags;
 	proc->force_kill_delay = 30;
+	proc->autorestart_delay = 5;
 	proc->args = mb_process_clone_args(argv);
 	proc->name = strdup(name);
 	proc->binary = strdup(binary);

@@ -3,14 +3,15 @@
 
 
 /**
- * mb_library_backend_init() -- Initialize the library backend.
+ * Initialize the library backend.
  */
 int
-mb_library_backend_init(const int launch_avmount);
+mb_library_backend_init(const int launch_avmount,
+	const int launch_mediatomb);
 
 
 /**
- * mb_library_backend_shutdown() -- Shutdown the library backend.
+ * Shutdown the library backend.
  */
 void
 mb_library_backend_shutdown(void);
