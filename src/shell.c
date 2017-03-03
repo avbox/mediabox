@@ -71,7 +71,7 @@ mbs_welcomescreen_paint(struct mbv_window *window)
 	DEBUG_VPRINT("shell", "mbs_welcomescreen_paint(0x%p)",
 		window);
 
-	assert(mbv_window_isvisible(window));
+	/* assert(mbv_window_isvisible(window)); */
 
 	mbv_window_getcanvassize(window, &w, &h);
 	mbv_window_clear(window, 0x000000ff);

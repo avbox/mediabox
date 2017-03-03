@@ -59,7 +59,7 @@ cp(const char *src, const char *dst)
 
 	if (stat(src, &st) == 0) {
 		if ((fdr = open(src, O_RDONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) != -1) {
-			if ((fdw = open(dst, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) != -1) {
+			if ((fdw = open(dst, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH)) != -1) {
 				if (sendfile(fdw, fdr, 0, st.st_size) != -1) {
 					ret = 0;
 				} else {
@@ -175,6 +175,73 @@ mb_getdatadir(char *buf, size_t bufsize)
 		}
 	}
 	return NULL;
+}
+
+
+/**
+ * Copies a file from ifilename to ofilename replacing
+ * all occurrences of match with replace.
+ */
+int
+frep(const char * const ifilename,
+	const char * ofilename,
+	const char * const match[],
+	const char * const replace[])
+{
+	FILE *fin, *fout;
+	char *lineptr = NULL;
+	size_t i_n = 0;
+
+	if (ofilename == NULL) {
+		ofilename = ifilename;
+	}
+
+	/* Open both files. If they both point to the same
+	 * file unlink() it after opening it as input */
+	if ((fin = fopen(ifilename, "r")) == NULL) {
+		return -1;
+	}
+	if (ifilename == ofilename || !strcmp(ifilename, ofilename)) {
+		unlink(ifilename);
+	}
+	if ((fout = fopen(ofilename, "w")) == NULL) {
+		fclose(fin);
+		return -1;
+	}
+
+	while (getline(&lineptr, &i_n, fin) > 0) {
+		const char * const * pmatch = &match[0];
+		const char * const * preplace = &replace[0];
+		char * matchptr = NULL;
+
+		/* first we find a match string that matches the
+		 * current line. This limits this implementation to
+		 * replacing one match per line */
+		while (*pmatch != NULL) {
+			if ((matchptr = strstr(lineptr, *pmatch)) != NULL) {
+				break;
+			}
+			pmatch++;
+			preplace++;
+		}
+		if (matchptr != NULL) {
+			fwrite(lineptr, matchptr - lineptr, sizeof(char), fout);
+			fwrite(*preplace, strlen(*preplace), sizeof(char), fout);
+			matchptr += strlen(*pmatch);
+			fwrite(matchptr, strlen(matchptr), sizeof(char), fout);
+		} else {
+			fwrite(lineptr, strlen(lineptr), sizeof(char), fout);
+		}
+
+	}
+
+	/* cleanup and return */
+	if (lineptr != NULL) {
+		free(lineptr);
+	}
+	fclose(fout);
+	fclose(fin);
+	return 0;
 }
 
 

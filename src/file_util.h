@@ -32,4 +32,15 @@ char *
 mb_getdatadir(char *buf, size_t bufsize);
 
 
+/**
+ * Copies a file from ifilename to ofilename replacing
+ * all occurrences of match with replace.
+ */
+int
+frep(const char * const ifilename,
+	const char * ofilename,
+	const char * const match[],
+	const char * const replace[]);
+
+
 #endif
