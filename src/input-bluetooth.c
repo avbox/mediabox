@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) 2016-2017 Fernando Rodriguez - All rights reserved
+ * This file is part of mediabox.
+ */
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif

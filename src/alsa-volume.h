@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) 2016-2017 Fernando Rodriguez - All rights reserved
+ * This file is part of mediabox.
+ */
+
 #ifndef __ALSA_VOLUME_H__
 #define __ALSA_VOLUME_H__
 

@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) 2016-2017 Fernando Rodriguez - All rights reserved
+ * This file is part of mediabox.
+ */
+
 #ifndef __TIME_UTIL_H__
 #define __TIME_UTIL_H__
 
