@@ -493,12 +493,7 @@ mbv_window_getchildwindow(struct mbv_window *window,
 
 	/* add the window to the parent window children list */
 	window_node->window = new_window;
-	if (&window->content_window != NULL) {
-		LIST_ADD(&window->content_window->children, window_node);
-	} else {
-		LIST_ADD(&window->children, window_node);
-	}
-
+	LIST_ADD(&window->content_window->children, window_node);
 	return new_window;
 }
 
