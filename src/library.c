@@ -343,7 +343,7 @@ mb_library_init(void)
 
 	LIST_INIT(&playlist);
 
-	mbv_getscreensize(&resx, &resy);
+	mbv_window_getcanvassize(mbv_getrootwindow(), &resx, &resy);
 
 	/* set width according to screen size */
 	switch (resx) {

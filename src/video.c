@@ -11,6 +11,7 @@
 #define LOG_MODULE "video"
 
 #include "video.h"
+#include "video-drv.h"
 #include "video-directfb.h"
 #include "debug.h"
 #include "linkedlist.h"
@@ -34,10 +35,11 @@ struct mbv_rect
  */
 struct mbv_window
 {
-	struct mbv_dfb_window *native_window;
+	struct mbv_surface *surface;
 	struct mbv_window *content_window;
 	struct mbv_window *parent;
 	mbv_repaint_handler repaint_handler;
+	cairo_t *cairo_context;
 	const char *title;
 	const char *identifier; /* used for debugging purposes */
 	struct mbv_rect rect;
@@ -53,6 +55,7 @@ LISTABLE_STRUCT(mbv_childwindow,
 	struct mbv_window *window;
 );
 
+static struct mbv_drv_funcs driver;
 static struct mbv_window root_window;
 static PangoFontDescription *font_desc;
 static int default_font_height = 32;
@@ -82,9 +85,34 @@ mbv_rect_isinside(const struct mbv_rect * const inner,
  * Gets the cairo context for a window
  */
 cairo_t *
-mbv_window_cairo_begin(struct mbv_window *window)
+mbv_window_cairo_begin(struct mbv_window * const window)
 {
-	return mbv_dfb_window_cairo_begin(window->content_window->native_window);
+	cairo_surface_t *surface;
+	int pitch;
+	void *buf;
+
+	assert(window != NULL);
+
+	if ((buf = driver.surface_lock(window->surface, &pitch)) == NULL) {
+		LOG_PRINT_ERROR("Could not lock surface!!!");
+		return NULL;
+	}
+
+	surface = cairo_image_surface_create_for_data(buf,
+		CAIRO_FORMAT_ARGB32, window->rect.w, window->rect.h,
+		cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, window->rect.w));
+	if (surface == NULL) {
+		driver.surface_unlock(window->surface);
+		return NULL;
+	}
+
+	window->cairo_context = cairo_create(surface);
+	cairo_surface_destroy(surface);
+	if (window->cairo_context == NULL) {
+		driver.surface_unlock(window->surface);
+	}
+		
+	return window->cairo_context;
 }
 
 
@@ -94,7 +122,11 @@ mbv_window_cairo_begin(struct mbv_window *window)
 void
 mbv_window_cairo_end(struct mbv_window *window)
 {
-	mbv_dfb_window_cairo_end(window->content_window->native_window);
+	assert(window != NULL);
+	assert(window->cairo_context != NULL);
+	cairo_destroy(window->cairo_context);
+	window->cairo_context = NULL;
+	driver.surface_unlock(window->surface);
 }
 
 
@@ -176,13 +208,6 @@ mbv_window_settitle(struct mbv_window *window, const char *title)
 }
 
 
-void
-mbv_getscreensize(int *width, int *height)
-{
-	mbv_dfb_getscreensize(width, height);
-}
-
-
 /**
  * Fills a rectangle inside a window.
  */
@@ -220,8 +245,8 @@ mbv_window_blit_buffer(
 	int x, int y)
 {
 	int ret;
-	ret = mbv_dfb_window_blit_buffer(
-		window->content_window->native_window,
+	ret = driver.surface_blitbuf(
+		window->content_window->surface,
 		buf, width, height, x, y);
 	return ret;
 }
@@ -231,7 +256,7 @@ mbv_window_blit_buffer(
  * This is the internal repaint handler
  */
 static int
-__mbv_window_repaint_handler(struct mbv_window * const window, int update)
+mbv_window_repaint_handler(struct mbv_window * const window, int update)
 {
 	/* DEBUG_VPRINT("video", "mbv_window_repaint_handler(\"%s\")",
 		window->identifier); */
@@ -246,25 +271,18 @@ __mbv_window_repaint_handler(struct mbv_window * const window, int update)
 	if (window->repaint_handler == NULL) {
 		struct mbv_childwindow *child;
 		LIST_FOREACH(struct mbv_childwindow *, child, &window->children) {
-			__mbv_window_repaint_handler(child->window, update);
+			mbv_window_repaint_handler(child->window, update);
 		}
 
 		/* blit window */
-		mbv_dfb_window_update(window->native_window, update);
+		driver.surface_update(window->surface, update);
 		return 0;
 	} else {
 		/* invoke the user-defined repaint handler */
 		window->repaint_handler(window);
-		mbv_dfb_window_update(window->native_window, update);
+		driver.surface_update(window->surface, update);
 		return 0;
 	}
-}
-
-
-static int
-mbv_window_repaint_handler(struct mbv_window * const window)
-{
-	return __mbv_window_repaint_handler(window, 1);
 }
 
 
@@ -283,7 +301,7 @@ mbv_window_repaint_decoration(struct mbv_window *window)
 	/* DEBUG_VPRINT("video", "mbv_window_repaint_decoration(\"%s\")",
 		window->identifier); */
 
-	if ((context = mbv_dfb_window_cairo_begin(window->native_window)) != NULL) {
+	if ((context = mbv_window_cairo_begin(window)) != NULL) {
 
 		/* first clear the title window */
 		cairo_move_to(context, 0, 0);
@@ -321,11 +339,11 @@ mbv_window_repaint_decoration(struct mbv_window *window)
 			DEBUG_PRINT("video", "Could not create layout");
 		}
 
-		mbv_dfb_window_cairo_end(window->native_window);
+		mbv_window_cairo_end(window);
 	}
 
 	/* invoke the content window repaint handler */
-	return __mbv_window_repaint_handler(window->content_window, 1);
+	return mbv_window_repaint_handler(window->content_window, 1);
 }
 
 
@@ -361,9 +379,8 @@ mbv_window_new(
 	}
 
 	/* initialize a native window object */
-	window->native_window = mbv_dfb_window_new(window, x, y, width, height,
-		&mbv_window_repaint_handler);
-	if (window->native_window == NULL) {
+	window->surface = driver.surface_new(NULL, x, y, width, height);
+	if (window->surface == NULL) {
 		fprintf(stderr, "video: Could not create native window. Out of memory\n");
 		free(window);
 		return NULL;
@@ -377,6 +394,7 @@ mbv_window_new(
 	window->rect.h = height;
 	window->foreground_color = MBV_DEFAULT_FOREGROUND;
 	window->background_color = MBV_DEFAULT_BACKGROUND;
+	window->cairo_context = NULL;
 	window->user_context = NULL;
 	window->parent = &root_window;
 	window->visible = 0;
@@ -410,7 +428,7 @@ mbv_window_new(
 			0, (font_height + 11), width, height - (font_height + 11),
 			repaint_handler, NULL);
 		if (window->content_window == NULL) {
-			mbv_dfb_window_destroy(window->native_window);
+			driver.surface_destroy(window->surface);
 			free(window);
 			return NULL;
 		}
@@ -463,10 +481,9 @@ mbv_window_getchildwindow(struct mbv_window *window,
 	}
 
 	/* initialize a native window object */
-	new_window->native_window = mbv_dfb_window_getchildwindow(
-		window->content_window->native_window, x, y, width, height,
-		repaint_handler);
-	if (new_window->native_window == NULL) {
+	new_window->surface = driver.surface_newsubsurface(
+		window->content_window->surface, x, y, width, height);
+	if (new_window->surface == NULL) {
 		fprintf(stderr, "video: Could not create native child window.\n");
 		free(new_window);
 		return NULL;
@@ -475,6 +492,7 @@ mbv_window_getchildwindow(struct mbv_window *window,
 	new_window->content_window = new_window;
 	new_window->repaint_handler = repaint_handler;
 	new_window->user_context = user_context;
+	new_window->cairo_context = NULL;
 	new_window->parent = window;
 	new_window->visible = 1;
 	new_window->title = NULL;
@@ -547,7 +565,7 @@ mbv_window_update(struct mbv_window *window)
 	 * need to flip the windows to the front (screen) buffer
 	 * as the whole surface will be flipped. This value is
 	 * passed down the repaint chain so that none of the
-	 * windows get blitted. When we call mbv_dfb_window_update
+	 * windows get blitted. When we call driver.surface_update()
 	 * bellow the whole back-buffer will be flipped */
 	const int update = (window != &root_window);
 
@@ -556,9 +574,9 @@ mbv_window_update(struct mbv_window *window)
 		return;
 	}
 
-	__mbv_window_repaint_handler(window, update);
+	mbv_window_repaint_handler(window, update);
 
-	mbv_dfb_window_update(window->native_window, update);
+	driver.surface_update(window->surface, update);
 }
 
 
@@ -698,8 +716,8 @@ mbv_window_show(struct mbv_window * const window)
 	}
 
 	window->visible = 1;
-	__mbv_window_repaint_handler(window, 1);
-	mbv_dfb_window_update(window->native_window, 1);
+	mbv_window_repaint_handler(window, 1);
+	driver.surface_update(window->surface, 1);
 }
 
 
@@ -768,7 +786,7 @@ mbv_window_destroy(struct mbv_window * const window)
 		window->identifier); */
 
 	assert(window != NULL);
-	assert(window->native_window != NULL);
+	assert(window->surface != NULL);
 	assert(window->content_window != NULL);
 	assert(window != &root_window);
 
@@ -802,7 +820,7 @@ mbv_window_destroy(struct mbv_window * const window)
 		free((void*) window->identifier);
 	}
 
-	mbv_dfb_window_destroy(window->native_window);
+	driver.surface_destroy(window->surface);
 	free(window);
 }
 
@@ -815,6 +833,8 @@ mbv_init(int argc, char **argv)
 {
 	int w, h;
 
+	mbv_dfb_initft(&driver);
+
 	/* initialize default font description */
 	font_desc = pango_font_description_from_string("Sans Bold 36px");
 	if (font_desc == NULL) {
@@ -823,13 +843,11 @@ mbv_init(int argc, char **argv)
 	}
 
 	/* initialize native driver */
-	root_window.native_window = mbv_dfb_init(&root_window, argc, argv);
-	if (root_window.native_window == NULL) {
+	root_window.surface = driver.init(argc, argv, &w, &h);
+	if (root_window.surface == NULL) {
 		fprintf(stderr, "video: Could not initialize native driver. Exiting!\n");
 		exit(EXIT_FAILURE);
 	}
-
-	mbv_getscreensize(&w, &h);
 
 	root_window.content_window = &root_window;
 	root_window.title = NULL;
@@ -841,6 +859,8 @@ mbv_init(int argc, char **argv)
 	root_window.identifier = strdup("root_window");
 	root_window.background_color = 0x000000FF;
 	root_window.foreground_color = 0xFFFFFFFF;
+	root_window.user_context = NULL;
+	root_window.cairo_context = NULL;
 	root_window.parent = NULL;
 
 	LIST_INIT(&root_window.children);
@@ -863,6 +883,6 @@ mbv_destroy()
 	assert(font_desc != NULL);
 
 	pango_font_description_free(font_desc);
-	mbv_dfb_destroy();
+	driver.shutdown();
 }
 
