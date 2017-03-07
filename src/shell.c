@@ -79,8 +79,7 @@ mbs_welcomescreen_paint(struct mbv_window *window)
 	/* assert(mbv_window_isvisible(window)); */
 
 	mbv_window_getcanvassize(window, &w, &h);
-	mbv_window_clear(window, 0x000000ff);
-	mbv_window_setcolor(window, 0x8080ffff);
+	mbv_window_clear(window);
 	mbv_window_drawline(window, 0, h / 2, w - 1, h / 2);
 
 	if ((context = mbv_window_cairo_begin(window)) != NULL) {
@@ -357,7 +356,7 @@ mbs_playerstatuschanged(struct mbp *inst,
 				/* TODO: This is not needed now */
 				root_window = mbv_getrootwindow();
 				assert(root_window != NULL);
-				mbv_window_clear(root_window, 0x000000ff);
+				mbv_window_clear(root_window);
 				mbv_window_update(root_window);
 
 				mbv_window_getsize(root_window, &sw, &sh);
@@ -435,6 +434,8 @@ mbs_init(void)
 		fprintf(stderr, "Could not create root window\n");
 		return -1;
 	}
+	mbv_window_setbgcolor(main_window, 0x000000ff);
+	mbv_window_setcolor(main_window, 0x8080ffff);
 
 	/* initialize main media player */
 	player = mb_player_new(NULL);

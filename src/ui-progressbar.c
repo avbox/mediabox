@@ -23,7 +23,7 @@ struct mb_ui_progressbar
 
 
 /**
- * mb_ui_progressbar_setvalue() -- Set the progressbar value.
+ * Set the progressbar value.
  */
 int
 mb_ui_progressbar_setvalue(struct mb_ui_progressbar *inst, int value)
@@ -45,7 +45,7 @@ mb_ui_progressbar_setvalue(struct mb_ui_progressbar *inst, int value)
  * Repaint the progressbar.
  */
 static int
-mb_ui_progressbar_repaint(struct mbv_window *window)
+mb_ui_progressbar_paint(struct mbv_window *window)
 {
 	int bar_width;
 	int w, h;
@@ -60,8 +60,9 @@ mb_ui_progressbar_repaint(struct mbv_window *window)
 
 	bar_width = (w * inst->value) / inst->max;
 
-	mbv_window_clear(inst->window, MBV_DEFAULT_BACKGROUND);
+	mbv_window_setbgcolor(inst->window, MBV_DEFAULT_BACKGROUND);
 	mbv_window_setcolor(inst->window, MBV_DEFAULT_FOREGROUND);
+	mbv_window_clear(inst->window);
 	mbv_window_fillrectangle(inst->window, 0, 0, bar_width, h);
 
 	return 1;
@@ -104,7 +105,7 @@ mb_ui_progressbar_new(struct mbv_window *parent,
 
 	/* create widget window */
 	if ((inst->window = mbv_window_getchildwindow(parent,
-		"ui.progressbar", x, y, w, h, &mb_ui_progressbar_repaint, inst)) == NULL) {
+		"ui.progressbar", x, y, w, h, &mb_ui_progressbar_paint, inst)) == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "ui-progressbar",
 			"Could not create window");
 		free(inst);

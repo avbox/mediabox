@@ -52,7 +52,7 @@
 
 /*
  * For now to change the pix format it needs to be
- * done here and on video-directfb.c mbv_window_blit_buffer()
+ * done here and on video-directfb.c mbv_window_blitbuf()
  * function. We need to implement our own enum with supported
  * formats (on video.h) and add it as an argument to that
  * function. Then use a LUT to map between those and ffmpeg's.
@@ -589,7 +589,7 @@ mb_player_video(void *arg)
 		}
 
 		/* blit the frame to window surface  */
-		mbv_window_blit_buffer(inst->window, buf, inst->width, inst->height, 0, 0);
+		mbv_window_blitbuf(inst->window, buf, inst->width, inst->height, 0, 0);
 		mbv_window_update(inst->window);
 
 #ifdef MB_DECODER_PRINT_FPS
@@ -623,7 +623,7 @@ video_exit:
 
 	/* clear screen */
 	memset(inst->frame_data[0], 0, inst->bufsz);
-	mbv_window_blit_buffer(inst->window, inst->frame_data[0], inst->width, inst->height, 0, 0);
+	mbv_window_blitbuf(inst->window, inst->frame_data[0], inst->width, inst->height, 0, 0);
 	mbv_window_update(inst->window);
 
 	inst->video_playback_running = 0;
@@ -666,7 +666,7 @@ mb_player_update(struct mbp *inst)
 	pthread_mutex_unlock(&inst->update_lock);
 
 	mb_player_postproc(inst, frame_data);
-	mbv_window_blit_buffer(inst->window, frame_data, inst->width, inst->height, 0, 0);
+	mbv_window_blitbuf(inst->window, frame_data, inst->width, inst->height, 0, 0);
 	mbv_window_update(inst->window);
 	free(frame_data);
 }

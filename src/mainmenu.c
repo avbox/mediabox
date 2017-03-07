@@ -159,7 +159,6 @@ mb_mainmenu_showdialog(void)
 		} else {
 			break;
 		}
-		mbv_window_show(window);
 	}
 
 	/* hide the mainmenu window */

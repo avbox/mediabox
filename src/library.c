@@ -165,7 +165,8 @@ mb_library_loadlist(const char *path)
 	}
 
 	if (realpath(rpath, resolved_path) == NULL) {
-		fprintf(stderr, "mb_library: Invalid path\n");
+		DEBUG_VPRINT("library", "Invalid path %s",
+			rpath);
 		free(rpath);
 		return -1;
 	}
@@ -302,7 +303,7 @@ mb_library_loadlist(const char *path)
 
 
 /**
- * mb_library_freeitems() -- Called back by mb_ui_menu_enumitems(). Used to free
+ * Called back by mb_ui_menu_enumitems(). Used to free
  * item list entries
  */
 static int

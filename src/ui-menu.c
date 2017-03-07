@@ -35,6 +35,7 @@ struct mb_ui_menu
 	mb_ui_menuitem *selected;
 	int visible_items;
 	int visible_window_offset;
+	int dirty;
 	int count;
 	void *selection_changed_callback;
 	mb_eol_callback end_of_list_callback;
@@ -60,15 +61,11 @@ mb_ui_menu_getwindowitem(struct mb_ui_menu *inst, struct mbv_window *window)
 
 
 /**
- * Repaints a menu item.
+ * Paints the menu item.
  */
 static int
-mb_ui_menuitem_repaint(struct mbv_window * const window)
+mb_ui_menuitem_paint(struct mbv_window * const window)
 {
-
-	/* DEBUG_VPRINT("ui-menu", "mb_ui_menuitem_repaint(0x%p)",
-		window); */
-
 	int canvas_width, canvas_height;
 	struct mb_ui_menu * const inst = (struct mb_ui_menu*)
 		mbv_window_getusercontext(window);
@@ -77,28 +74,38 @@ mb_ui_menuitem_repaint(struct mbv_window * const window)
 
 	assert(inst != NULL);
 
-	if (item == NULL) {
+	if (item == NULL || !item->dirty) {
+		/* const int dirty = (item != NULL) ? item->dirty : 0;
+		DEBUG_VPRINT("ui-menu", "Not painting clean window (item=0x%p dirty=%i)!",
+			item, dirty); */
 		return 0;
 	}
 
+	DEBUG_VPRINT("ui-menu", "mb_ui_menuitem_paint(0x%p)",
+		window);
+
 	/* get canvas size */
-	mbv_window_getcanvassize(item->window, &canvas_width, &canvas_height);
+	mbv_window_getcanvassize(item->window,
+		&canvas_width, &canvas_height);
 
 	if (inst->selected == item) {
-		mbv_window_clear(inst->selected->window,  0xffffffff);
-		mbv_window_setcolor(inst->selected->window, 0x000000ff);
-		mbv_window_drawstring(inst->selected->window, inst->selected->name, canvas_width / 2, 5);
+		mbv_window_setbgcolor(item->window, 0xffffffff);
+		mbv_window_setcolor(item->window, 0x000000ff);
 	} else {
-		mbv_window_clear(item->window, MBV_DEFAULT_BACKGROUND);
+		mbv_window_setbgcolor(item->window, MBV_DEFAULT_BACKGROUND);
 		mbv_window_setcolor(item->window, MBV_DEFAULT_FOREGROUND);
-		mbv_window_drawstring(item->window, item->name, canvas_width / 2, 5);
 	}
+
+	/* paint the item and clear the dirty flag */
+	mbv_window_clear(item->window);
+	mbv_window_drawstring(item->window, item->name, canvas_width / 2, 5);
+	item->dirty = 0;
 	return 1;
 }
 
 
 /**
- * mb_ui_menu_setselected() -- Changes the currently selected item.
+ * Changes the currently selected item.
  */
 static int
 mb_ui_menu_setselected(struct mb_ui_menu *inst, mb_ui_menuitem *item)
@@ -111,8 +118,13 @@ mb_ui_menu_setselected(struct mb_ui_menu *inst, mb_ui_menuitem *item)
 		return 0;
 	}
 
+	if (inst->selected != NULL) {
+		inst->selected->dirty = 1;
+	}
+
 	/* select the new item */
 	inst->selected = item;
+	inst->selected->dirty = 1;
 
 	/* this is where we invoke the callback function. For now
 	 * we just SIGABRT if it's set since it's not implemented yet. */
@@ -199,23 +211,24 @@ mb_ui_menu_scrollitems(struct mb_ui_menu *inst, int direction)
 		if (i++ < inst->visible_window_offset) {
 			item->window = NULL;
 		} else if (j < inst->visible_items) {
+			if (item->window != inst->item_windows[j]) {
+				item->dirty = 1;
+			}
 			item->window = inst->item_windows[j++];
 		} else {
 			item->window = NULL;
 		}
 	}
-	mbv_window_update(inst->window);
 }
 
 
 /**
- * mb_ui_menu_additem() -- Adds a new item to a menu widget.
+ * Adds a new item to a menu widget.
  */
 int
 mb_ui_menu_additem(struct mb_ui_menu *inst, char *name, void *data)
 {
 	mb_ui_menuitem *item;
-	int canvas_width, canvas_height;
 
 	assert(inst != NULL);
 	assert(name != NULL);
@@ -231,26 +244,17 @@ mb_ui_menu_additem(struct mb_ui_menu *inst, char *name, void *data)
 		item->window = inst->item_windows[inst->count];
 		assert(item->window != NULL);
 
-		mbv_window_getcanvassize(item->window, &canvas_width, &canvas_height);
-
 		/* if there's no selected item make this one it */
 		if (inst->selected == NULL) {
 			inst->selected = item;
-			mbv_window_clear(item->window, 0xFFFFFFFF);
-			mbv_window_setcolor(item->window, 0x000000FF);
-		} else {
-			mbv_window_clear(item->window, MBV_DEFAULT_BACKGROUND);
-			mbv_window_setcolor(item->window, MBV_DEFAULT_FOREGROUND);
 		}
-
-		/* draw the menu item */
-		mbv_window_drawstring(item->window, name, canvas_width / 2, 5);
 	} else {
 		item->window = NULL;
 	}
 
 	item->name = strdup(name);
 	item->data = data;
+	item->dirty = 1;
 
 	if (item->name == NULL) {
 		fprintf(stderr, "mb_ui_menu: Out of memory\n");
@@ -275,7 +279,8 @@ mb_ui_menu_removeitem(struct mb_ui_menu *inst, void *item)
 		if (menuitem->data == item) {
 			LIST_REMOVE(menuitem);
 			if (menuitem->window != NULL) {
-				mbv_window_clear(menuitem->window, MBV_DEFAULT_BACKGROUND);
+				mbv_window_setbgcolor(menuitem->window, MBV_DEFAULT_BACKGROUND);
+				mbv_window_clear(menuitem->window);
 			}
 			free(menuitem->name);
 			free(menuitem);
@@ -298,32 +303,36 @@ mb_ui_menu_removeitem(struct mb_ui_menu *inst, void *item)
 
 
 void
-mb_ui_menu_clearitems(struct mb_ui_menu *inst)
+mb_ui_menu_clearitems(struct mb_ui_menu * const inst)
 {
 	mb_ui_menuitem* item;
 	LIST_FOREACH_SAFE(mb_ui_menuitem*, item, &inst->items, {
 		LIST_REMOVE(item);
 		if (item->window != NULL) {
-			mbv_window_clear(item->window, MBV_DEFAULT_BACKGROUND);
+			mbv_window_setbgcolor(item->window, MBV_DEFAULT_BACKGROUND);
+			mbv_window_clear(item->window);
 		}
 		free(item->name);
 		free(item);
 	});
-	mbv_window_update(inst->window);
 	inst->count = 0;
 	inst->selected = NULL;
 }
 
 
 /**
- * mb_ui_menu_showdialog() -- Show the menu and run it's
- * message loop
+ * Show the menu and run it's message loop.
  */
 int
 mb_ui_menu_showdialog(struct mb_ui_menu *inst)
 {
 	int fd, quit = 0, ret = 0;
 	enum mbi_event e;
+
+	if (!mbv_window_isvisible(inst->window)) {
+		DEBUG_PRINT("ui-menu", "Not showing invisible window!");
+		return -1;
+	}
 
 	/* grab the input device */
 	if ((fd = mbi_grab_input()) == -1) {
@@ -411,7 +420,7 @@ start:
 
 
 /**
- * mb_ui_menu_new() -- Create a new instance of the menu widget.
+ * Create a new instance of the menu widget.
  */
 struct mb_ui_menu*
 mb_ui_menu_new(struct mbv_window *window)
@@ -465,7 +474,7 @@ mb_ui_menu_new(struct mbv_window *window)
 	for (i = 0; i < inst->visible_items; i++) {
 		inst->item_windows[i] = mbv_window_getchildwindow(inst->window,
 			"menuitem", 0,
-			itemheight * i, -1, itemheight, &mb_ui_menuitem_repaint, inst);
+			itemheight * i, -1, itemheight, &mb_ui_menuitem_paint, inst);
 		if (inst->item_windows[i] == NULL) {
 			int j;
 
@@ -479,6 +488,8 @@ mb_ui_menu_new(struct mbv_window *window)
 			inst = NULL;
 			break;
 		}
+		/* clear the window */
+		mbv_window_clear(inst->item_windows[i]);
 	}
 
 	return inst;

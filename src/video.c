@@ -38,12 +38,13 @@ struct mbv_window
 	struct mbv_surface *surface;
 	struct mbv_window *content_window;
 	struct mbv_window *parent;
-	mbv_repaint_handler repaint_handler;
+	mbv_paint_func paint;
 	cairo_t *cairo_context;
 	const char *title;
 	const char *identifier; /* used for debugging purposes */
 	struct mbv_rect rect;
 	int visible;
+	int decor_dirty;
 	uint32_t foreground_color;
 	uint32_t background_color;
 	void *user_context;
@@ -69,23 +70,20 @@ static int
 mbv_rect_isinside(const struct mbv_rect * const inner,
 	const struct mbv_rect * const outter)
 {
-	if (inner->x >= outter->x && inner->y >= outter->y) {
-		if ((inner->x + inner->w) <= (outter->x + outter->w)) {
-			if ((inner->y + inner->h) <= (outter->y + outter->h)) {
-				return 1;
-			}
-		}
-	}
-	return 0;
+	return inner->x >= outter->x && inner->y >= outter->y &&
+		(inner->x + inner->w) <= (outter->x + outter->w) &&
+		(inner->y + inner->h) <= (outter->y + outter->h);
 }
 
 
 
 /**
- * Gets the cairo context for a window
+ * Gets the cairo context for a window. This is the
+ * internal version that works directly on the surface
+ * (and not the content window subsurface).
  */
-cairo_t *
-mbv_window_cairo_begin(struct mbv_window * const window)
+static cairo_t *
+__window_cairobegin(struct mbv_window * const window)
 {
 	cairo_surface_t *surface;
 	int pitch;
@@ -99,8 +97,7 @@ mbv_window_cairo_begin(struct mbv_window * const window)
 	}
 
 	surface = cairo_image_surface_create_for_data(buf,
-		CAIRO_FORMAT_ARGB32, window->rect.w, window->rect.h,
-		cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, window->rect.w));
+		CAIRO_FORMAT_ARGB32, window->rect.w, window->rect.h, pitch);
 	if (surface == NULL) {
 		driver.surface_unlock(window->surface);
 		return NULL;
@@ -119,14 +116,71 @@ mbv_window_cairo_begin(struct mbv_window * const window)
 /**
  * Releases the cairo context for the window
  */
-void
-mbv_window_cairo_end(struct mbv_window *window)
+static void
+__window_cairoend(struct mbv_window *window)
 {
 	assert(window != NULL);
 	assert(window->cairo_context != NULL);
 	cairo_destroy(window->cairo_context);
 	window->cairo_context = NULL;
 	driver.surface_unlock(window->surface);
+}
+
+
+/**
+ * Clear the window. This is the internal version
+ * that works on the whole window.
+ */
+static void
+__window_clear(struct mbv_window *window, const uint32_t color)
+{
+	cairo_t *context;
+
+	if (window->title != NULL) {
+		mbv_window_settitle(window, window->title);
+	}
+
+	if ((context = __window_cairobegin(window)) != NULL) {
+		int w, h;
+		mbv_window_getsize(window, &w, &h);
+		cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(color));
+		cairo_move_to(context, 0, 0);
+		cairo_line_to(context, w, 0);
+		cairo_line_to(context, w, h);
+		cairo_line_to(context, 0, h);
+		cairo_line_to(context, 0, 0);
+		cairo_fill(context);
+		__window_cairoend(window);
+	}
+}
+
+
+/**
+ * Gets the cairo context for a window
+ */
+cairo_t *
+mbv_window_cairo_begin(struct mbv_window * const window)
+{
+	return __window_cairobegin(window->content_window);
+}
+
+
+/**
+ * Releases the cairo context for the window
+ */
+void mbv_window_cairo_end(struct mbv_window * const window)
+{
+	assert(window != NULL);
+	__window_cairoend(window->content_window);
+}
+
+/**
+ * Clear the window.
+ */
+void mbv_window_clear(struct mbv_window * const window)
+{
+	assert(window != NULL);
+	__window_clear(window, window->background_color);
 }
 
 
@@ -240,7 +294,7 @@ mbv_getdefaultfontheight(void)
  * Blits a buffer into a window's surface.
  */
 int
-mbv_window_blit_buffer(
+mbv_window_blitbuf(
 	struct mbv_window *window, void *buf, int width, int height,
 	int x, int y)
 {
@@ -256,9 +310,9 @@ mbv_window_blit_buffer(
  * This is the internal repaint handler
  */
 static int
-mbv_window_repaint_handler(struct mbv_window * const window, int update)
+mbv_window_paint(struct mbv_window * const window, int update)
 {
-	/* DEBUG_VPRINT("video", "mbv_window_repaint_handler(\"%s\")",
+	/* DEBUG_VPRINT("video", "mbv_window_paint(\"%s\")",
 		window->identifier); */
 
 	if (!window->visible) {
@@ -268,10 +322,10 @@ mbv_window_repaint_handler(struct mbv_window * const window, int update)
 	/* if the window has no repaint handler then
 	 * just invoke the repaint handler for all child
 	 * windows */
-	if (window->repaint_handler == NULL) {
+	if (window->paint == NULL) {
 		struct mbv_childwindow *child;
 		LIST_FOREACH(struct mbv_childwindow *, child, &window->children) {
-			mbv_window_repaint_handler(child->window, update);
+			mbv_window_paint(child->window, update);
 		}
 
 		/* blit window */
@@ -279,7 +333,7 @@ mbv_window_repaint_handler(struct mbv_window * const window, int update)
 		return 0;
 	} else {
 		/* invoke the user-defined repaint handler */
-		window->repaint_handler(window);
+		window->paint(window);
 		driver.surface_update(window->surface, update);
 		return 0;
 	}
@@ -290,7 +344,7 @@ mbv_window_repaint_handler(struct mbv_window * const window, int update)
  * Repaints the window decoration
  */
 static int
-mbv_window_repaint_decoration(struct mbv_window *window)
+mbv_window_paintdecor(struct mbv_window * const window)
 {
 	cairo_t *context;
 	PangoLayout *layout;
@@ -301,49 +355,56 @@ mbv_window_repaint_decoration(struct mbv_window *window)
 	/* DEBUG_VPRINT("video", "mbv_window_repaint_decoration(\"%s\")",
 		window->identifier); */
 
-	if ((context = mbv_window_cairo_begin(window)) != NULL) {
+	if (window->decor_dirty) {
+		if ((context = __window_cairobegin(window)) != NULL) {
 
-		/* first clear the title window */
-		cairo_move_to(context, 0, 0);
-		cairo_line_to(context, window->rect.w, 0);
-		cairo_line_to(context, window->rect.w, window->rect.h);
-		cairo_line_to(context, 0, window->rect.h);
-		cairo_line_to(context, 0, 0);
-		cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->background_color));
-		cairo_fill(context);
-
-		if ((layout = pango_cairo_create_layout(context)) != NULL) {
-
-			/* DEBUG_VPRINT("video", "Font size %i",
-				mbv_getfontsize(font_desc) / PANGO_SCALE); */
-
-			pango_layout_set_font_description(layout, font_desc);
-			pango_layout_set_width(layout, window->rect.w * PANGO_SCALE);
-			pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
-			pango_layout_set_text(layout, window->title, -1);
-
-			cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->foreground_color));
+			/* first clear the title window */
 			cairo_move_to(context, 0, 0);
-			pango_cairo_update_layout(context, layout);
-			pango_cairo_show_layout(context, layout);
-
-			/* free the layout */
-			g_object_unref(layout);
-
-			/* draw line after title */
-			cairo_set_line_width(context, 2.0);
-			cairo_move_to(context, 0, font_height + 6);
+			cairo_line_to(context, window->rect.w, 0);
 			cairo_line_to(context, window->rect.w, font_height + 6);
-			cairo_stroke(context);
-		} else {
-			DEBUG_PRINT("video", "Could not create layout");
-		}
+			cairo_line_to(context, 0, font_height + 6);
+			cairo_line_to(context, 0, 0);
+			cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->background_color));
+			cairo_fill(context);
 
-		mbv_window_cairo_end(window);
+			if ((layout = pango_cairo_create_layout(context)) != NULL) {
+
+				/* DEBUG_VPRINT("video", "Font size %i",
+					mbv_getfontsize(font_desc) / PANGO_SCALE); */
+
+				pango_layout_set_font_description(layout, font_desc);
+				pango_layout_set_width(layout, window->rect.w * PANGO_SCALE);
+				pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
+				pango_layout_set_text(layout, window->title, -1);
+
+				cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->foreground_color));
+				cairo_move_to(context, 0, 0);
+				pango_cairo_update_layout(context, layout);
+				pango_cairo_show_layout(context, layout);
+
+				/* free the layout */
+				g_object_unref(layout);
+
+				/* draw line after title */
+				cairo_set_line_width(context, 2.0);
+				cairo_move_to(context, 0, font_height + 6);
+				cairo_line_to(context, window->rect.w, font_height + 6);
+				cairo_stroke(context);
+
+				window->decor_dirty = 0;
+
+			} else {
+				DEBUG_PRINT("video", "Could not create layout");
+			}
+
+			__window_cairoend(window);
+		} else {
+			LOG_PRINT_ERROR("Could not create cairo context!");
+		}
 	}
 
 	/* invoke the content window repaint handler */
-	return mbv_window_repaint_handler(window->content_window, 1);
+	return mbv_window_paint(window->content_window, 1);
 }
 
 
@@ -353,12 +414,8 @@ mbv_window_repaint_decoration(struct mbv_window *window)
 struct mbv_window*
 mbv_window_new(
 	const char * const identifier,
-	char *title,
-	int x,
-	int y,
-	int width,
-	int height,
-	mbv_repaint_handler repaint_handler)
+	char *title, const int x, const int y, int w, int h,
+	mbv_paint_func paint)
 {
 	struct mbv_window *window;
 	struct mbv_childwindow *window_node;
@@ -378,8 +435,8 @@ mbv_window_new(
 		return NULL;
 	}
 
-	/* initialize a native window object */
-	window->surface = driver.surface_new(NULL, x, y, width, height);
+	/* initialize a surface for this window */
+	window->surface = driver.surface_new(NULL, x, y, w, h);
 	if (window->surface == NULL) {
 		fprintf(stderr, "video: Could not create native window. Out of memory\n");
 		free(window);
@@ -390,14 +447,16 @@ mbv_window_new(
 	window->title = NULL;
 	window->rect.x = x;
 	window->rect.y = y;
-	window->rect.w = width;
-	window->rect.h = height;
+	window->rect.w = w;
+	window->rect.h = h;
 	window->foreground_color = MBV_DEFAULT_FOREGROUND;
 	window->background_color = MBV_DEFAULT_BACKGROUND;
 	window->cairo_context = NULL;
 	window->user_context = NULL;
 	window->parent = &root_window;
 	window->visible = 0;
+	window->decor_dirty = 1;
+
 	LIST_INIT(&window->children);
 
 	/* save a copy of the identifier if provided */
@@ -422,11 +481,10 @@ mbv_window_new(
 			strcat(cidentifier, "_content");
 		}
 
-		window->repaint_handler = &mbv_window_repaint_decoration;
+		window->paint = &mbv_window_paintdecor;
 		window->content_window = mbv_window_getchildwindow(window,
-			cidentifier,
-			0, (font_height + 11), width, height - (font_height + 11),
-			repaint_handler, NULL);
+			cidentifier, 0, (font_height + 11), w, h - (font_height + 11),
+			paint, NULL);
 		if (window->content_window == NULL) {
 			driver.surface_destroy(window->surface);
 			free(window);
@@ -435,8 +493,18 @@ mbv_window_new(
 
 		mbv_window_settitle(window, title);
 	} else {
-		window->repaint_handler = repaint_handler;
+		window->paint = paint;
 	}
+
+	/* If a paint handler was not provided clear the window.
+	 * This is needed since without a paint handler only areas
+	 * covered by widgets will get painted. */
+	if (paint == NULL) {
+		DEBUG_VPRINT("video", "Clearing window %s",
+			window->identifier);
+		__window_clear(window, window->background_color);
+	}
+
 	return window;
 }
 
@@ -445,9 +513,9 @@ mbv_window_new(
  * Gets a child window
  */
 struct mbv_window*
-mbv_window_getchildwindow(struct mbv_window *window,
+mbv_window_getchildwindow(struct mbv_window * const window,
 	const char * const identifier,
-	int x, int y, int width, int height, mbv_repaint_handler repaint_handler,
+	const int x, const int y, int w, int h, mbv_paint_func paint,
 	void *user_context)
 {
 	struct mbv_window *new_window;
@@ -469,28 +537,28 @@ mbv_window_getchildwindow(struct mbv_window *window,
 
 	/* if width or height is -1 adjust it to the
 	 * size of the parent window */
-	if (width == -1 || height == -1) {
-		int w, h;
-		mbv_window_getcanvassize(window, &w, &h);
-		if (width == -1) {
-			width = w;
+	if (w == -1 || h == -1) {
+		int pw, ph;
+		mbv_window_getcanvassize(window, &pw, &ph);
+		if (w == -1) {
+			w = pw;
 		}
-		if (height == -1) {
-			height = h;
+		if (h == -1) {
+			h = ph;
 		}
 	}
 
 	/* initialize a native window object */
-	new_window->surface = driver.surface_newsubsurface(
-		window->content_window->surface, x, y, width, height);
+	new_window->surface = driver.surface_new(
+		window->content_window->surface, x, y, w, h);
 	if (new_window->surface == NULL) {
-		fprintf(stderr, "video: Could not create native child window.\n");
+		LOG_PRINT_ERROR("Could not create subsurface!!");
 		free(new_window);
 		return NULL;
 	}
 
 	new_window->content_window = new_window;
-	new_window->repaint_handler = repaint_handler;
+	new_window->paint = paint;
 	new_window->user_context = user_context;
 	new_window->cairo_context = NULL;
 	new_window->parent = window;
@@ -498,10 +566,11 @@ mbv_window_getchildwindow(struct mbv_window *window,
 	new_window->title = NULL;
 	new_window->rect.x = x;
 	new_window->rect.y = y;
-	new_window->rect.w = width;
-	new_window->rect.h = height;
+	new_window->rect.w = w;
+	new_window->rect.h = h;
 	new_window->foreground_color = window->foreground_color;
 	new_window->background_color = window->background_color;
+	new_window->decor_dirty = 1;
 	LIST_INIT(&new_window->children);
 
 	/* save a copy of the identifier for debugging */
@@ -529,33 +598,6 @@ mbv_getrootwindow(void)
 
 
 /**
- * Clear the window.
- */
-void
-mbv_window_clear(struct mbv_window *window, uint32_t color)
-{
-	cairo_t *context;
-
-	if (window->title != NULL) {
-		mbv_window_settitle(window, window->title);
-	}
-
-	if ((context = mbv_window_cairo_begin(window)) != NULL) {
-		int w, h;
-		mbv_window_getcanvassize(window, &w, &h);
-		cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(color));
-		cairo_move_to(context, 0, 0);
-		cairo_line_to(context, w, 0);
-		cairo_line_to(context, w, h);
-		cairo_line_to(context, 0, h);
-		cairo_line_to(context, 0, 0);
-		cairo_fill(context);
-		mbv_window_cairo_end(window);
-	}
-}
-
-
-/**
  * Causes the window to be repainted.
  */
 void
@@ -574,7 +616,7 @@ mbv_window_update(struct mbv_window *window)
 		return;
 	}
 
-	mbv_window_repaint_handler(window, update);
+	mbv_window_paint(window, update);
 
 	driver.surface_update(window->surface, update);
 }
@@ -584,8 +626,8 @@ mbv_window_update(struct mbv_window *window)
  * Gets the window's canvas size.
  */
 void
-mbv_window_getcanvassize(struct mbv_window *window,
-	int *width, int *height)
+mbv_window_getcanvassize(const struct mbv_window * const window,
+	int * const width, int * const height)
 {
 	*width = window->content_window->rect.w;
 	*height = window->content_window->rect.h;
@@ -599,6 +641,17 @@ mbv_window_setcolor(struct mbv_window *window, uint32_t color)
 	window->foreground_color = color;
 }
 
+
+/**
+ * Sets the window's background color.
+ */
+void
+mbv_window_setbgcolor(struct mbv_window * const window,
+	const uint32_t color)
+{
+	assert(window != NULL);
+	window->background_color = color;
+}
 
 /**
  * Gets the window's foreground color
@@ -716,7 +769,7 @@ mbv_window_show(struct mbv_window * const window)
 	}
 
 	window->visible = 1;
-	mbv_window_repaint_handler(window, 1);
+	mbv_window_paint(window, 1);
 	driver.surface_update(window->surface, 1);
 }
 

@@ -40,8 +40,7 @@ mb_ui_textview_repaint(struct mbv_window *window)
 	mbv_window_getcanvassize(inst->window, &w, &h);
 
 	/* clear the window */
-	mbv_window_clear(inst->window,
-		mbv_window_getbackground(inst->window));
+	mbv_window_clear(inst->window);
 
 	/* get the cairo context for it */
 	if ((context = mbv_window_cairo_begin(inst->window)) == NULL) {

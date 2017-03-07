@@ -18,15 +18,8 @@ typedef struct mbv_surface *(*mbv_drv_init)(
  * Create a new surface.
  */
 typedef struct mbv_surface *(*mbv_drv_surface_new)(
-	struct mbv_surface * const parent,
-	int x, int y, int w, int h);
-
-/**
- * Create a new sub-surface.
- */
-typedef struct mbv_surface *(*mbv_drv_surface_newsubsurface)(
-	struct mbv_surface * const parent,
-	int x, int y, int w, int h);
+	const struct mbv_surface * parent,
+	const int x, const int y, int w, int h);
 
 /**
  * Lock a surface.
@@ -73,7 +66,6 @@ struct mbv_drv_funcs
 {
 	mbv_drv_init init;
 	mbv_drv_surface_new surface_new;
-	mbv_drv_surface_newsubsurface surface_newsubsurface;
 	mbv_drv_surface_lock surface_lock;
 	mbv_drv_surface_unlock surface_unlock;
 	mbv_drv_surface_blitbuf surface_blitbuf;

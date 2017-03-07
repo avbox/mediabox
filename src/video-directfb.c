@@ -30,7 +30,6 @@ struct mbv_surface
 	IDirectFBSurface *surface;
 	DFBRectangle rect;
 	pthread_mutex_t lock;
-	uint8_t opacity;
 	int is_subwindow;
 };
 
@@ -81,6 +80,32 @@ pixfmt_tostring(DFBSurfacePixelFormat fmt)
 
 
 /**
+ * Lock a surface and return a pointer for writing
+ * to it. The pitch argument will indicate the pitch
+ * of the returned surface buffer.
+ */
+static void *
+surface_lock(struct mbv_surface * const inst, int *pitch)
+{
+	void *buf;
+	pthread_mutex_lock(&inst->lock);
+	DFBCHECK(inst->surface->Lock(inst->surface, DSLF_READ | DSLF_WRITE, &buf, pitch));
+	return buf;
+}
+
+
+/**
+ * Unlock a previously locked surface.
+ */
+static void
+surface_unlock(struct mbv_surface * const inst)
+{
+	DFBCHECK(inst->surface->Unlock(inst->surface));
+	pthread_mutex_unlock(&inst->lock);
+}
+
+
+/**
  * Blits an RGB32 C buffer to the window's surface.
  */
 static int
@@ -119,105 +144,27 @@ surface_blitbuf(
  */
 static struct mbv_surface*
 surface_new(
-	struct mbv_surface *parent,
-	int posx,
-	int posy,
-	int width,
-	int height)
+	const struct mbv_surface * parent,
+	const int x, const int y, int w, int h)
 {
 	struct mbv_surface *inst;
 
+	if (parent == NULL) {
+		parent = root;
+	}
+
 	/* first allocate the window structure */
 	if ((inst = malloc(sizeof(struct mbv_surface))) == NULL) {
-		fprintf(stderr, "mbv_surface_new() failed -- out of memory\n");
+		LOG_PRINT_ERROR("surface_new() failed: Out of memory!");
 		return NULL;
 	}
 
 	/* initialize window structure */
-	inst->rect.w = width;
-	inst->rect.h = height;
-	inst->rect.x = posx;
-	inst->rect.y = posy;
-	inst->is_subwindow = 0;
-	inst->opacity = (uint8_t) ((0xFF * DEFAULT_OPACITY) / 100);
-
-	if (pthread_mutex_init(&inst->lock, NULL) != 0) {
-		fprintf(stderr, "video-dfb: Could not initialize mutex\n");
-		free(inst);
-		return NULL;
-	}
-
-	if (root == NULL) {
-		DFBCHECK(layer->GetSurface(layer, &inst->surface));
-	} else {
-		DFBSurfaceDescription dsc;
-		dsc.flags = DSDESC_CAPS | DSDESC_WIDTH | DSDESC_HEIGHT;
-		dsc.caps = DSCAPS_NONE;
-		dsc.width = width;
-		dsc.height = height;
-		DFBCHECK(dfb->CreateSurface(dfb, &dsc, &inst->surface));
-	}
-
-	/* set basic drawing flags */
-	DFBCHECK(inst->surface->SetBlittingFlags(
-		inst->surface, DSBLIT_NOFX));
-
-	return inst;
-}
-
-
-/**
- * Lock a surface and return a pointer for writing
- * to it. The pitch argument will indicate the pitch
- * of the returned surface buffer.
- */
-static void *
-surface_lock(struct mbv_surface * const inst, int *pitch)
-{
-	void *buf;
-	pthread_mutex_lock(&inst->lock);
-	DFBCHECK(inst->surface->Lock(inst->surface, DSLF_READ | DSLF_WRITE, &buf, pitch));
-	return buf;
-}
-
-
-/**
- * Unlock a previously locked surface.
- */
-static void
-surface_unlock(struct mbv_surface * const inst)
-{
-	DFBCHECK(inst->surface->Unlock(inst->surface));
-	pthread_mutex_unlock(&inst->lock);
-}
-
-
-/**
- * Creates a new child window.
- */
-static struct mbv_surface*
-surface_newsubsurface(struct mbv_surface *parent,
-	int x, int y, int width, int height)
-{
-	struct mbv_surface *inst;
-
-	assert(parent != NULL);
-	assert(width != -1);
-	assert(height != -1);
-
-	/* allocate memory for window object */
-	inst = malloc(sizeof(struct mbv_surface));
-	if (inst == NULL) {
-		fprintf(stderr, "mbv: Out of memory\n");
-		return NULL;
-	}
-
-	/* initialize new window object */
-	inst->rect.w = width;
-	inst->rect.h = height;
 	inst->rect.x = x;
 	inst->rect.y = y;
-	inst->is_subwindow = 1;
+	inst->rect.w = w;
+	inst->rect.h = h;
+	inst->is_subwindow = (parent != root);
 
 	if (pthread_mutex_init(&inst->lock, NULL) != 0) {
 		fprintf(stderr, "video-dfb: Could not initialize mutex\n");
@@ -225,9 +172,26 @@ surface_newsubsurface(struct mbv_surface *parent,
 		return NULL;
 	}
 
-	/* create the sub-window surface */
-	DFBRectangle rect = { x, y, width, height };
-	DFBCHECK(parent->surface->GetSubSurface(parent->surface, &rect, &inst->surface));
+	if (parent == root) {
+		if (root == NULL) {
+			DFBCHECK(layer->GetSurface(layer, &inst->surface));
+		} else {
+			DFBSurfaceDescription dsc;
+			dsc.flags = DSDESC_CAPS | DSDESC_WIDTH | DSDESC_HEIGHT;
+			dsc.caps = DSCAPS_PREMULTIPLIED;
+			dsc.width = w;
+			dsc.height = h;
+			DFBCHECK(dfb->CreateSurface(dfb, &dsc, &inst->surface));
+		}
+
+		/* set basic drawing flags */
+		DFBCHECK(inst->surface->SetBlittingFlags(
+			inst->surface, DSBLIT_NOFX));
+	} else {
+		/* create the sub-window surface */
+		DFBRectangle rect = { x, y, w, h };
+		DFBCHECK(parent->surface->GetSubSurface(parent->surface, &rect, &inst->surface));
+	}
 
 	return inst;
 }
@@ -339,7 +303,7 @@ init(int argc, char **argv, int * const w, int * const h)
 	/* IDirectFBScreen does not return the correct size on SDL */
 	DFBSurfaceDescription dsc;
 	dsc.flags = DSDESC_CAPS;
-	dsc.caps  = DSCAPS_PRIMARY;
+	dsc.caps  = DSCAPS_PRIMARY | DSCAPS_PREMULTIPLIED | DSCAPS_DOUBLE;
 	IDirectFBSurface *primary;
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &primary));
 	DFBCHECK(primary->GetSize(primary, w, h));
@@ -355,10 +319,10 @@ init(int argc, char **argv, int * const w, int * const h)
 	DFBCHECK(layer->EnableCursor(layer, 0));
 	DFBCHECK(layer->SetCooperativeLevel(layer, DLSCL_ADMINISTRATIVE));
 	
-	/* create root window */
+	/* create root surface */
 	root = surface_new(NULL, 0, 0, *w, *h);
 	if (root == NULL) {
-		fprintf(stderr, "Could not create root window\n");
+		LOG_PRINT_ERROR("Could not create root surface for layer 0!");
 		abort();
 	}
 	surface_update(root, 1);
@@ -366,7 +330,8 @@ init(int argc, char **argv, int * const w, int * const h)
 	/* print the pixel format of the root window */
 	DFBSurfacePixelFormat pix_fmt;
 	DFBCHECK(root->surface->GetPixelFormat(root->surface, &pix_fmt));
-	DEBUG_VPRINT("video-dfb", "Root surface pixel format: %s", pixfmt_tostring(pix_fmt));
+	DEBUG_VPRINT("video-dfb", "Root surface pixel format: %s",
+		pixfmt_tostring(pix_fmt));
 
 	return root;
 }
@@ -389,7 +354,6 @@ mbv_dfb_initft(struct mbv_drv_funcs * const funcs)
 {
 	funcs->init = &init;
 	funcs->surface_new = &surface_new;
-	funcs->surface_newsubsurface = &surface_newsubsurface;
 	funcs->surface_lock = &surface_lock;
 	funcs->surface_unlock = &surface_unlock;
 	funcs->surface_blitbuf = &surface_blitbuf;

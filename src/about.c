@@ -25,21 +25,25 @@
 #include "debug.h"
 
 
-static struct mbv_window *window = NULL;
+static struct mbv_window *window;
 static int window_height, window_width;
+static int dirty;
 
 
 /**
  * Handles manual drawing of the about window
  */
 static int
-mb_about_repaint(struct mbv_window *window)
+mb_about_paint(struct mbv_window * const window)
 {
 	cairo_t *context;
-
 	PangoLayout *layout;
 
-	mbv_window_clear(window, MBV_DEFAULT_BACKGROUND);
+	if (!dirty) {
+		return 0;
+	}
+
+	mbv_window_clear(window);
 
 	if ((context = mbv_window_cairo_begin(window)) != NULL) {
 
@@ -66,6 +70,7 @@ mb_about_repaint(struct mbv_window *window)
 	} else {
 		DEBUG_PRINT("about", "Could not get cairo context");
 	}
+	dirty = 0;
 	return 1;
 }
 
@@ -88,6 +93,7 @@ mb_about_init(void)
 	mbv_window_getcanvassize(mbv_getrootwindow(), &xres, &yres);
 	font_height = mbv_getdefaultfontheight();
 	window_height = 30 + font_height + ((font_height + 10) * n_entries);
+	dirty = 0;
 
 	/* set width according to screen size */
 	switch (xres) {
@@ -102,7 +108,7 @@ mb_about_init(void)
 	window = mbv_window_new("about", NULL,
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
-		window_width, window_height, &mb_about_repaint);
+		window_width, window_height, &mb_about_paint);
 	if (window == NULL) {
 		fprintf(stderr, "mb_mainmenu: Could not create new window!\n");
 		return -1;
@@ -118,6 +124,7 @@ mb_about_showdialog(void)
 	int fd;
 	enum mbi_event e;
 	/* show the menu window */
+	dirty = 1;
         mbv_window_show(window);
 
 	/* grab the input device */
@@ -140,8 +147,6 @@ mb_about_showdialog(void)
 void
 mb_about_destroy(void)
 {
-	/* fprintf(stderr, "about: Destroying instance\n"); */
-
 	mbv_window_destroy(window);
 }
 

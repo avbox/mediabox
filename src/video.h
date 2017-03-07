@@ -33,7 +33,11 @@ struct mbv_window;
 struct mbv_font;
 
 
-typedef int (*mbv_repaint_handler)(struct mbv_window * const window);
+/**
+ * Function that handles window painting.
+ */
+typedef int (*mbv_paint_func)(
+	struct mbv_window * const window);
 
 
 enum mbv_alignment
@@ -124,7 +128,7 @@ mbv_font_destroy(struct mbv_font *inst);
 
 
 int
-mbv_window_blit_buffer(
+mbv_window_blitbuf(
 	struct mbv_window *window, void *buf, int width, int height,
 	int x, int y);
 
@@ -132,16 +136,15 @@ mbv_window_blit_buffer(
 struct mbv_window*
 mbv_window_new(
 	const char * const identifier, char *title,
-	int x, 	int y, int width, int height,
-	mbv_repaint_handler repaint_handler);
+	const int x, const int y, int w, int h,
+	mbv_paint_func paint);
 
 
 struct mbv_window*
 mbv_window_getchildwindow(struct mbv_window *window,
 	const char * const identifier,
-	int x, int y, int width, int height,
-	mbv_repaint_handler repaint_handler,
-	void *user_context);
+	const int x, const int y, int w, int h,
+	mbv_paint_func paint, void *user_context);
 
 
 void
@@ -156,7 +159,7 @@ mbv_getrootwindow(void);
  * mbv_window_clear() -- Clear the window surface
  */
 void
-mbv_window_clear(struct mbv_window *win, uint32_t color);
+mbv_window_clear(struct mbv_window * const window);
 
 
 /**
@@ -171,12 +174,20 @@ mbv_window_hide(struct mbv_window *win);
 
 
 void
-mbv_window_getcanvassize(struct mbv_window *window,
-	int *width, int *height);
+mbv_window_getcanvassize(const struct mbv_window * const window,
+	int * const width, int * const height);
 
 
 void
 mbv_window_setcolor(struct mbv_window *window, uint32_t color);
+
+
+/**
+ * Sets the window's background color.
+ */
+void
+mbv_window_setbgcolor(struct mbv_window * const window,
+	const uint32_t color);
 
 
 void
