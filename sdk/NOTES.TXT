@@ -1,0 +1,3 @@
+Requires:
+- Recent GCC version (tested with 4.9x and 5.4.x)
+- ncurses (including 32-bits if building grub legacy)

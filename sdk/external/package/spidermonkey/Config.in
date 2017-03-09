@@ -1,0 +1,8 @@
+config BR2_PACKAGE_SPIDERMONKEY
+	bool "spidermonkey"
+	select BR2_PACKAGE_ZIP
+	select BR2_PACKAGE_PKGCONF
+	select BR2_PACKAGE_NSPR
+	help
+	  Spidemonkey Javascript Engine.
+

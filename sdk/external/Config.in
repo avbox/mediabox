@@ -1,0 +1,5 @@
+source "$BR2_EXTERNAL_MEDIABOX_PATH/package/mediabox/Config.in"
+source "$BR2_EXTERNAL_MEDIABOX_PATH/package/nspr/Config.in"
+source "$BR2_EXTERNAL_MEDIABOX_PATH/package/spidermonkey/Config.in"
+source "$BR2_EXTERNAL_MEDIABOX_PATH/package/mediatomb/Config.in"
+source "$BR2_EXTERNAL_MEDIABOX_PATH/package/avmount/Config.in"

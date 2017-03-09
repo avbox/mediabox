@@ -1,0 +1,6 @@
+config BR2_PACKAGE_AVMOUNT
+	bool "avmount"
+	select BR2_PACKAGE_LIBCURL
+	select BR2_PACKAGE_LIBUPNP
+	help
+	  UPnP media client implemented as a FUSE filesystem.

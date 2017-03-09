@@ -1,0 +1,5 @@
+config BR2_PACKAGE_NSPR
+	bool "nspr"
+	help
+	  NSPR Library
+

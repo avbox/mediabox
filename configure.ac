@@ -1,8 +1,10 @@
 AC_PREREQ([2.69])
 AC_INIT([mediabox], [0.01], [https://github.com/avbox/mediabox/])
 
+AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_HEADERS(src/config.h)
 AC_CONFIG_SRCDIR(src/main.c)
+AC_CONFIG_MACRO_DIR(m4)
 AC_COPYRIGHT([Copyright (C) 2016 Fernando Rodriguez])
 AC_REVISION([$Revision: 266 $])
 
@@ -89,7 +91,7 @@ fi
 # POSIX Threads
 # -------------
 #
-AX_PTHREAD([],[AC_MSG_ERROR([POSIX threads are required to build this program])])
+AX_PTHREAD([],AC_MSG_ERROR([POSIX threads are required to build this program]))
 
 # We are only building threads programs so we add the pthread flags directly
 # to the default compilation variables. This will also allow the tests below

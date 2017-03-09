@@ -1,8 +1,19 @@
+android/remote/projectFilesBackup
 src/*.o
 src/mediabox
 src/Makefile
 src/Makefile.in
+src/config.h
+src/config.h.in
+src/config.h.in~
+src/mediabox.service
+src/stamp-h1
+src/.deps/
+sdk/build/
+sdk/packages/
+sdk/temp/
 *.swp
+*.pyc
 Makefile
 Makefile.in
 aclocal.m4
@@ -15,3 +26,4 @@ missing
 config.log
 config.status
 compile
+depcomp

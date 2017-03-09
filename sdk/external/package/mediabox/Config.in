@@ -1,0 +1,26 @@
+config BR2_PACKAGE_MEDIABOX
+	bool "mediabox"
+	depends on BR2_TOOLCHAIN_HAS_THREADS_NPTL
+	depends on BR2_TOOLCHAIN_GCC_AT_LEAST_4_5
+	depends on !BR2_TOOLCHAIN_USES_MUSL # sigval_t issue
+	select BR2_PACKAGE_DIRECTFB
+	select BR2_PACKAGE_CAIRO
+	select BR2_PACKAGE_LIBCURL
+	select BR2_PACKAGE_LIBUPNP
+	select BR2_PACKAGE_OPENSSL
+	select BR2_PACKAGE_MEDIATOMB
+	select BR2_PACKAGE_AVMOUNT
+	help
+	  Set-top box system.
+
+if BR2_PACKAGE_MEDIABOX
+
+config BR2_PACKAGE_MEDIABOX_BLUETOOTH
+	bool "mediabox bluetooth support"
+	select BR2_PACKAGE_LINUX_FUSION
+	depends on BR2_USE_MMU # madvise()
+	depends on BR2_LINUX_KERNEL
+	help
+	  Enable Bluetooth support on MediaBox
+
+endif # BR2_PACKAGE_MEDIABOX

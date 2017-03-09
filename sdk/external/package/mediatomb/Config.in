@@ -1,0 +1,11 @@
+config BR2_PACKAGE_MEDIATOMB
+	bool "mediatomb"
+	select BR2_PACKAGE_LIBCURL
+	select BR2_PACKAGE_LIBUPNP
+	select BR2_PACKAGE_OPENSSL
+	select BR2_PACKAGE_ZLIB
+	select BR2_PACKAGE_SQLITE
+	select BR2_PACKAGE_FILE
+	select BR2_PACKAGE_SPIDERMONKEY
+	help
+	  MediaTomb is an open source UPnP MediaServer.

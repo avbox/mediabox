@@ -1,0 +1,122 @@
+#!/bin/sh
+#
+# Copyright (C) 2017 Fernando Rodriguez. All rights reserved.
+# This file is part of mediabox
+#
+
+ARCH="x86_64"
+BOARD="pc"
+CLEAN=0
+MENUCONFIG=0
+
+BUILDROOT_PKG="buildroot-2017.02"
+BUILDROOT_PACKAGE="${BUILDROOT_PKG}.tar.gz"
+BUILDROOT_URL="https://buildroot.uclibc.org/downloads/${BUILDROOT_PACKAGE}"
+BUILDROOT_FOUND=0
+
+# print an informational message
+pinfo()
+{
+	echo -e "\033[0;32m *\033[0m ${1}"
+}
+
+# print an error message and exit
+die()
+{
+	echo $1
+	exit 1
+}
+
+while [ $# -ne 0 ]; do
+	case $1 in
+		--clean)
+			CLEAN=1
+		;;
+		--menuconfig)
+			MENUCONFIG=1
+		;;
+		--arch=*)
+			ARCH=${1#*=}
+		;;
+		--board=*)
+			BOARD=${1#*=}
+		;;
+	esac
+	shift
+done
+
+
+BUILDROOT_WORKDIR="build/${ARCH}/${BOARD}"
+
+# Print welcome message
+echo "Welcome to MediaBox's buildroot script!"
+echo
+echo "Target architecture: ${ARCH}"
+echo "Buildroot package: ${BUILDROOT_PACKAGE}"
+echo
+echo "In order to build a MediaBox firmware image"
+echo "we need to do the following:"
+echo "1. Download buildroot"
+echo "2. Configure buildroot"
+echo "3. Configure the linux kernel"
+echo "4. Build kernel and all packages and generate fs images"
+echo
+echo "Press any key to continue..."
+echo
+
+
+# cleanup build directory if necessary
+if [ ${CLEAN} -eq 1 ]; then
+	if [ -d "${BUILDROOT_WORKDIR}" ]; then
+		pinfo "Cleaning last build..."
+		rm -rf "${BUILDROOT_WORKDIR}" || die "Cannot cleanup build directory!"
+	fi
+fi
+
+# create build and package directories
+pinfo "Creating build directories..."
+mkdir -p packages || die "Could not create packages directory!"
+mkdir -p temp || die "Could not create temp directory!"
+mkdir -p "${BUILDROOT_WORKDIR}" || die "Could not create build directory!"
+
+export TMPDIR="$(realpath temp)"
+
+# check if we already have a valid copy of the
+# buildroot package
+if [ -f "packages/${BUILDROOT_PACKAGE}" ]; then
+	pinfo "Buildroot package found"
+	BUILDROOT_FOUND=1
+fi
+
+# fetch buildroot
+if [ ${BUILDROOT_FOUND} == 0 ]; then
+	pinfo "Fetching buildroot..."
+	curl --progress-bar "${BUILDROOT_URL}" > "packages/${BUILDROOT_PACKAGE}"
+fi
+
+# unpack buildroot
+if [ ${CLEAN} -eq 1 ] || [ ! -f "${BUILDROOT_WORKDIR}/Config.in" ]; then
+	pinfo "Extracting buildroot..."
+	tar --strip 1 -C "${BUILDROOT_WORKDIR}" -xf "packages/${BUILDROOT_PACKAGE}"
+
+	# Configure build root
+	pinfo "Configuring buildroot..."
+	cp "config/${ARCH}/${BOARD}/buildroot" "${BUILDROOT_WORKDIR}/.config"
+	cp "config/${ARCH}/${BOARD}/busybox" "${BUILDROOT_WORKDIR}/package/busybox/busybox.config"
+	cp "config/${ARCH}/${BOARD}/linux" "${BUILDROOT_WORKDIR}/.linux-config"
+	cd "${BUILDROOT_WORKDIR}"
+	if [ "${MENUCONFIG}" == "1" ]; then
+		make BR2_EXTERNAL=$(realpath ../../../external) menuconfig
+		make busybox-menuconfig
+		make linux-menuconfig
+	else
+		make BR2_EXTERNAL=$(realpath ../../../external) oldconfig
+		make busybox-oldconfig
+		make linux-oldconfig
+	fi
+else
+	cd "${BUILDROOT_WORKDIR}"
+fi
+
+pinfo "Building system images..."
+make

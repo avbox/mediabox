@@ -341,7 +341,7 @@ init(int argc, char **argv, int * const w, int * const h)
  * Destroy the directfb video driver.
  */
 static void
-shutdown(void)
+__shutdown(void)
 {
 	surface_destroy(root);
 	layer->Release(layer);
@@ -359,5 +359,5 @@ mbv_dfb_initft(struct mbv_drv_funcs * const funcs)
 	funcs->surface_blitbuf = &surface_blitbuf;
 	funcs->surface_update = &surface_update;
 	funcs->surface_destroy = &surface_destroy;
-	funcs->shutdown = &shutdown;
+	funcs->shutdown = &__shutdown;
 }

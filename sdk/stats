@@ -1,0 +1,13 @@
+#!/bin/sh
+
+SCRIPTPATH="$( cd $(dirname $0)/.. ; pwd -P )"
+cd "${SCRIPTPATH}"
+
+echo 'Mediabox:'
+echo
+cloc src
+
+echo
+echo 'MediaBox Remote:'
+echo
+cloc $(find android -name '*.java' -o -name '*.xml')

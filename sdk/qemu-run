@@ -1,0 +1,24 @@
+#!/bin/sh
+
+ARCH="x86_64"
+BOARD="qemu"
+KERNEL="build/${ARCH}/${BOARD}/output/images/bzImage"
+ROOTFS="build/${ARCH}/${BOARD}/output/images/rootfs.ext4"
+
+if [ -c /dev/kvm ]; then
+	EXTRA_ARGS="--enable-kvm"
+fi
+
+qemu-system-${ARCH} \
+	${EXTRA_ARGS} \
+	-kernel ${KERNEL} \
+	-vga qxl \
+	-drive file=${ROOTFS},format=raw,if=none,id=a1 \
+	-device ich9-ahci,id=ahci \
+	-device ide-drive,drive=a1,bus=ahci.0 \
+	-boot c \
+	-netdev user,id=net0,hostfwd=tcp::2222-:22 \
+	-device virtio-net,netdev=net0,mac=52:54:00:12:34:56 \
+	-m 1024 \
+	-append "video=mode:1024x600x32 root=/dev/sda rw quiet loglevel=0" \
+	-name MediaBox
