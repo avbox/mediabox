@@ -63,6 +63,7 @@ mediabox_SOURCES = \
 	timers.c \
 	alsa-volume.c \
 	process.c \
+	sysinit.c \
 	proc_util.c
 
 if ENABLE_BLUETOOTH

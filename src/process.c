@@ -215,7 +215,7 @@ end:
  * mb_process_clone_args() -- Clones a list of arguments.
  */
 static char * const*
-mb_process_clone_args(char * const argv[])
+mb_process_clone_args(const char * const argv[])
 {
 	char **args;
 	int sz = 0, i = 0;
@@ -642,7 +642,7 @@ mb_process_setsigkilldelay(int procid, unsigned delay)
  * mb_process_start() -- Starts and monitors a child process.
  */
 int
-mb_process_start(const char *binary, char * const argv[],
+mb_process_start(const char *binary, const char * const argv[],
 	enum mb_process_flags flags, const char *name, mb_process_exit exit_callback,
 	void *callback_data)
 {

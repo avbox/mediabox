@@ -20,5 +20,5 @@ qemu-system-${ARCH} \
 	-netdev user,id=net0,hostfwd=tcp::2222-:22 \
 	-device virtio-net,netdev=net0,mac=52:54:00:12:34:56 \
 	-m 1024 \
-	-append "video=mode:1024x600x32 root=/dev/sda rw quiet loglevel=0" \
+	-append "video=mode:1024x600x32 root=/dev/sda rw quiet loglevel=0 init=/bin/mediabox" \
 	-name MediaBox

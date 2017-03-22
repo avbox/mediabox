@@ -14,29 +14,10 @@
 # process   == program to run
 
 # Startup the system
-::sysinit:/bin/mount -t proc proc /proc
-::sysinit:/bin/mount -o remount,rw /
-::sysinit:/bin/mkdir -p /dev/pts
-::sysinit:/bin/mkdir -p /dev/shm
-::sysinit:/bin/mount -a
-::sysinit:/bin/mkdir -p /var/lib/dbus
-::sysinit:/bin/mkdir -p /var/run/dbus
-::sysinit:/bin/hostname -F /etc/hostname
-::sysinit:/bin/cat /etc/random-seed > /dev/urandom
-::sysinit:/bin/dbus-uuidgen --ensure
-::sysinit:/bin/dbus-daemon --system
-::sysinit:/sbin/dropbear -R
-::sysinit:/sbin/ifup -a
-::sysinit:/sbin/ifconfig eth0 10.0.2.15
-::sysinit:/sbin/ifconfig lo up
-::sysinit:/bin/mediabox
-#::sysinit:/etc/init.d/rcS
+::sysinit:/bin/mediabox --init
 
 # Put a getty on the serial port
 console::respawn:/sbin/getty -L  console 0 vt100 # GENERIC_SERIAL
 
 # Stuff to do before rebooting
-#::shutdown:/etc/init.d/rcK
-#::shutdown:/sbin/swapoff -a
 ::shutdown:killall mediabox
-::shutdown:/bin/umount -a -r

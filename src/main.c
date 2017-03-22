@@ -31,6 +31,7 @@
 #include "announce.h"
 #include "debug.h"
 #include "log.h"
+#include "sysinit.h"
 
 #ifdef ENABLE_IONICE
 #include "ionice.h"
@@ -91,7 +92,10 @@ main (int argc, char **argv)
 	int i;
 	int launch_avmount = 1;
 	int launch_mediatomb = 1;
+	int init;
 	char *progmem;
+
+	init = (getpid() == 1);
 
 	/* save program name */
 	if ((progmem = strdup(argv[0])) == NULL) {
@@ -119,6 +123,8 @@ main (int argc, char **argv)
 			launch_avmount = 0;
 		} else if (!strcmp(argv[i], "--dont-launch-mediatomb")) {
 			launch_mediatomb = 0;
+		} else if (!strcmp(argv[i], "--init")) {
+			init = 1;
 		} else {
 			fprintf(stderr, "main: Invalid argument %s\n", argv[i]);
 			print_usage();
@@ -133,6 +139,12 @@ main (int argc, char **argv)
 			strerror(errno));
 	}
 
+	/* initialize timers system */
+	if (mbt_init() != 0) {
+		fprintf(stderr, "Could not initialize timers system. Exiting.\n");
+		exit(EXIT_FAILURE);
+	}
+
 	/* initialize process manager */
 	if (mb_process_init() != 0) {
 		fprintf(stderr, "Could not initialize daemons launcher. Exiting.\n");
@@ -141,6 +153,12 @@ main (int argc, char **argv)
 
 	/* initialize video device */
 	mbv_init(argc, argv);
+
+	/* initialize system */
+	if (init && sysinit_init() != 0) {
+		LOG_PRINT_ERROR("Could not initialize system");
+		exit(EXIT_FAILURE);
+	}
 
 	/* initialize input system */
 	if (mbi_init() != 0) {
@@ -156,12 +174,6 @@ main (int argc, char **argv)
 
 	/* drop root prividges after initializing framebuffer */
 	mb_su_droproot();
-
-	/* initialize timers system */
-	if (mbt_init() != 0) {
-		fprintf(stderr, "Could not initialize timers system. Exiting.\n");
-		exit(EXIT_FAILURE);
-	}
 
 	/* initialize the shell */
 	if (mbs_init() != 0) {

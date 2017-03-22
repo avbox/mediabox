@@ -122,7 +122,7 @@ mb_downloads_populatelist(int _id, void *data)
 	size_t n = 0;;
 	char *str = NULL, *name = NULL, *id = NULL, *progress = NULL, *progressbar = NULL;
 	char buf[512];
-	char * const deluge_args[] =
+	const char * const deluge_args[] =
 	{
 		"deluge-console",
 		"connect",

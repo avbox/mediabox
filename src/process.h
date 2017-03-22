@@ -63,7 +63,7 @@ mb_process_setsigkilldelay(int procid, unsigned delay);
 
 
 int
-mb_process_start(const char *binary, char * const argv[], enum mb_process_flags flags,
+mb_process_start(const char *binary, const char * const argv[], enum mb_process_flags flags,
 	const char *name, mb_process_exit exit_callback, void *exit_callback_data);
 
 
