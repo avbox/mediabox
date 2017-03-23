@@ -1,0 +1,21 @@
+1. Create reusable multi-threaded queue implementation
+   and rewrite the messaging system to use it (currently
+   it uses pipes) and also rewrite the player to use it
+   (currently using an inlined implementation).
+
+2. Integrate curl into download manager to allow
+   downloading of http, ftp, etc.
+
+3. Write plugin system for writing search plugins
+   using javascript through spidermonkey.
+
+4. Fix player bug (the scaling filter crashes with
+   some aspect ratios/screen resolution combo)
+
+5. Fix rewind/fast foward.
+
+6. Finish libdrm dumb buffers driver.
+
+7. Fix problems with audio driver (it doesn't work with
+   pulseaudio and audio may get choppy after a while until
+   paused on some audio hardware).

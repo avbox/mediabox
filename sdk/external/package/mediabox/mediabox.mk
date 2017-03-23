@@ -1,6 +1,6 @@
 ################################################################################
 #
-# directfb
+# mediabox
 #
 ################################################################################
 
@@ -13,7 +13,8 @@ MEDIABOX_INSTALL_STAGING = YES
 MEDIABOX_AUTORECONF = YES
 
 MEDIABOX_CONF_OPTS = \
-	--enable-debug
+	--enable-debug \
+	--without-systemd
 
 MEDIABOX_DEPENDENCIES = libcurl libupnp directfb openssl mediatomb avmount
 

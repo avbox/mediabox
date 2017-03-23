@@ -18,3 +18,9 @@ rm -rvf output/target/usr/bin/dfbshow
 # by spidermonkey's makefile
 ln -sf libmozjs185.so.1.0.0 output/target/usr/lib/libmozjs185.so
 ln -sf libmozjs185.so.1.0.0 output/target/usr/lib/libmozjs185.so.1.0
+
+
+rm -rvf output/target/usr/bin/deluge
+rm -rvf output/target/usr/bin/deluge-gtk
+rm -rvf output/target/usr/bin/deluge-web
+ln -s deluge-console output/target/usr/bin/deluge

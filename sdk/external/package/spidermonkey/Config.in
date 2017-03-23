@@ -4,5 +4,6 @@ config BR2_PACKAGE_SPIDERMONKEY
 	select BR2_PACKAGE_PKGCONF
 	select BR2_PACKAGE_NSPR
 	help
-	  Spidemonkey Javascript Engine.
+	  Stand-alone JavaScript C library.
 
+	  https://developer.mozilla.org/en-US/docs/Mozilla/Projects/SpiderMonkey

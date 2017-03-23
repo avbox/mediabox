@@ -1,0 +1,8 @@
+config BR2_PACKAGE_PYTHON_PYXDG
+	bool "python-pyxdg"
+	select BR2_PACKAGE_PYTHON
+	select BR2_PACKAGE_PYTHON_SETUPTOOLS
+	help
+	  A Python module to deal with freedesktop.org specifications.
+
+	  https://freedesktop.org/wiki/Software/pyxdg
