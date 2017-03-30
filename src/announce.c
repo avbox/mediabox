@@ -34,6 +34,7 @@
 
 static int iface_index;
 static int sockfd;
+static int timerid;
 static struct sockaddr_in addr;
 
 
@@ -58,7 +59,7 @@ genid(void)
 
 
 /**
- * mb_broadcast_address() -- Broadcast the interface address.
+ * Broadcast the interface address.
  */
 static int
 mb_broadcast_address(const char * const iface_name, void *arg)
@@ -87,14 +88,12 @@ mb_broadcast_address(const char * const iface_name, void *arg)
 		fprintf(stderr, "announce: Could not broadcast announcement. errno=%i\n", errno);
 	}
 
-	/* fprintf(stderr, "announce: Sent %s\n", ann); */
-
 	return -1;
 }
 
 
 /**
- * mb_announce_sendbroadcast() -- Send broadcast for each interface.
+ * Send broadcast for each interface.
  */
 static enum mbt_result
 mb_announce_sendbroadcast(int timer_id, void *data)
@@ -106,15 +105,13 @@ mb_announce_sendbroadcast(int timer_id, void *data)
 
 
 /**
- * mb_announce_start() -- Start the announce service.
+ * Start the announce service.
  */
 int
 mb_announce_start(void)
 {
 	int broadcast = 1;
 	struct timespec tv;
-
-	sockfd = -1;
 
 	/* create socket */
 	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
@@ -146,7 +143,8 @@ mb_announce_start(void)
 	/* register a timer to send announcements */
 	tv.tv_sec = MB_ANNOUNCE_INTERVAL;
 	tv.tv_nsec = 0;
-	if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, -1, mb_announce_sendbroadcast, NULL) == -1) {
+	if ((timerid = mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD,
+		-1, mb_announce_sendbroadcast, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "announce", "Could not register timer");
 		close(sockfd);
 		return sockfd = -1;
@@ -159,8 +157,14 @@ mb_announce_start(void)
 void
 mb_announce_stop(void)
 {
+	/* cancel timer before closing socket */
+	if (timerid != -1) {
+		mbt_cancel(timerid);
+		timerid = -1;
+	}
 	if (sockfd != -1) {
 		close(sockfd);
+		sockfd = -1;
 	}
 }
 

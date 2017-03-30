@@ -204,7 +204,7 @@ sysinit_random()
 		LOG_PRINT_ERROR("Could not open /etc/random-seed!");
 		return;
 	}
-	if ((furand = open("/dev/urandom", 0)) == -1) {
+	if ((furand = open("/dev/urandom", O_WRONLY)) == -1) {
 		LOG_VPRINT_ERROR("Could not open /dev/urandom: %s",
 			strerror(errno));
 		close(fseed);
@@ -213,7 +213,7 @@ sysinit_random()
 
 	while ((c = read(fseed, buf, 1024 * sizeof(char))) > 0) {
 		if (write(furand, buf, c) == -1) {
-			LOG_VPRINT_ERROR("Could not write to /etc/urandom: %s!",
+			LOG_VPRINT_ERROR("Could not write to /dev/urandom: %s!",
 				strerror(errno));
 			break;
 		}
