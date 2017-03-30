@@ -107,6 +107,28 @@ sysinit_mount()
 
 
 /**
+ * Initialize the logger
+ */
+static void
+sysinit_logger(const char * const filepath)
+{
+	/* initialize the logging system */
+	if (filepath == NULL) {
+		log_setfile(stderr);
+		exit(EXIT_FAILURE);
+	} else {
+		FILE *f;
+		if ((f = fopen(filepath, "a")) == NULL) {
+			fprintf(stderr, "main: Could not open logfile %s: %s\n",
+				filepath, strerror(errno));
+			exit(EXIT_FAILURE);
+		}
+		log_setfile(f);
+	}
+}
+
+
+/**
  * Set the system hostname.
  */
 static void
@@ -325,9 +347,10 @@ sysinit_dropbear()
 
 
 int
-sysinit_init(void)
+sysinit_init(const char * const logfile)
 {
 	sysinit_mount();
+	sysinit_logger(logfile);
 	sysinit_random();
 	sysinit_hostname();
 	sysinit_dbus();

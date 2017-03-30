@@ -2,7 +2,7 @@
 #define __INIT_H__
 
 int
-sysinit_init(void);
+sysinit_init(const char * const filepath);
 
 void
 sysinit_shutdown(void);

@@ -81,6 +81,7 @@ print_usage()
 	printf(" --dont-launch-avmount\tAssume avmount is already mounted\n");
 	printf(" --dont-launch-mediatomb\tDon't launch mediatomb\n");
 	printf(" --dfb:XXX\t\tDirectFB options. See directfbrc(5)\n");
+	printf(" --logfile\t\tLog file\n");
 	printf(" --help\t\t\tShow this help\n");
 	printf("\n");
 }
@@ -93,7 +94,7 @@ main (int argc, char **argv)
 	int launch_avmount = 1;
 	int launch_mediatomb = 1;
 	int init;
-	char *progmem;
+	char *progmem, *logfile = NULL;
 
 	init = (getpid() == 1);
 
@@ -125,11 +126,23 @@ main (int argc, char **argv)
 			launch_mediatomb = 0;
 		} else if (!strcmp(argv[i], "--init")) {
 			init = 1;
+		} else if (!strcmp(argv[i], "--logfile")) {
+			logfile = argv[++i];
 		} else {
 			fprintf(stderr, "main: Invalid argument %s\n", argv[i]);
 			print_usage();
 			exit(EXIT_FAILURE);
 		}
+	}
+
+	/* initialize logging system for early
+	 * logging */
+	log_init();
+
+	/* if not logfile was specified and we're running
+	 * as init then use the default */
+	if (init && logfile == NULL) {
+		logfile = "/var/log/mediabox.log";
 	}
 
 	/* Change the working directory.
@@ -155,7 +168,7 @@ main (int argc, char **argv)
 	mbv_init(argc, argv);
 
 	/* initialize system */
-	if (init && sysinit_init() != 0) {
+	if (init && sysinit_init(logfile) != 0) {
 		LOG_PRINT_ERROR("Could not initialize system");
 		exit(EXIT_FAILURE);
 	}
