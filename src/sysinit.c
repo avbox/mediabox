@@ -13,6 +13,9 @@
 
 #define LOG_MODULE "sysinit"
 
+/* TODO: Do this at configure time */
+#define LINUX 1
+
 #include "debug.h"
 #include "log.h"
 #include "process.h"
@@ -109,11 +112,60 @@ sysinit_mount()
 static void
 sysinit_hostname()
 {
+#ifdef LINUX
+	int fd;
+	size_t n = 0, tmp;
+	FILE *f;
+	char *hostname = NULL;
+
+	if ((f = fopen("/etc/hostname", "r")) == NULL) {
+		LOG_VPRINT_ERROR("Could not open /etc/hostname: %s!",
+			strerror(errno));
+		return;
+	}
+
+	if (getline(&hostname, &n, f) == -1) {
+		LOG_VPRINT_ERROR("Could not read /etc/hostname: %s!",
+			strerror(errno));
+		fclose(f);
+		return;
+	}
+
+	assert(hostname != NULL);
+
+	/* make sure hostname doesn't end in new line */
+	tmp = strlen(hostname) - 1;
+	while (hostname[tmp] == '\n') {
+		hostname[tmp] = '\0';
+	}
+
+	DEBUG_VPRINT("sysinit", "Setting hostname to %s", hostname);
+	fclose(f);
+
+	if ((fd = open("/proc/sys/kernel/hostname", O_WRONLY)) == -1) {
+		LOG_VPRINT_ERROR("Could not open /proc/sys/kernel/hostname: %s",
+			strerror(errno));
+		free(hostname);
+		return;
+	}
+
+	if (write(fd, hostname, strlen(hostname) + 1) == -1) {
+		LOG_VPRINT_ERROR("Could not write to /proc/sys/kernel/hostname: %s",
+			strerror(errno));
+		/* best to keep that here or we may easily forget */
+		goto end;
+	}
+
+end:
+	free(hostname);
+	close(fd);
+#else
 	int ret;
 	ret = sysinit_execargs("/bin/hostname", "-F", "/etc/hostname", NULL);
 	if (ret != 0) {
 		LOG_PRINT_ERROR("Could not set system hostname!");
 	}
+#endif
 }
 
 
