@@ -85,7 +85,8 @@ mb_broadcast_address(const char * const iface_name, void *arg)
 	if (sendto(sockfd, &ann, sizeof(ann), 0, &addr, sizeof(addr)) == -1 ||
 		sendto(sockfd, &ann, sizeof(ann), 0, &addr, sizeof(addr)) == -1 ||
 		sendto(sockfd, &ann, sizeof(ann), 0, &addr, sizeof(addr)) == -1) {
-		fprintf(stderr, "announce: Could not broadcast announcement. errno=%i\n", errno);
+		LOG_VPRINT_ERROR("Could not broadcast announcement: %s",
+			strerror(errno));
 	}
 
 	return -1;
