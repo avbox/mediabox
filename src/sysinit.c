@@ -22,8 +22,9 @@
 #include "file_util.h"
 
 
-int proc_dropbear = -1;
-int proc_dbus = -1;
+static int proc_dropbear = -1;
+static int proc_dbus = -1;
+static int proc_getty = -1;
 
 
 /**
@@ -346,6 +347,31 @@ sysinit_dropbear()
 }
 
 
+/**
+ * Launch tty on the console
+ */
+static void
+sysinit_console()
+{
+	const char * args[] =
+	{
+		"getty",
+		"-L",
+		"console",
+		"0",
+		"vt100",
+		NULL
+	};
+
+	if ((proc_getty = mb_process_start("/sbin/getty", args,
+		MB_PROCESS_AUTORESTART | MB_PROCESS_SUPERUSER |
+		MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDERR_LOG,
+		"getty", NULL, NULL)) == -1) {
+		LOG_PRINT_ERROR("Could not start getty program!");
+	}
+}
+
+
 int
 sysinit_init(const char * const logfile)
 {
@@ -356,6 +382,7 @@ sysinit_init(const char * const logfile)
 	sysinit_dbus();
 	sysinit_network();
 	sysinit_dropbear();
+	sysinit_console();
 	return 0;
 }
 
