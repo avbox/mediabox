@@ -357,6 +357,9 @@ sysinit_console()
 	{
 		"getty",
 		"-L",
+		"-n",
+		"-l",
+		"/bin/sh",
 		"console",
 		"0",
 		"vt100",
@@ -364,7 +367,7 @@ sysinit_console()
 	};
 
 	if ((proc_getty = mb_process_start("/sbin/getty", args,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_SUPERUSER |
+		MB_PROCESS_AUTORESTART_ALWAYS | MB_PROCESS_SUPERUSER |
 		MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDERR_LOG,
 		"getty", NULL, NULL)) == -1) {
 		LOG_PRINT_ERROR("Could not start getty program!");

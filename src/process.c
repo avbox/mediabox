@@ -496,7 +496,8 @@ mb_process_monitor_thread(void *arg)
 
 				/* if the process terminated abormally and the AUTORESTART flag is
 				 * set then restart the process */
-				if (WEXITSTATUS(status) != 0 && (proc->flags & MB_PROCESS_AUTORESTART)) {
+				if (proc->flags & MB_PROCESS_AUTORESTART_ALWAYS ||
+					(WEXITSTATUS(status) != 0 && (proc->flags & MB_PROCESS_AUTORESTART))) {
 					if (!proc->stopping) {
 						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 							"Auto restarting process '%s' (id=%i,pid=%i)",
