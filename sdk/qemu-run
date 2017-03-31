@@ -16,9 +16,13 @@ qemu-system-${ARCH} \
 	-drive file=${ROOTFS},format=raw,if=none,id=a1 \
 	-device ich9-ahci,id=ahci \
 	-device ide-drive,drive=a1,bus=ahci.0 \
-	-boot c \
 	-netdev user,id=net0,hostfwd=tcp::2222-:22 \
 	-device virtio-net,netdev=net0,mac=52:54:00:12:34:56 \
+	-boot c \
 	-m 1024 \
-	-append "video=mode:1024x600x32 root=/dev/sda rw quiet loglevel=0 init=/bin/mediabox" \
+	-append "video=mode:1024x600x32 root=/dev/sda rw quiet loglevel=0 console=ttyS0 init=/bin/mediabox" \
 	-name MediaBox
+
+#	-net nic,model=virtio \
+#	-net bridge,br=bridge1 \
+
