@@ -33,7 +33,7 @@ SPIDERMONKEY_CONF_OPTS += \
 	--build=x86_64-pc-linux-gnu
 
 
-SPIDERMONKEY_DEPENDENCIES = pkgconf zip nspr
+SPIDERMONKEY_DEPENDENCIES = pkgconf nspr
 
 define SPIDERMONKEY_BUILD_CMDS
 	/bin/sh -c ' \
