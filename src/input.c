@@ -18,6 +18,7 @@
 
 #include "input.h"
 #include "input-directfb.h"
+#include "input-libinput.h"
 #include "input-tcp.h"
 #include "input-bluetooth.h"
 #include "linkedlist.h"
@@ -331,6 +332,7 @@ int
 mbi_init(void)
 {
 	int event_pipe[2];
+	int got_keyboard = 0;
 
 	DEBUG_PRINT("input", "Starting input dispatcher");
 
@@ -354,6 +356,15 @@ mbi_init(void)
 	/* initialize directfb input provider */
 	if (mbi_directfb_init() == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "Could not start DirectFB provider");
+	} else {
+		got_keyboard = 1;
+	}
+
+	/* initialize libinput driver */
+	if (!got_keyboard && mbi_libinput_init() == -1) {
+		LOG_PRINT_ERROR("Could not initialize libinput driver");
+	} else {
+		got_keyboard = 1;
 	}
 
 	/* initialize the tcp remote input provider */

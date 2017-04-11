@@ -13,7 +13,8 @@ AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
 	@LIBAVCODEC_CFLAGS@ \
 	@LIBAVFILTER_CFLAGS@ \
 	@GLIB_CFLAGS@ \
-	@GIO_CFLAGS@
+	@GIO_CFLAGS@ \
+	@LIBINPUT_CFLAGS@
 
 AM_LDFLAGS = -lz -lm \
 	@LIBS@ \
@@ -27,7 +28,8 @@ AM_LDFLAGS = -lz -lm \
 	@LIBAVCODEC_LIBS@ \
 	@LIBAVFILTER_LIBS@ \
 	@GLIB_LIBS@ \
-	@GIO_LIBS@
+	@GIO_LIBS@ \
+	@LIBINPUT_LIBS@
 
 bin_PROGRAMS = mediabox
 
@@ -37,6 +39,7 @@ mediabox_SOURCES = \
 	video-directfb.c \
 	audio.c \
 	input.c \
+	input-libinput.c \
 	input-directfb.c \
 	input-socket.c \
 	input-tcp.c \
@@ -71,6 +74,12 @@ if ENABLE_BLUETOOTH
 AM_CFLAGS += @BLUEZ_CFLAGS@
 AM_LDFLAGS += @BLUEZ_LIBS@
 mediabox_SOURCES += input-bluetooth.c
+endif
+
+if ENABLE_LIBDRM
+mediabox_SOURCES += video-drm.c
+AM_CFLAGS += @LIBDRM_CFLAGS@
+AM_LDFLAGS += @LIBDRM_LIBS@
 endif
 
 systemddir = /usr/lib/systemd/system

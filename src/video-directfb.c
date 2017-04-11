@@ -85,11 +85,23 @@ pixfmt_tostring(DFBSurfacePixelFormat fmt)
  * of the returned surface buffer.
  */
 static void *
-surface_lock(struct mbv_surface * const inst, int *pitch)
+surface_lock(struct mbv_surface * const inst,
+	const unsigned int flags, int *pitch)
 {
 	void *buf;
+	unsigned int lockflags = 0;
+
+	if (flags & MBV_LOCKFLAGS_READ) {
+		lockflags |= DSLF_READ;
+	}
+	if (flags & MBV_LOCKFLAGS_WRITE) {
+		lockflags |= DSLF_WRITE;
+	}
+	if (flags & MBV_LOCKFLAGS_FRONT) {
+		LOG_PRINT_ERROR("Front buffer locking not supported!");
+	}
 	pthread_mutex_lock(&inst->lock);
-	DFBCHECK(inst->surface->Lock(inst->surface, DSLF_READ | DSLF_WRITE, &buf, pitch));
+	DFBCHECK(inst->surface->Lock(inst->surface, lockflags, &buf, pitch));
 	return buf;
 }
 
@@ -111,13 +123,17 @@ surface_unlock(struct mbv_surface * const inst)
 static int
 surface_blitbuf(
 	struct mbv_surface * const inst,
-	void *buf, int width, int height, const int x, const int y)
+	void *buf, unsigned int flags, int width, int height, const int x, const int y)
 {
 	DFBSurfaceDescription dsc;
 	static IDirectFBSurface *surface = NULL;
 
 	assert(inst != NULL);
 	assert(inst->surface != NULL);
+
+	if (flags != MBV_BLITFLAGS_NONE) {
+		LOG_VPRINT_ERROR("Invalid blit flags 0x%ux", flags);
+	}
 
 	dsc.width = width;
 	dsc.height = height;
@@ -144,7 +160,7 @@ surface_blitbuf(
  */
 static struct mbv_surface*
 surface_new(
-	const struct mbv_surface * parent,
+	struct mbv_surface * parent,
 	const int x, const int y, int w, int h)
 {
 	struct mbv_surface *inst;

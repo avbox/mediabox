@@ -2,7 +2,12 @@
 #include <pthread.h>
 #include <directfb.h>
 
+#define LOG_MODULE "input"
+
 #include "input.h"
+#include "debug.h"
+#include "log.h"
+
 
 extern IDirectFB *dfb;
 static DFBInputDeviceID keyboard_device_id = -1;
@@ -10,6 +15,7 @@ static IDirectFBInputDevice *keyboard_device = NULL;
 static IDirectFBEventBuffer *events = NULL;
 static pthread_t event_loop_thread;
 static int quit = 0;
+
 
 #define CASE_KEYBOARD(x) \
 	case DIKS_SMALL_ ## x: \
@@ -20,7 +26,7 @@ static int quit = 0;
 
 
 /**
- * mbi_directfb_event_loop() -- Runs the directfb input driver event loop
+ * Runs the directfb input driver event loop
  */
 static void*
 mbi_directfb_event_loop(void *arg)
@@ -30,12 +36,12 @@ mbi_directfb_event_loop(void *arg)
 
 	(void) arg;
 
-	fprintf(stderr, "mbi: Running directfb input event loop\n");
+	DEBUG_PRINT("input-directfb", "Running DirectFB input loop");
 
 	while (!quit) {
 		if (events->WaitForEvent(events) == DFB_OK) {
 			if ((ret = events->GetEvent(events, DFB_EVENT(&e))) != DFB_OK) {
-				fprintf(stderr, "mbi: GetEvents() returned %i\n", ret);
+				LOG_VPRINT_ERROR("GetEvent() returned %i. Aborting", ret);
 				abort();
 			}
 			switch (e.type) {
@@ -88,13 +94,13 @@ mbi_directfb_event_loop(void *arg)
 		}
 	}
 
-	fprintf(stderr, "mbi: Exiting directfb input event loop\n");
+	DEBUG_PRINT("input-directfb", "Exiting DirectFB event loop");
 	return NULL;
 }
 
+
 /**
- * enum_devices_callback() -- Callback function used by directfb
- * to return enumerated devices
+ * Callback function used by directfb to return enumerated devices
  */
 DFBEnumerationResult
 enum_devices_callback(
@@ -104,7 +110,7 @@ enum_devices_callback(
 {
 	if (keyboard_device_id == -1 && desc.type & DIDTF_KEYBOARD) {
 		keyboard_device_id = device_id;	
-		fprintf(stderr, "input-dfb: Discovered device: %s (id=%i)\n",
+		DEBUG_VPRINT("input-directfb", "Discovered device: %s (id=%i)",
 			desc.name, device_id);
 	}
 	return 0;
@@ -112,52 +118,56 @@ enum_devices_callback(
 
 
 /**
- * mbi_directfb_init() -- Initialize the directfb input driver
+ * Initialize the directfb input driver
  */
 int
 mbi_directfb_init(void)
 {
+	DEBUG_PRINT("input-directfb", "Initializing DirectFB input driver");
+
 	/* make sure directfb has been initialized */
 	if (dfb == NULL) {
-		fprintf(stderr, "mbi_directfb_init() failed!\n");
+		LOG_PRINT_ERROR("DirectFB not initialized!");
 		return -1;
 	}
 
 	/* find a keyboard device */
 	if (dfb->EnumInputDevices(dfb, enum_devices_callback, NULL) != DFB_OK) {
-		fprintf(stderr, "dfb->EnumInputDevices() failed\n");
+		LOG_PRINT_ERROR("EnumInputDevices() failed");
 		return -1;
 	}
 	if (keyboard_device_id == -1) {
-		fprintf(stderr, "No input devices found\n");
+		LOG_PRINT_ERROR("No input devices found!");
 		return -1;
 	}
 	if (dfb->GetInputDevice(dfb, keyboard_device_id, &keyboard_device) != DFB_OK) {
-		fprintf(stderr, "Could not get device interface\n");
+		LOG_PRINT_ERROR("Could not get device interface!");
 		return -1;
 	}
 
 	/* create events buffer */
 	if (keyboard_device->CreateEventBuffer(keyboard_device, &events) != DFB_OK) {
-		fprintf(stderr, "dfb->CreateEventBuffer() failed\n");
+		LOG_PRINT_ERROR("CreateEventBuffer() failed!");
 		return -1;
 	}
 
 	/* launch the event loop on another thread */
 	if (pthread_create(&event_loop_thread, NULL, mbi_directfb_event_loop, NULL) != 0) {
-		fprintf(stderr, "pthread_create() failed\n");
+		LOG_PRINT_ERROR("pthread_create() failed!");
 		return -1;
 	}
 	return 0;
 }
 
+
 /**
- * mbi_directfb_destroy() -- Destroy the directfb input driver
+ * Destroy the directfb input driver.
  */
 void
 mbi_directfb_destroy(void)
 {
-	fprintf(stderr, "mbi: Destroying DirectFB input system\n");
+	DEBUG_PRINT("input-directfb", "Shutting down DirectFB input driver");
+
 	quit = 1;
 	events->WakeUp(events);
 	pthread_join(event_loop_thread, NULL);
@@ -166,4 +176,3 @@ mbi_directfb_destroy(void)
 		keyboard_device->Release(keyboard_device);
 	}
 }
-

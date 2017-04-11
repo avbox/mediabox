@@ -84,6 +84,13 @@ if test x"$enable_branch_optimization" = xyes; then
 	AC_DEFINE([ENABLE_BRANCH_OPTIMIZATION], 1, [Define to 1 to enable branch optimization])
 fi
 
+AC_ARG_ENABLE([libdrm], [Define to 1 to enable the libdrm driver])
+AM_CONDITIONAL([ENABLE_LIBDRM], [test x$enable_libdrm = xyes])
+if test x"$enable_libdrm" = xyes; then
+	AC_DEFINE([ENABLE_LIBDRM], 1, [Define to 1 to enable libdrm support])
+fi
+
+
 
 #AC_SUBST(DAEMON_ARGS)
 
@@ -105,6 +112,10 @@ PKG_CHECK_MODULES([PANGOCAIRO], [pangocairo], ,
 PKG_CHECK_MODULES(DIRECTFB, [directfb >= 1.4.9], ,
 	AC_MSG_ERROR('Unable to find DirectFB. Please make sure library and header files are installed.'))
 
+PKG_CHECK_MODULES(LIBINPUT, [libinput], ,
+	AC_MSG_ERROR('Unable to find libinput. Please make sure library and header files are installed.'))
+
+
 PKG_CHECK_MODULES(ALSA, [alsa], ,
 	AC_MSG_ERROR('Unable to find libasound. Please make sure library and header files are installed.'))
 
@@ -116,6 +127,14 @@ PKG_CHECK_MODULES(LIBAVCODEC, [libavcodec], ,
 	AC_MSG_ERROR('Unable to find libavcodec. Please make sure library and header files are installed.'))
 PKG_CHECK_MODULES(LIBAVFILTER, [libavfilter], ,
 	AC_MSG_ERROR('Unable to find libavfilter. Please make sure library and header files are installed.'))
+
+#
+# libdrm support
+#
+if test x"$enable_libdrm" = xyes; then
+	PKG_CHECK_MODULES(LIBDRM, [libdrm], ,
+		AC_MSG_ERROR('Unable to find libdrm. Please make sure library and header files are installed.'))
+fi
 
 
 #
@@ -137,8 +156,9 @@ fi
 #
 # libcurl
 #
-AX_LIB_CURL([7.45.0],,
-	[AC_MSG_ERROR([Your system lacks libcurl >= 7.45.0])])
+PKG_CHECK_MODULES(CURL, [libcurl], ,
+	AC_MSG_ERROR('Unable to find libcurl. Please make sure library and header files are installed.'))
+
 AC_DEFINE([USE_CURL], 1, [Define to 1 to use libcurl])
 
 

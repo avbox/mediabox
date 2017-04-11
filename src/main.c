@@ -120,6 +120,8 @@ main (int argc, char **argv)
 			exit(EXIT_SUCCESS);
 		} else if (!memcmp(argv[i], "--dfb:", 6)) {
 			/* let dfb args pass */
+		} else if (!strncmp(argv[i], "--video:", 8)) {
+			/* let video args pass */
 		} else if (!strcmp(argv[i], "--dont-launch-avmount")) {
 			launch_avmount = 0;
 		} else if (!strcmp(argv[i], "--dont-launch-mediatomb")) {
@@ -172,6 +174,8 @@ main (int argc, char **argv)
 		LOG_PRINT_ERROR("Could not initialize system");
 		exit(EXIT_FAILURE);
 	}
+
+	DEBUG_PRINT("main", "Initializing input system");
 
 	/* initialize input system */
 	if (mbi_init() != 0) {

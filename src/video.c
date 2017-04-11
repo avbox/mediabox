@@ -3,6 +3,9 @@
  * This file is part of mediabox.
  */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -17,6 +20,9 @@
 #include "linkedlist.h"
 #include "log.h"
 
+#ifdef ENABLE_LIBDRM
+#include "video-drm.h"
+#endif
 
 /**
  * Represents a rectangle.
@@ -91,7 +97,7 @@ __window_cairobegin(struct mbv_window * const window)
 
 	assert(window != NULL);
 
-	if ((buf = driver.surface_lock(window->surface, &pitch)) == NULL) {
+	if ((buf = driver.surface_lock(window->surface, MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
 		LOG_PRINT_ERROR("Could not lock surface!!!");
 		return NULL;
 	}
@@ -301,7 +307,7 @@ mbv_window_blitbuf(
 	int ret;
 	ret = driver.surface_blitbuf(
 		window->content_window->surface,
-		buf, width, height, x, y);
+		buf, MBV_BLITFLAGS_NONE, width, height, x, y);
 	return ret;
 }
 
@@ -884,9 +890,22 @@ mbv_window_destroy(struct mbv_window * const window)
 void
 mbv_init(int argc, char **argv)
 {
-	int w, h;
+	int w = 0, h = 0, i;
+	char *driver_string = "directfb";
 
-	mbv_dfb_initft(&driver);
+	DEBUG_PRINT("video", "Initializing video subsystem");
+
+	for (i = 1; i < argc; i++) {
+		if (!strncmp(argv[i], "--video:", 8)) {
+			char *arg = argv[i] + 8;
+			if (!strncmp(arg, "driver=", 7)) {
+				driver_string = arg + 7;
+			}
+		}
+	}
+
+	DEBUG_VPRINT("video", "Using '%s' driver",
+		driver_string);
 
 	/* initialize default font description */
 	font_desc = pango_font_description_from_string("Sans Bold 36px");
@@ -895,10 +914,30 @@ mbv_init(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	/* initialize native driver */
-	root_window.surface = driver.init(argc, argv, &w, &h);
+	root_window.surface = NULL;
+
+#ifdef ENABLE_LIBDRM
+	if (!strcmp(driver_string, "libdrm")) {
+		/* attempt to initialize the libdrm driver */
+		mbv_drm_initft(&driver);
+		root_window.surface = driver.init(argc, argv, &w, &h);
+		if (root_window.surface == NULL) {
+			LOG_PRINT_ERROR("Could not initialize libdrm driver!");
+		}
+	}
+#endif
+
+	if (!strcmp(driver_string, "directfb")) {
+		/* initialize directfb driver */
+		mbv_dfb_initft(&driver);
+		root_window.surface = driver.init(argc, argv, &w, &h);
+		if (root_window.surface == NULL) {
+			LOG_PRINT_ERROR("Could not initialize DirectFB driver. Exiting!");
+		}
+	}
+
 	if (root_window.surface == NULL) {
-		fprintf(stderr, "video: Could not initialize native driver. Exiting!\n");
+		LOG_PRINT_ERROR("Could not find a suitable driver!");
 		exit(EXIT_FAILURE);
 	}
 
@@ -926,7 +965,6 @@ mbv_init(int argc, char **argv)
 	case 1280: default_font_height = 32; break;
 	case 1920: default_font_height = 32; break;
 	}
-
 }
 
 

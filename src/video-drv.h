@@ -7,6 +7,14 @@
 struct mbv_surface;
 struct mbv_window;
 
+#define MBV_BLITFLAGS_NONE	0
+#define MBV_BLITFLAGS_FRONT	1 
+
+#define MBV_LOCKFLAGS_NONE	0
+#define MBV_LOCKFLAGS_FRONT	1
+#define MBV_LOCKFLAGS_READ	2
+#define MBV_LOCKFLAGS_WRITE	4
+
 /**
  * Initialize the video device and return
  * a pointer to the root surface.
@@ -18,14 +26,17 @@ typedef struct mbv_surface *(*mbv_drv_init)(
  * Create a new surface.
  */
 typedef struct mbv_surface *(*mbv_drv_surface_new)(
-	const struct mbv_surface * parent,
+	struct mbv_surface * parent,
 	const int x, const int y, int w, int h);
+
 
 /**
  * Lock a surface.
  */
 typedef void *(*mbv_drv_surface_lock)(
-	struct mbv_surface * const inst, int *pitch);
+	struct mbv_surface * const inst,
+	unsigned int flags, int *pitch);
+
 
 /**
  * Unlock a surface.
@@ -33,12 +44,23 @@ typedef void *(*mbv_drv_surface_lock)(
 typedef void (*mbv_drv_surface_unlock)(
 	struct mbv_surface * const inst);
 
+
 /**
  * Blit an RGB32 C buffer to the surface.
  */
 typedef int (*mbv_drv_surface_blitbuf)(
 	struct mbv_surface * const surface,
-	void * buf, int x, int y, int w, int h);
+	void * buf, unsigned int flags, int x, int y, int w, int h);
+
+
+/**
+ * Blit a surface unto another.
+ */
+typedef int (*mbv_drv_surface_blit)(
+	struct mbv_surface * const dst,
+	struct mbv_surface * const src,
+	unsigned int flags);
+
 
 /**
  * Update a surface.
@@ -46,12 +68,14 @@ typedef int (*mbv_drv_surface_blitbuf)(
 typedef void (*mbv_drv_surface_update)(
 	struct mbv_surface * const surface, int update);
 
+
 /**
  * Destroys a surface and release all it's
  * resources.
  */
 typedef void (*mbv_drv_surface_destroy)(
 	struct mbv_surface * const surface);
+
 
 /**
  * Shutdown the video device.
@@ -69,6 +93,7 @@ struct mbv_drv_funcs
 	mbv_drv_surface_lock surface_lock;
 	mbv_drv_surface_unlock surface_unlock;
 	mbv_drv_surface_blitbuf surface_blitbuf;
+	mbv_drv_surface_blit surface_blit;
 	mbv_drv_surface_update surface_update;
 	mbv_drv_surface_destroy surface_destroy;
 	mbv_drv_shutdown shutdown;
