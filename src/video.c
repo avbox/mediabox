@@ -24,6 +24,10 @@
 #include "video-drm.h"
 #endif
 
+
+#define FONT_PADDING 	(3)
+
+
 /**
  * Represents a rectangle.
  */
@@ -354,7 +358,7 @@ mbv_window_paintdecor(struct mbv_window * const window)
 {
 	cairo_t *context;
 	PangoLayout *layout;
-	int font_height = 36;
+	int font_height = default_font_height;
 
 	assert(window->content_window != window); /* is a window WITH title */
 
@@ -367,8 +371,8 @@ mbv_window_paintdecor(struct mbv_window * const window)
 			/* first clear the title window */
 			cairo_move_to(context, 0, 0);
 			cairo_line_to(context, window->rect.w, 0);
-			cairo_line_to(context, window->rect.w, font_height + 6);
-			cairo_line_to(context, 0, font_height + 6);
+			cairo_line_to(context, window->rect.w, font_height + FONT_PADDING);
+			cairo_line_to(context, 0, font_height + FONT_PADDING);
 			cairo_line_to(context, 0, 0);
 			cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->background_color));
 			cairo_fill(context);
@@ -393,8 +397,8 @@ mbv_window_paintdecor(struct mbv_window * const window)
 
 				/* draw line after title */
 				cairo_set_line_width(context, 2.0);
-				cairo_move_to(context, 0, font_height + 6);
-				cairo_line_to(context, window->rect.w, font_height + 6);
+				cairo_move_to(context, 0, font_height + FONT_PADDING);
+				cairo_line_to(context, window->rect.w, font_height + FONT_PADDING);
 				cairo_stroke(context);
 
 				window->decor_dirty = 0;
@@ -478,7 +482,7 @@ mbv_window_new(
 
 	if (title != NULL) {
 		char *cidentifier;
-		int font_height = 36;
+		int font_height = default_font_height;
 
 		/* create a copy of the identifier with _content
 		 * appended */
@@ -489,7 +493,8 @@ mbv_window_new(
 
 		window->paint = &mbv_window_paintdecor;
 		window->content_window = mbv_window_getchildwindow(window,
-			cidentifier, 0, (font_height + 11), w, h - (font_height + 11),
+			cidentifier, 0, (font_height + (FONT_PADDING)),
+			w, h - (font_height + (FONT_PADDING)),
 			paint, NULL);
 		if (window->content_window == NULL) {
 			driver.surface_destroy(window->surface);
@@ -891,6 +896,7 @@ void
 mbv_init(int argc, char **argv)
 {
 	int w = 0, h = 0, i;
+	char font_desc_str[16];
 	char *driver_string = "directfb";
 
 	DEBUG_PRINT("video", "Initializing video subsystem");
@@ -906,13 +912,6 @@ mbv_init(int argc, char **argv)
 
 	DEBUG_VPRINT("video", "Using '%s' driver",
 		driver_string);
-
-	/* initialize default font description */
-	font_desc = pango_font_description_from_string("Sans Bold 36px");
-	if (font_desc == NULL) {
-		fprintf(stderr, "video: Could not initialize font description. Exiting!\n");
-		exit(EXIT_FAILURE);
-	}
 
 	root_window.surface = NULL;
 
@@ -964,6 +963,14 @@ mbv_init(int argc, char **argv)
 	case 1024: default_font_height = 20; break;
 	case 1280: default_font_height = 32; break;
 	case 1920: default_font_height = 32; break;
+	}
+
+	/* initialize default font description */
+	sprintf(font_desc_str, "Sans Bold %dpx", default_font_height);
+	font_desc = pango_font_description_from_string(font_desc_str);
+	if (font_desc == NULL) {
+		fprintf(stderr, "video: Could not initialize font description. Exiting!\n");
+		exit(EXIT_FAILURE);
 	}
 }
 

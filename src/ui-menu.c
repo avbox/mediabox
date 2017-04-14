@@ -16,6 +16,9 @@
 #include "ui-menu.h"
 
 
+#define FONT_PADDING (3)
+
+
 /* Listable type for storing menuitem objects */
 LISTABLE_TYPE(mb_ui_menuitem,
 	struct mbv_window *window;
@@ -449,7 +452,7 @@ mb_ui_menu_new(struct mbv_window *window)
 
 	/* calculate item height */
 	int itemheight = mbv_getdefaultfontheight();
-	itemheight += 10;
+	itemheight += FONT_PADDING;
 
 
 	/* get the widget window size and calculate the

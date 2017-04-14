@@ -51,7 +51,7 @@ mb_mainmenu_init(void)
 	/* set height according to font size */
 	mbv_window_getcanvassize(mbv_getrootwindow(), &xres, &yres);
 	font_height = mbv_getdefaultfontheight();
-	window_height = 30 + font_height + ((font_height + 10) * n_entries);
+	window_height = 3 + font_height + ((font_height + 3) * n_entries);
 
 	DEBUG_VPRINT("mainmenu", "Default font size: %i", font_height);
 
