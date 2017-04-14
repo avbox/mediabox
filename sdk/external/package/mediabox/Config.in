@@ -16,12 +16,24 @@ config BR2_PACKAGE_MEDIABOX
 
 if BR2_PACKAGE_MEDIABOX
 
+config BR2_PACKAGE_MEDIABOX_DEBUG
+	bool "mediabox debug support"
+	help
+	  Enables runtime checks and debug output to log
+	  file (or stderr).
+
 config BR2_PACKAGE_MEDIABOX_BLUETOOTH
 	bool "mediabox bluetooth support"
 	select BR2_PACKAGE_LINUX_FUSION
 	depends on BR2_USE_MMU # madvise()
 	depends on BR2_LINUX_KERNEL
 	help
-	  Enable Bluetooth support on MediaBox
+	  Enable Bluetooth support on MediaBox.
+
+config BR2_PACKAGE_MEDIABOX_LIBDRM
+	bool "mediabox libdrm driver"
+	select BR2_PACKAGE_LIBDRM
+	help
+	  Enable libdrm video driver.
 
 endif # BR2_PACKAGE_MEDIABOX

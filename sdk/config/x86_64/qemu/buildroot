@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Buildroot 2017.02-g515c99b-dirty Configuration
+# Buildroot 2017.02-gc282c79-dirty Configuration
 #
 BR2_HAVE_DOT_CONFIG=y
 BR2_HOST_GCC_AT_LEAST_4_5=y
@@ -238,6 +238,7 @@ BR2_GCC_ENABLE_LTO=y
 # Host GDB Options
 #
 # BR2_PACKAGE_HOST_GDB is not set
+BR2_GDB_VERSION="7.11.1"
 
 #
 # Toolchain Generic Options
@@ -311,17 +312,17 @@ BR2_TARGET_GENERIC_PASSWD_MD5=y
 # BR2_TARGET_GENERIC_PASSWD_SHA256 is not set
 # BR2_TARGET_GENERIC_PASSWD_SHA512 is not set
 BR2_TARGET_GENERIC_PASSWD_METHOD="md5"
-# BR2_INIT_BUSYBOX is not set
+BR2_INIT_BUSYBOX=y
 # BR2_INIT_SYSV is not set
 
 #
 # systemd needs a glibc toolchain, headers >= 3.10
 #
-BR2_INIT_NONE=y
+# BR2_INIT_NONE is not set
 # BR2_ROOTFS_DEVICE_CREATION_STATIC is not set
-BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y
+# BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS is not set
 # BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_MDEV is not set
-# BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV is not set
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV=y
 BR2_ROOTFS_DEVICE_TABLE="system/device_table.txt"
 # BR2_ROOTFS_DEVICE_TABLE_SUPPORTS_EXTENDED_ATTRIBUTES is not set
 BR2_TARGET_ENABLE_ROOT_LOGIN=y
@@ -530,7 +531,9 @@ BR2_PACKAGE_ZIP=y
 #
 # fwts needs a glibc toolchain w/ wchar, threads
 #
-# BR2_PACKAGE_GDB is not set
+BR2_PACKAGE_GDB=y
+BR2_PACKAGE_GDB_SERVER=y
+# BR2_PACKAGE_GDB_DEBUGGER is not set
 BR2_PACKAGE_GOOGLE_BREAKPAD_ARCH_SUPPORTS=y
 # BR2_PACKAGE_GOOGLE_BREAKPAD is not set
 # BR2_PACKAGE_IOZONE is not set
@@ -766,10 +769,7 @@ BR2_PACKAGE_QT5_JSCORE_AVAILABLE=y
 #
 # tekui needs a Lua interpreter and a toolchain w/ threads, dynamic library
 #
-
-#
-# weston needs udev and a toolchain w/ locale, threads, dynamic library, headers >= 3.0
-#
+# BR2_PACKAGE_WESTON is not set
 # BR2_PACKAGE_XORG7 is not set
 
 #
@@ -798,10 +798,8 @@ BR2_PACKAGE_QT5_JSCORE_AVAILABLE=y
 # amd-catalyst needs a glibc toolchain
 #
 # BR2_PACKAGE_AVRDUDE is not set
-
-#
-# bcache-tools needs udev /dev management
-#
+# BR2_PACKAGE_BCACHE_TOOLS is not set
+# BR2_PACKAGE_BIOSDEVNAME is not set
 # BR2_PACKAGE_CC_TOOL is not set
 # BR2_PACKAGE_CDRKIT is not set
 # BR2_PACKAGE_CRYPTSETUP is not set
@@ -818,10 +816,10 @@ BR2_PACKAGE_DBUS=y
 # BR2_PACKAGE_DVBSNOOP is not set
 # BR2_PACKAGE_EDID_DECODE is not set
 # BR2_PACKAGE_EEPROG is not set
-
-#
-# eudev needs eudev /dev management
-#
+BR2_PACKAGE_EUDEV=y
+BR2_PACKAGE_PROVIDES_UDEV="eudev"
+# BR2_PACKAGE_EUDEV_RULES_GEN is not set
+BR2_PACKAGE_EUDEV_ENABLE_HWDB=y
 # BR2_PACKAGE_EVEMU is not set
 # BR2_PACKAGE_EVTEST is not set
 # BR2_PACKAGE_FAN_CTRL is not set
@@ -914,24 +912,13 @@ BR2_PACKAGE_DBUS=y
 # BR2_PACKAGE_TRIGGERHAPPY is not set
 # BR2_PACKAGE_UBOOT_TOOLS is not set
 # BR2_PACKAGE_UBUS is not set
-
-#
-# udisks needs udev /dev management
-#
-
-#
-# upower needs udev /dev management
-#
+BR2_PACKAGE_HAS_UDEV=y
+# BR2_PACKAGE_UDISKS is not set
+# BR2_PACKAGE_UPOWER is not set
 # BR2_PACKAGE_USB_MODESWITCH is not set
 # BR2_PACKAGE_USB_MODESWITCH_DATA is not set
-
-#
-# usbmount requires udev to be enabled
-#
-
-#
-# usbutils needs udev /dev management and toolchain w/ threads
-#
+# BR2_PACKAGE_USBMOUNT is not set
+# BR2_PACKAGE_USBUTILS is not set
 # BR2_PACKAGE_W_SCAN is not set
 # BR2_PACKAGE_WIPE is not set
 # BR2_PACKAGE_XORRISO is not set
@@ -1135,10 +1122,7 @@ BR2_PACKAGE_PYTHON_PYOPENSSL=y
 # BR2_PACKAGE_PYTHON_PYTABLEWRITER is not set
 # BR2_PACKAGE_PYTHON_PYTRIE is not set
 # BR2_PACKAGE_PYTHON_PYTZ is not set
-
-#
-# python-pyudev needs udev /dev management
-#
+# BR2_PACKAGE_PYTHON_PYUDEV is not set
 # BR2_PACKAGE_PYTHON_PYUSB is not set
 # BR2_PACKAGE_PYTHON_PYXB is not set
 # BR2_PACKAGE_PYTHON_PYYAML is not set
@@ -1391,7 +1375,14 @@ BR2_PACKAGE_JPEG_SIMD_SUPPORT=y
 # BR2_PACKAGE_LCMS2 is not set
 # BR2_PACKAGE_LIBART is not set
 # BR2_PACKAGE_LIBDMTX is not set
-# BR2_PACKAGE_LIBDRM is not set
+BR2_PACKAGE_LIBDRM=y
+BR2_PACKAGE_LIBDRM_HAS_ATOMIC=y
+# BR2_PACKAGE_LIBDRM_INTEL is not set
+# BR2_PACKAGE_LIBDRM_RADEON is not set
+# BR2_PACKAGE_LIBDRM_AMDGPU is not set
+# BR2_PACKAGE_LIBDRM_NOUVEAU is not set
+# BR2_PACKAGE_LIBDRM_VMWGFX is not set
+# BR2_PACKAGE_LIBDRM_INSTALL_TESTS is not set
 
 #
 # libepoxy needs an OpenGL and/or OpenGL EGL backend
@@ -1466,17 +1457,11 @@ BR2_PACKAGE_WEBKITGTK_ARCH_SUPPORTS=y
 # BR2_PACKAGE_CCID is not set
 # BR2_PACKAGE_DTC is not set
 # BR2_PACKAGE_GNU_EFI is not set
-
-#
-# hidapi needs udev /dev management and a toolchain w/ NPTL threads
-#
+# BR2_PACKAGE_HIDAPI is not set
 # BR2_PACKAGE_LCDAPI is not set
 BR2_PACKAGE_LIBAIO_ARCH_SUPPORTS=y
 # BR2_PACKAGE_LIBAIO is not set
-
-#
-# libatasmart requires udev to be enabled
-#
+# BR2_PACKAGE_LIBATASMART is not set
 # BR2_PACKAGE_LIBCEC is not set
 # BR2_PACKAGE_LIBFREEFARE is not set
 # BR2_PACKAGE_LIBFTDI is not set
@@ -1485,22 +1470,13 @@ BR2_PACKAGE_LIBAIO_ARCH_SUPPORTS=y
 #
 # libgpiod needs kernel headers >= 4.8
 #
-
-#
-# libgudev needs udev /dev handling and a toolchain w/ wchar, threads
-#
+# BR2_PACKAGE_LIBGUDEV is not set
 # BR2_PACKAGE_LIBHID is not set
 # BR2_PACKAGE_LIBIIO is not set
-
-#
-# libinput needs udev /dev management and a toolchain w/ locale
-#
+BR2_PACKAGE_LIBINPUT=y
 # BR2_PACKAGE_LIBIQRF is not set
 # BR2_PACKAGE_LIBLLCP is not set
-
-#
-# libmbim needs udev /dev management and a toolchain w/ wchar, threads
-#
+# BR2_PACKAGE_LIBMBIM is not set
 # BR2_PACKAGE_LIBNFC is not set
 # BR2_PACKAGE_LIBPCIACCESS is not set
 # BR2_PACKAGE_LIBPHIDGET is not set
@@ -1520,7 +1496,7 @@ BR2_PACKAGE_LIBAIO_ARCH_SUPPORTS=y
 # BR2_PACKAGE_LIBV4L is not set
 # BR2_PACKAGE_LIBXKBCOMMON is not set
 # BR2_PACKAGE_MRAA is not set
-# BR2_PACKAGE_MTDEV is not set
+BR2_PACKAGE_MTDEV=y
 # BR2_PACKAGE_NEARDAL is not set
 # BR2_PACKAGE_OWFS is not set
 # BR2_PACKAGE_PCSC_LITE is not set
@@ -1707,10 +1683,7 @@ BR2_PACKAGE_LIBUPNP=y
 # BR2_PACKAGE_OPENLDAP is not set
 # BR2_PACKAGE_OPENMPI is not set
 # BR2_PACKAGE_OPENPGM is not set
-
-#
-# openzwave needs udev and a toolchain w/ C++, threads, wchar
-#
+# BR2_PACKAGE_OPENZWAVE is not set
 # BR2_PACKAGE_ORTP is not set
 # BR2_PACKAGE_PAHO_MQTT_C is not set
 # BR2_PACKAGE_QDECODER is not set
@@ -1810,7 +1783,7 @@ BR2_PACKAGE_LIBBSD_ARCH_SUPPORTS=y
 # BR2_PACKAGE_LIBDAEMON is not set
 # BR2_PACKAGE_LIBEE is not set
 # BR2_PACKAGE_LIBEV is not set
-# BR2_PACKAGE_LIBEVDEV is not set
+BR2_PACKAGE_LIBEVDEV=y
 # BR2_PACKAGE_LIBEVENT is not set
 BR2_PACKAGE_LIBFFI=y
 # BR2_PACKAGE_LIBGEE is not set
@@ -1823,7 +1796,7 @@ BR2_PACKAGE_LIBNSPR_ARCH_SUPPORT=y
 # BR2_PACKAGE_LIBNSPR is not set
 # BR2_PACKAGE_LIBPFM4 is not set
 # BR2_PACKAGE_LIBPLIST is not set
-# BR2_PACKAGE_LIBPTHREAD_STUBS is not set
+BR2_PACKAGE_LIBPTHREAD_STUBS=y
 # BR2_PACKAGE_LIBPTHSEM is not set
 # BR2_PACKAGE_LIBSECCOMP is not set
 # BR2_PACKAGE_LIBSIGC is not set
@@ -2053,10 +2026,7 @@ BR2_PACKAGE_DROPBEAR_SMALL=y
 # BR2_PACKAGE_MINIDLNA is not set
 # BR2_PACKAGE_MINISSDPD is not set
 # BR2_PACKAGE_MJPG_STREAMER is not set
-
-#
-# modemmanager needs udev /dev management and a toolchain w/ wchar, threads
-#
+# BR2_PACKAGE_MODEM_MANAGER is not set
 BR2_PACKAGE_MONGREL2_LIBC_SUPPORTS=y
 # BR2_PACKAGE_MONGREL2 is not set
 # BR2_PACKAGE_MONKEY is not set
@@ -2297,11 +2267,12 @@ BR2_PACKAGE_EFIVAR_ARCH_SUPPORTS=y
 # BR2_PACKAGE_FTOP is not set
 # BR2_PACKAGE_GETENT is not set
 BR2_PACKAGE_HTOP=y
+BR2_PACKAGE_INITSCRIPTS=y
 # BR2_PACKAGE_IOTOP is not set
 # BR2_PACKAGE_IPRUTILS is not set
 # BR2_PACKAGE_IRQBALANCE is not set
 # BR2_PACKAGE_KEYUTILS is not set
-# BR2_PACKAGE_KMOD is not set
+BR2_PACKAGE_KMOD=y
 
 #
 # kvmtool needs a glibc or musl toolchain
@@ -2866,7 +2837,9 @@ BR2_LINUX_KERNEL_CUSTOM_GIT_VERSION=""
 #
 BR2_EXTERNAL_MEDIABOX_PATH="/home/fernan/Projects/mediabox/sdk/external"
 BR2_PACKAGE_MEDIABOX=y
+BR2_PACKAGE_MEDIABOX_DEBUG=y
 # BR2_PACKAGE_MEDIABOX_BLUETOOTH is not set
+BR2_PACKAGE_MEDIABOX_LIBDRM=y
 BR2_PACKAGE_NSPR=y
 BR2_PACKAGE_SPIDERMONKEY=y
 BR2_PACKAGE_MEDIATOMB=y
