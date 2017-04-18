@@ -22,6 +22,10 @@
 #include "file_util.h"
 
 
+#define UDEVD_BIN	"/sbin/udevd"
+#define UDEVADM_BIN	"/sbin/udevadm"
+
+
 static int proc_dropbear = -1;
 static int proc_dbus = -1;
 static int proc_getty = -1;
@@ -225,6 +229,48 @@ sysinit_random()
 }
 
 
+static void
+sysinit_udevd()
+{
+	int proc_tmp, ret_tmp = 0;
+
+	const char * udevd_args[] =
+	{
+		"udevd",
+		"-d",
+		NULL
+	};
+
+
+	if ((proc_tmp = mb_process_start(UDEVD_BIN, udevd_args,
+		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
+		"udevd", NULL, NULL)) > 0) {
+		mb_process_wait(proc_tmp, &ret_tmp);
+		if (ret_tmp != 0) {
+			LOG_VPRINT_ERROR("ifup returned %i", ret_tmp);
+			return;
+		}
+	}
+
+	if ((ret_tmp = sysinit_execargs(UDEVADM_BIN, "trigger", "--type=subsystems",
+		"--action=add", NULL))) {
+		LOG_VPRINT_ERROR("`%s trigger --type=subsystems --action=add` returned %i",
+			UDEVADM_BIN, ret_tmp);
+	}
+	if ((ret_tmp = sysinit_execargs(UDEVADM_BIN, "trigger", "--type=devices",
+		"--action=add", NULL))) {
+		LOG_VPRINT_ERROR("`%s trigger --type=devices --action=add` returned %i",
+			UDEVADM_BIN, ret_tmp);
+	}
+	if ((ret_tmp = sysinit_execargs(UDEVADM_BIN, "settle", "--timeout=30", NULL))) {
+		LOG_VPRINT_ERROR("`%s settle --timeout=30` returned %i",
+			UDEVADM_BIN, ret_tmp);
+	}
+
+	return;
+}
+
+
 /**
  * Initialize network interfaces.
  */
@@ -237,13 +283,6 @@ sysinit_network()
 	{
 		"ifup",
 		"-a",
-		NULL
-	};
-	const char * ifconfig_eth0_args[] =
-	{
-		"ifconfig",
-		"eth0",
-		"10.0.2.15",
 		NULL
 	};
 	const char * ifconfig_lo_args[] =
@@ -263,14 +302,6 @@ sysinit_network()
 			LOG_VPRINT_ERROR("ifup returned %i", ret_tmp);
 		}
 	}
-	if ((proc_tmp = mb_process_start("/sbin/ifconfig", ifconfig_eth0_args,
-		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
-		"ifconfig_eth0", NULL, NULL)) > 0) {
-		mb_process_wait(proc_tmp, &ret_tmp);
-		if (ret_tmp != 0) {
-			LOG_VPRINT_ERROR("ifconfig eth0 10.0.2.15 returned %i", ret_tmp);
-		}
-	}
 	if ((proc_tmp = mb_process_start("/sbin/ifconfig", ifconfig_lo_args,
 		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
 		"ifconfig_lo", NULL, NULL)) > 0) {
@@ -279,6 +310,43 @@ sysinit_network()
 			LOG_VPRINT_ERROR("ifconfig lo up returned %i", ret_tmp);
 		}
 	}
+#if 1
+	const char * udhcpc_eth0_args[] =
+	{
+		"udhcpc",
+		"-i",
+		"eth0",
+		"-n",
+		NULL
+	};
+
+	if ((proc_tmp = mb_process_start("/sbin/udhcpc", udhcpc_eth0_args,
+		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
+		"udhcpc_eth0", NULL, NULL)) > 0) {
+		mb_process_wait(proc_tmp, &ret_tmp);
+		if (ret_tmp != 0) {
+			LOG_VPRINT_ERROR("`udhcpc -i eth0 -n` returned %i", ret_tmp);
+		}
+	}
+
+#else
+	const char * ifconfig_eth0_args[] =
+	{
+		"ifconfig",
+		"eth0",
+		"10.0.2.15",
+		NULL
+	};
+
+	if ((proc_tmp = mb_process_start("/sbin/ifconfig", ifconfig_eth0_args,
+		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
+		"ifconfig_eth0", NULL, NULL)) > 0) {
+		mb_process_wait(proc_tmp, &ret_tmp);
+		if (ret_tmp != 0) {
+			LOG_VPRINT_ERROR("ifconfig eth0 10.0.2.15 returned %i", ret_tmp);
+		}
+	}
+#endif
 }
 
 
@@ -381,6 +449,7 @@ sysinit_init(const char * const logfile)
 	sysinit_mount();
 	sysinit_logger(logfile);
 	sysinit_random();
+	sysinit_udevd();
 	sysinit_hostname();
 	sysinit_dbus();
 	sysinit_network();
@@ -393,5 +462,7 @@ sysinit_init(const char * const logfile)
 void
 sysinit_shutdown(void)
 {
+	sysinit_execargs(UDEVADM_BIN, "control", "--stop-exec-queue", NULL);
+	/* killall udevd */
 	return;
 }
