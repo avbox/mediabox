@@ -464,6 +464,9 @@ mb_library_backend_init(const int launch_avmount,
 		char * const avargs[] =
 		{
 			AVMOUNT_BIN,
+#ifndef NDEBUG
+			"-d",
+#endif
 			"-l",
 			avmount_logfile,
 			"--lobind",
