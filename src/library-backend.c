@@ -482,8 +482,8 @@ mb_library_backend_init(const int launch_avmount,
 			if (mkdir_p(AVMOUNT_MOUNTPOINT, S_IRWXU)) {
 				DEBUG_VPRINT("library-backend", "Could not create mountpoint "
 					AVMOUNT_MOUNTPOINT ": %s", strerror(errno));
+				return -1;
 			}
-			return -1;
 		}
 
 
