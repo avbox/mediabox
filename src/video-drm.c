@@ -40,6 +40,7 @@ struct mbv_buf
 	uint32_t sz;
 	uint32_t hnd;
 	uint32_t fb;
+	uint8_t *map;
 };
 
 
@@ -55,7 +56,7 @@ struct mbv_surface
 	uint32_t realy;
 	uint32_t n_buffers;
 	uint32_t active_buffer;
-	uint8_t *map;
+	uint32_t mapped_buffer;
 
 	struct mbv_surface *real;
 	struct mbv_surface *parent;
@@ -83,6 +84,7 @@ surface_new(struct mbv_surface *parent,
 	const int x, const int y, const int w, const int h)
 {
 	struct mbv_surface *inst;
+	pthread_mutexattr_t lockattr;
 
 	DEBUG_PRINT("video-drm", "Entering surface_new()");
 
@@ -113,7 +115,7 @@ surface_new(struct mbv_surface *parent,
 		inst->dev = default_dev;
 
 		/* allocate a buffer for surface in system memory */
-		if ((inst->map = malloc(inst->buffers[0].sz)) == NULL) {
+		if ((inst->buffers[0].map = malloc(inst->buffers[0].sz)) == NULL) {
 			LOG_VPRINT_ERROR("Could not allocate surface buffer: %s",
 				strerror(errno));
 			free(inst);
@@ -130,12 +132,16 @@ surface_new(struct mbv_surface *parent,
 			inst->realx = inst->x + parent->realx;
 			inst->realy = inst->y + parent->realy;
 		}
-		inst->map = NULL;
+		inst->buffers[0].map = NULL;
 	}
 
+	pthread_mutexattr_init(&lockattr);
+	pthread_mutexattr_settype(&lockattr, PTHREAD_MUTEX_RECURSIVE);
 	if (pthread_mutex_init(&inst->lock, NULL) != 0) {
 		LOG_PRINT_ERROR("Could not initialize surface mutex!");
-		free(inst->map);
+		if (inst->buffers[0].map != NULL) {
+			free(inst->buffers[0].map);
+		}
 		free(inst);
 		return NULL;
 	}
@@ -147,7 +153,7 @@ surface_new(struct mbv_surface *parent,
 	DEBUG_VPRINT("video-drm", "surface.y = %i", inst->y);
 	DEBUG_VPRINT("video-drm", "surface.realx = %i", inst->realx);
 	DEBUG_VPRINT("video-drm", "surface.realy = %i", inst->realy);
-	DEBUG_VPRINT("video-drm", "surface.map = %p", inst->map);
+	DEBUG_VPRINT("video-drm", "surface.buffers[0].map = %p", inst->buffers[0].map);
 
 	return inst;
 }
@@ -167,66 +173,29 @@ surface_lock(struct mbv_surface * const inst,
 
 	pthread_mutex_lock(&inst->lock);
 
-	if (realinst->buffers[realinst->active_buffer].hnd != 0) {
+	const int buffer = (flags & MBV_LOCKFLAGS_FRONT) ?
+		(realinst->active_buffer + 1) % realinst->n_buffers :
+		realinst->active_buffer;
 
-		const int buffer = (flags & MBV_LOCKFLAGS_FRONT) ?
-			(realinst->active_buffer + 1) % realinst->n_buffers :
-			realinst->active_buffer;
-		struct drm_mode_map_dumb mreq = { 0 };
-		unsigned int mapflags = 0;
+	realinst->mapped_buffer = buffer;
+	*pitch = realinst->buffers[buffer].pitch;
+	assert(realinst->buffers[buffer].map != NULL);
 
-		/* DEBUG_VPRINT("video-drm", "Mapping dumb buffer (buffer=%i,active=%i,n_buffers=%i,hnd=0x%x)",
-			buffer, realinst->active_buffer, realinst->n_buffers, realinst->buffers[buffer].hnd); */
-
-		if (flags & MBV_LOCKFLAGS_READ) {
-			mapflags |= PROT_READ;
-		}
-		if (flags & MBV_LOCKFLAGS_WRITE) {
-			mapflags |= PROT_WRITE;
-		}
-
-		assert(mapflags != 0);
-
-		/* prepare buffer for memory mapping */
-		/* DEBUG_PRINT("video-drm", "Preparing to map surface"); */
-		mreq.handle = realinst->buffers[buffer].hnd;
-		assert(mreq.offset == 0);
-		if (drmIoctl(realinst->dev->fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq)) {
-			LOG_VPRINT_ERROR("Cannot map dumb buffer (%d) %s",
-				errno, strerror(errno));
-			return NULL;
-		}
-
-		/* perform actual memory mapping */
-		/* DEBUG_VPRINT("video-drm", "Mapping surface (offset=%u)",
-			mreq.offset); */
-		realinst->map = mmap(0, inst->buffers[buffer].sz,
-			mapflags, MAP_SHARED, inst->dev->fd, mreq.offset);
-		if (realinst->map == MAP_FAILED) {
-			LOG_VPRINT_ERROR("Cannot mmap dumb buffer (%d) %s",
-				errno, strerror(errno));
-			return (inst->map = NULL);
-		}
-
-		*pitch = realinst->buffers[buffer].pitch;
-
-		/* DEBUG_VPRINT("video-drm", "Surface mapped (map=0x%x)",
-			inst->map); */
-	} else {
-		/* DEBUG_PRINT("video-drm", "Locking system buffer"); */
-		*pitch = realinst->buffers[0].pitch;
+	if (realinst->buffers[buffer].hnd != 0) {
+		madvise(realinst->buffers[buffer].map,
+			realinst->buffers[buffer].sz,
+			MADV_WILLNEED);
 	}
-
-	assert(realinst->map != NULL);
 
 	/* DEBUG_VPRINT("video-drm", "map=%p,x=%i,y=%i,realx=%i,realy=%i,w=%i,h=%i,p=%i)",
 		inst->map, inst->x, inst->y, inst->realx, inst->realy, inst->w, inst->h, *pitch); */
 
 	if (inst == realinst) {
-		return inst->map;
+		return inst->buffers[buffer].map;
 	}
 
-	uint8_t *map  = realinst->map + (inst->realy * (*pitch)) + inst->realx * 4;
+	uint8_t *map  = realinst->buffers[buffer].map +
+		(inst->realy * (*pitch)) + inst->realx * 4;
 	/* DEBUG_VPRINT("video-drm", "surface_lock() returning %p", map); */
 	return map;
 }
@@ -237,14 +206,10 @@ surface_unlock(struct mbv_surface * const inst)
 {
 	/* DEBUG_PRINT("video-drm", "Entering surface_unlock()"); */
 	assert(inst != NULL);
-	if (inst->buffers[inst->active_buffer].hnd != 0) {
-		/* DEBUG_VPRINT("video-drm", "Unmapping dumb buffer (map=0x%x sz=%u)",
-			inst->map, inst->buffers[inst->active_buffer].sz); */
-		if (munmap(inst->map, inst->buffers[inst->active_buffer].sz) == -1) {
-			LOG_VPRINT_ERROR("Could not unmap dumb buffer: %s",
-				strerror(errno));
-		}
-		inst->map = NULL;
+	if (inst->buffers[0].hnd != 0) {
+		madvise(inst->buffers[inst->mapped_buffer].map,
+			inst->buffers[inst->mapped_buffer].sz,
+			MADV_DONTNEED);
 	}
 	pthread_mutex_unlock(&inst->lock);
 }
@@ -330,8 +295,8 @@ surface_update(struct mbv_surface * const surface,
 	}
 
 	if (surface == &surface->dev->root) {
-		DEBUG_VPRINT("video-drm", "Flipping root surface fb=%u",
-			surface->buffers[surface->active_buffer].fb);
+		/* DEBUG_VPRINT("video-drm", "Flipping root surface fb=%u",
+			surface->buffers[surface->active_buffer].fb); */
 
 		pthread_mutex_lock(&surface->dev->root.lock);
 
@@ -368,9 +333,9 @@ surface_destroy(struct mbv_surface *inst)
 		/* free dumb buffer */
 		abort();
 	} else {
-		if (inst->map != NULL) {
+		if (inst->buffers[0].map != NULL) {
 			assert(inst->real == inst);
-			free(inst->map);
+			free(inst->buffers[0].map);
 		}
 	}
 	free(inst);
@@ -382,7 +347,9 @@ mbv_drm_mkfb(struct mbv_drm_dev * const dev,
 	const int w, const int h)
 {
 	struct drm_mode_create_dumb creq;
+	struct drm_mode_map_dumb mreq = { 0 };
 	struct drm_mode_destroy_dumb dreq;
+	pthread_mutexattr_t lockattr;
 	int pitch;
 	uint8_t *buf;
 	int ret;
@@ -407,9 +374,12 @@ mbv_drm_mkfb(struct mbv_drm_dev * const dev,
 	surface->buffers[1].fb = 0;
 	surface->dev = dev;
 
-	if (pthread_mutex_init(&surface->lock, NULL) > 0) {
+	pthread_mutexattr_init(&lockattr);
+	pthread_mutexattr_settype(&lockattr, PTHREAD_MUTEX_RECURSIVE);
+	if (pthread_mutex_init(&surface->lock, &lockattr) > 0) {
 		LOG_PRINT_ERROR("Could not initialize root surface mutex!");
 		return -1;
+	} else {
 	}
 
 	/* create dumb back buffer */
@@ -477,13 +447,58 @@ mbv_drm_mkfb(struct mbv_drm_dev * const dev,
 	DEBUG_VPRINT("video-drm", "buffer[0].fb = 0x%x", surface->buffers[0].fb);
 	DEBUG_VPRINT("video-drm", "buffer[1].fb = 0x%x", surface->buffers[1].fb);
 
+	/* prepare buffer for memory mapping */
+	/* DEBUG_PRINT("video-drm", "Preparing to map surface"); */
+	mreq.handle = surface->buffers[0].hnd;
+	assert(mreq.offset == 0);
+	if (drmIoctl(dev->fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq)) {
+		LOG_VPRINT_ERROR("Cannot map dumb buffer (%d) %s",
+			errno, strerror(errno));
+		goto err_destroy;
+	}
+
+	/* perform actual memory mapping */
+	/* DEBUG_VPRINT("video-drm", "Mapping surface (offset=%u)",
+		mreq.offset); */
+	surface->buffers[0].map = mmap(0, surface->buffers[0].sz,
+		PROT_READ | PROT_WRITE, MAP_SHARED, dev->fd, mreq.offset);
+	if (surface->buffers[0].map == MAP_FAILED) {
+		LOG_VPRINT_ERROR("Cannot mmap dumb buffer (%d) %s",
+			errno, strerror(errno));
+		goto err_destroy;
+	}
+
+	/* prepare buffer for memory mapping */
+	/* DEBUG_PRINT("video-drm", "Preparing to map surface"); */
+	mreq.handle = surface->buffers[1].hnd;
+	mreq.offset = 0;
+	if (drmIoctl(dev->fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq)) {
+		LOG_VPRINT_ERROR("Cannot map dumb buffer (%d) %s",
+			errno, strerror(errno));
+		goto err_destroy;
+	}
+
+	/* perform actual memory mapping */
+	/* DEBUG_VPRINT("video-drm", "Mapping surface (offset=%u)",
+		mreq.offset); */
+	surface->buffers[1].map = mmap(0, surface->buffers[1].sz,
+		PROT_READ | PROT_WRITE, MAP_SHARED, dev->fd, mreq.offset);
+	if (surface->buffers[1].map == MAP_FAILED) {
+		LOG_VPRINT_ERROR("Cannot mmap dumb buffer (%d) %s",
+			errno, strerror(errno));
+		goto err_destroy;
+	}
+
+	DEBUG_VPRINT("video-drm", "buffer[0].map = %p", surface->buffers[0].map);
+	DEBUG_VPRINT("video-drm", "buffer[1].map = %p", surface->buffers[1].map);
+
 	/* clear the framebuffer to 0 */
 	DEBUG_PRINT("video-drm", "Clearing framebuffers");
 	if ((buf = surface_lock(surface, MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
 		LOG_PRINT_ERROR("Could not lock surface!");
 		goto err_fb;
 	}
-	memset(surface->map, 0, surface->buffers[0].sz);
+	memset(buf, 0, surface->buffers[0].sz);
 	surface_unlock(surface);
 
 	DEBUG_PRINT("video-drm", "Flipping framebuffer");

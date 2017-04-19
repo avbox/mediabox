@@ -628,8 +628,6 @@ mbv_window_update(struct mbv_window *window)
 	}
 
 	mbv_window_paint(window, update);
-
-	driver.surface_update(window->surface, update);
 }
 
 
