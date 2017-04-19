@@ -320,7 +320,7 @@ mb_library_backend_mediaboxsetup(const char * const template_path)
 		mediatomb_home,
 		mediatomb_udn,
 		hostname,
-		"no",
+		"yes",
 		NULL
 	};
 
