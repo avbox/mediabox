@@ -55,7 +55,6 @@ struct mbv_surface
 	uint32_t realy;
 	uint32_t n_buffers;
 	uint32_t active_buffer;
-
 	uint8_t *map;
 
 	struct mbv_surface *real;
@@ -160,8 +159,8 @@ surface_lock(struct mbv_surface * const inst,
 {
 	struct mbv_surface * const realinst = inst->real;
 
-	DEBUG_VPRINT("video-drm", "Entering surface_lock(front=%i)",
-		(flags & MBV_LOCKFLAGS_FRONT) != 0);
+	/* DEBUG_VPRINT("video-drm", "Entering surface_lock(front=%i)",
+		(flags & MBV_LOCKFLAGS_FRONT) != 0); */
 
 	assert(inst != NULL);
 	assert(inst->real != NULL);
@@ -176,8 +175,8 @@ surface_lock(struct mbv_surface * const inst,
 		struct drm_mode_map_dumb mreq = { 0 };
 		unsigned int mapflags = 0;
 
-		DEBUG_VPRINT("video-drm", "Mapping dumb buffer (buffer=%i,active=%i,n_buffers=%i,hnd=0x%x)",
-			buffer, realinst->active_buffer, realinst->n_buffers, realinst->buffers[buffer].hnd);
+		/* DEBUG_VPRINT("video-drm", "Mapping dumb buffer (buffer=%i,active=%i,n_buffers=%i,hnd=0x%x)",
+			buffer, realinst->active_buffer, realinst->n_buffers, realinst->buffers[buffer].hnd); */
 
 		if (flags & MBV_LOCKFLAGS_READ) {
 			mapflags |= PROT_READ;
@@ -189,7 +188,7 @@ surface_lock(struct mbv_surface * const inst,
 		assert(mapflags != 0);
 
 		/* prepare buffer for memory mapping */
-		DEBUG_PRINT("video-drm", "Preparing to map surface");
+		/* DEBUG_PRINT("video-drm", "Preparing to map surface"); */
 		mreq.handle = realinst->buffers[buffer].hnd;
 		assert(mreq.offset == 0);
 		if (drmIoctl(realinst->dev->fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq)) {
@@ -199,8 +198,8 @@ surface_lock(struct mbv_surface * const inst,
 		}
 
 		/* perform actual memory mapping */
-		DEBUG_VPRINT("video-drm", "Mapping surface (offset=%u)",
-			mreq.offset);
+		/* DEBUG_VPRINT("video-drm", "Mapping surface (offset=%u)",
+			mreq.offset); */
 		realinst->map = mmap(0, inst->buffers[buffer].sz,
 			mapflags, MAP_SHARED, inst->dev->fd, mreq.offset);
 		if (realinst->map == MAP_FAILED) {
@@ -211,24 +210,24 @@ surface_lock(struct mbv_surface * const inst,
 
 		*pitch = realinst->buffers[buffer].pitch;
 
-		DEBUG_VPRINT("video-drm", "Surface mapped (map=0x%x)",
-			inst->map);
+		/* DEBUG_VPRINT("video-drm", "Surface mapped (map=0x%x)",
+			inst->map); */
 	} else {
-		DEBUG_PRINT("video-drm", "Locking system buffer");
+		/* DEBUG_PRINT("video-drm", "Locking system buffer"); */
 		*pitch = realinst->buffers[0].pitch;
 	}
 
 	assert(realinst->map != NULL);
 
-	DEBUG_VPRINT("video-drm", "map=%p,x=%i,y=%i,realx=%i,realy=%i,w=%i,h=%i,p=%i)",
-		inst->map, inst->x, inst->y, inst->realx, inst->realy, inst->w, inst->h, *pitch);
+	/* DEBUG_VPRINT("video-drm", "map=%p,x=%i,y=%i,realx=%i,realy=%i,w=%i,h=%i,p=%i)",
+		inst->map, inst->x, inst->y, inst->realx, inst->realy, inst->w, inst->h, *pitch); */
 
 	if (inst == realinst) {
 		return inst->map;
 	}
 
 	uint8_t *map  = realinst->map + (inst->realy * (*pitch)) + inst->realx * 4;
-	DEBUG_VPRINT("video-drm", "surface_lock() returning %p", map);
+	/* DEBUG_VPRINT("video-drm", "surface_lock() returning %p", map); */
 	return map;
 }
 
@@ -236,11 +235,11 @@ surface_lock(struct mbv_surface * const inst,
 static void
 surface_unlock(struct mbv_surface * const inst)
 {
-	DEBUG_PRINT("video-drm", "Entering surface_unlock()");
+	/* DEBUG_PRINT("video-drm", "Entering surface_unlock()"); */
 	assert(inst != NULL);
 	if (inst->buffers[inst->active_buffer].hnd != 0) {
-		DEBUG_VPRINT("video-drm", "Unmapping dumb buffer (map=0x%x sz=%u)",
-			inst->map, inst->buffers[inst->active_buffer].sz);
+		/* DEBUG_VPRINT("video-drm", "Unmapping dumb buffer (map=0x%x sz=%u)",
+			inst->map, inst->buffers[inst->active_buffer].sz); */
 		if (munmap(inst->map, inst->buffers[inst->active_buffer].sz) == -1) {
 			LOG_VPRINT_ERROR("Could not unmap dumb buffer: %s",
 				strerror(errno));
@@ -257,10 +256,10 @@ surface_blitbuf(struct mbv_surface * const surface,
 {
 	int pitch = w * 4;
 
-	DEBUG_VPRINT("video-drm", "Entering surface_blitbuf(front=%i)",
+	/* DEBUG_VPRINT("video-drm", "Entering surface_blitbuf(front=%i)",
 		(flags & MBV_BLITFLAGS_FRONT) != 0);
 	DEBUG_VPRINT("video-drm", "w=%i h=%i x=%i, y=%i",
-		w, h, x, y);
+		w, h, x, y); */
 
 	int stride, dst_pitch;
 	const int stride_sz = w * 4;
@@ -320,8 +319,8 @@ static void
 surface_update(struct mbv_surface * const surface,
 	const int update)
 {
-	DEBUG_VPRINT("video-drm", "Entering surface_update(update=%i)",
-		update);
+	/* DEBUG_VPRINT("video-drm", "Entering surface_update(update=%i)",
+		update); */
 
 	assert(surface != NULL);
 
@@ -331,7 +330,8 @@ surface_update(struct mbv_surface * const surface,
 	}
 
 	if (surface == &surface->dev->root) {
-		DEBUG_PRINT("video-drm", "Flipping root surface");
+		DEBUG_VPRINT("video-drm", "Flipping root surface fb=%u",
+			surface->buffers[surface->active_buffer].fb);
 
 		pthread_mutex_lock(&surface->dev->root.lock);
 
