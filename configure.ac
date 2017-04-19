@@ -128,6 +128,10 @@ PKG_CHECK_MODULES(LIBAVCODEC, [libavcodec], ,
 PKG_CHECK_MODULES(LIBAVFILTER, [libavfilter], ,
 	AC_MSG_ERROR('Unable to find libavfilter. Please make sure library and header files are installed.'))
 
+PKG_CHECK_MODULES(SQLITE3, [sqlite3], ,
+	AC_MSG_ERROR('Unable to find SQLite3. Please make sure library and header files are installed.'))
+
+
 #
 # libdrm support
 #

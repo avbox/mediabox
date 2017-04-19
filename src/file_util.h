@@ -38,6 +38,13 @@ mb_getdatadir(char *buf, size_t bufsize);
 
 
 /**
+ * Gets the state directory (usually /var/lib/mediabox)
+ */
+char *
+getstatedir();
+
+
+/**
  * Copies a file from ifilename to ofilename replacing
  * all occurrences of match with replace.
  */

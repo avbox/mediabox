@@ -33,6 +33,8 @@
 #include "debug.h"
 #include "log.h"
 #include "sysinit.h"
+#include "settings.h"
+
 
 #ifdef ENABLE_IONICE
 #include "ionice.h"
@@ -285,6 +287,12 @@ main (int argc, char **cargv)
 			strerror(errno));
 	}
 
+	/* initialize settings database */
+	if (settings_init() == -1) {
+		fprintf(stderr, "Could not initialize settings database!\n");
+		exit(EXIT_FAILURE);
+	}
+
 	/* initialize timers system */
 	if (mbt_init() != 0) {
 		fprintf(stderr, "Could not initialize timers system. Exiting.\n");
@@ -371,6 +379,7 @@ main (int argc, char **cargv)
 
 	mb_process_shutdown();
 	mbt_shutdown();
+	settings_shutdown();
 	mbi_destroy();
 	mbv_destroy();
 

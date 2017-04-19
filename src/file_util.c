@@ -184,6 +184,41 @@ mb_getdatadir(char *buf, size_t bufsize)
 
 
 /**
+ * Gets the state directory (usually /var/lib/mediabox)
+ */
+char *
+getstatedir()
+{
+	struct stat st;
+
+	/* attempt to create the directory if it
+	 * doesn't exists */
+	mkdir_p(LOCALSTATEDIR "/lib/mediabox", S_IRWXU);
+
+	/* if it still doesn't exists or we can't access it
+	 * then use something else */
+	if (stat(LOCALSTATEDIR "/lib/mediabox", &st) == -1 ||
+		access(LOCALSTATEDIR "/lib/mediabox", R_OK|W_OK) == -1) {
+		DEBUG_VPRINT("file-util", "Could not access '%s': %s",
+			LOCALSTATEDIR "/mediabox", strerror(errno));
+		char *envhome = getenv("HOME");
+		char home[PATH_MAX];
+		if (envhome == NULL) {
+			return NULL;
+		}
+
+		strncpy(home, envhome, PATH_MAX);
+		strncat(home, "/.mediabox", PATH_MAX);
+		mkdir_p(home, S_IRWXU);
+		return strdup(home);
+	} else {
+		/* otherwise just return it */
+		return strdup(LOCALSTATEDIR "/lib/mediabox");
+	}
+}
+
+
+/**
  * Copies a file from ifilename to ofilename replacing
  * all occurrences of match with replace.
  */

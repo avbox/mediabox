@@ -14,7 +14,8 @@ AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
 	@LIBAVFILTER_CFLAGS@ \
 	@GLIB_CFLAGS@ \
 	@GIO_CFLAGS@ \
-	@LIBINPUT_CFLAGS@
+	@LIBINPUT_CFLAGS@ \
+	@SQLITE3_CFLAGS@
 
 AM_LDFLAGS = -lz -lm \
 	@LIBS@ \
@@ -29,7 +30,8 @@ AM_LDFLAGS = -lz -lm \
 	@LIBAVFILTER_LIBS@ \
 	@GLIB_LIBS@ \
 	@GIO_LIBS@ \
-	@LIBINPUT_LIBS@
+	@LIBINPUT_LIBS@ \
+	@SQLITE3_LIBS@
 
 bin_PROGRAMS = mediabox
 
@@ -57,6 +59,7 @@ mediabox_SOURCES = \
 	url_util.c \
 	time_util.c \
 	file_util.c \
+	settings.c \
 	string_util.c \
 	about.c \
 	announce.c \
