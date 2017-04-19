@@ -24,3 +24,7 @@ rm -rvf output/target/usr/bin/deluge
 rm -rvf output/target/usr/bin/deluge-gtk
 rm -rvf output/target/usr/bin/deluge-web
 ln -s deluge-console output/target/usr/bin/deluge
+
+# create log directory (by default it's a symlink to /tmp!)
+rm -rvf output/target/var/log
+mkdir -p output/target/var/log

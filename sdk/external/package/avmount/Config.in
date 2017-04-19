@@ -4,3 +4,12 @@ config BR2_PACKAGE_AVMOUNT
 	select BR2_PACKAGE_LIBUPNP
 	help
 	  UPnP media client implemented as a FUSE filesystem.
+
+if BR2_PACKAGE_AVMOUNT
+config BR2_PACKAGE_AVMOUNT_DEBUG
+	bool "AVMount Debug Support"
+	help
+	  Enables runtime checks and debug output to log
+	  file (or stderr).
+
+endif

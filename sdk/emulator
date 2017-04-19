@@ -1,0 +1,103 @@
+#!/bin/sh
+
+ARCH="x86_64"
+BOARD="qemu"
+KERNEL="build/${ARCH}/${BOARD}/output/images/bzImage"
+ROOTFS="build/${ARCH}/${BOARD}/output/images/rootfs.ext4"
+VIDEO=directfb
+BUSYBOX_INIT=0
+KVM=1
+EMU_VIDEO=std
+NCORES=2
+
+echo_e()
+{
+	echo -e "$@"
+}
+
+
+while [ $# != 0 ];
+do
+	case $1 in
+		--cores=*)
+			CORES=${1#*=}
+		;;
+		--video=*)
+			VIDEO=${1#*=}
+		;;
+		--emu-video=*)
+			EMU_VIDEO=${1#*=}
+		;;
+		--busybox-init)
+			BUSYBOX_INIT=1
+		;;
+		--kvm)
+			KVM=1
+		;;
+		--no-kvm)
+			KVM=0
+		;;
+		--help)
+			echo_e "MediaBox Emulator"
+			echo_e "emulator [options]"
+			echo_e ""
+			echo_e "Options:"
+			echo_e "  --cores=<no>\t\tNumber of cores for target system"
+			echo_e "  --video=<drv>\t\tThe mediabox video driver"
+			echo_e "  --emu-video=<drv>\tThe QEMU video driver to use"
+			echo_e "  --busybox-init\t\tBoot using BusyBox's init system"
+			echo_e "  --[no-]kvm\t\t\tEnable/disable kvm support"
+			echo_e "  --help\t\t\tShow this."
+			echo_e ""
+			exit 0
+		;;
+	esac
+	shift
+done
+			
+if [ -c /dev/kvm ]; then
+	EXTRA_ARGS="--enable-kvm"
+fi
+
+
+KARGS=
+KARGS="${KARGS} video=mode:1024x600x32"
+KARGS="${KARGS} root=/dev/sda rw"
+KARGS="${KARGS} quiet loglevel=0"
+KARGS="${KARGS} console=ttyS0"
+
+if [ ${BUSYBOX_INIT} -eq 0 ]; then
+	KARGS="${KARGS} init=/bin/mediabox"
+	KARGS="${KARGS} mediabox.video:driver=${VIDEO}"
+fi
+
+
+QEMU_AUDIO_DRV=pa \
+QEMU_ALSA_DAC_DEV=sysdefault \
+QEMU_ALSA_ADC_DEV=sysdefault \
+qemu-system-${ARCH} \
+	${EXTRA_ARGS} \
+	-kernel ${KERNEL} \
+	-smp ${NCORES} \
+	-vga ${EMU_VIDEO}  \
+	-device intel-hda -device hda-duplex \
+	-drive file=${ROOTFS},format=raw,if=none,id=a1 \
+	-device ich9-ahci,id=ahci \
+	-device ide-drive,drive=a1,bus=ahci.0 \
+	-net nic,model=virtio \
+	-net tap,ifname=vtap0,script=no,downscript=no \
+	-boot c \
+	-m 1024 \
+	-serial stdio \
+	-append "${KARGS}" \
+	-name MediaBox
+
+#	-net nic,model=virtio \
+#	-net tap,ifname=vtap,script=no \
+
+#	-netdev user,id=net0,hostfwd=tcp::2222-:22,hostfwd=tcp::6666-:6666 \
+#	-device virtio-net,netdev=net0,mac=52:54:00:12:34:56 \
+
+#	-net nic,model=virtio \
+#	-net bridge,br=bridge1 \
+
