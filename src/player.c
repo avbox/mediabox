@@ -242,7 +242,7 @@ mb_player_printstatus(const struct mbp * const inst, const int fps)
 
 
 /**
- * mb_player_rendertext() -- Renders a text overlay on top of
+ * Renders a text overlay on top of
  * the video image
  */
 static int
@@ -264,8 +264,6 @@ mb_player_rendertext(struct mbp *inst, cairo_t *context, char *text, PangoRectan
 		pango_layout_set_alignment(layout, mbv_get_pango_alignment(inst->top_overlay_alignment));
 		pango_layout_set_text(layout, text, -1);
 
-
-
 		cairo_set_source_rgba(context, 1.0, 1.0, 1.0, 1.0);
 		pango_cairo_update_layout(context, layout);
 		pango_cairo_show_layout(context, layout);
@@ -278,7 +276,7 @@ mb_player_rendertext(struct mbp *inst, cairo_t *context, char *text, PangoRectan
 
 
 /**
- * mb_player_dumpvideo() -- Dump all video frames up to the specified
+ * Dump all video frames up to the specified
  * pts (in usecs)
  *
  * WARNING: DO NOT call this function from any thread except the
@@ -317,7 +315,7 @@ mb_player_dumpvideo(struct mbp * const inst, const int64_t pts, const int flush)
 			goto end;
 		}
 
-		/* fprintf(stderr, "player: video_time=%li, pts=%li\n",
+		/* DEBUG_VPRINT("player", "video_time=%li, pts=%li",
 			video_time, pts); */
 
 		pthread_mutex_lock(&inst->video_output_lock);
@@ -564,7 +562,7 @@ mb_player_video(void *arg)
 					if (mb_audio_stream_ispaused(inst->audio_stream) && inst->audio_packets == 0 &&
 						mb_audio_stream_getframecount(inst->audio_stream) == 0) {
 						mb_player_dumpvideo(inst, elapsed, 1);
-						fprintf(stderr, "Deadlock detected, recovered (I hope)\n");
+						LOG_PRINT_ERROR("Deadlock detected, recovered (I hope)");
 					}
 				} else {
 					if (UNLIKELY(inst->video_paused)) {
@@ -699,7 +697,7 @@ mb_player_initvideofilters(
 		dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
 		time_base.num, time_base.den,
 		dec_ctx->sample_aspect_ratio.num, dec_ctx->sample_aspect_ratio.den);
-	fprintf(stderr, "args: %s\n", args);
+	DEBUG_VPRINT("player", "Video filter args: %s", args);
 
 
 	*filter_graph = avfilter_graph_alloc();
@@ -711,7 +709,7 @@ mb_player_initvideofilters(
 	ret = avfilter_graph_create_filter(buffersrc_ctx, buffersrc, "in",
                                        args, NULL, *filter_graph);
 	if (ret < 0) {
-		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
+		LOG_PRINT_ERROR("Cannot create buffer source!");
 		goto end;
 	}
 
@@ -719,14 +717,14 @@ mb_player_initvideofilters(
 	ret = avfilter_graph_create_filter(buffersink_ctx, buffersink, "out",
                                        NULL, NULL, *filter_graph);
 	if (ret < 0) {
-		av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
+		LOG_PRINT_ERROR("Cannot create buffer sink!");
 		goto end;
 	}
 
 	ret = av_opt_set_int_list(*buffersink_ctx, "pix_fmts", pix_fmts,
                               AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
 	if (ret < 0) {
-		av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
+		LOG_PRINT_ERROR("Cannot set output pixel format!");
 		goto end;
 	}
 
@@ -785,114 +783,121 @@ mb_player_initaudiofilters(
 	const char *filters_descr,
 	int audio_stream_index)
 {
-    char args[512];
-    int ret = 0;
-    AVFilter *abuffersrc  = avfilter_get_by_name("abuffer");
-    AVFilter *abuffersink = avfilter_get_by_name("abuffersink");
-    AVFilterInOut *outputs = avfilter_inout_alloc();
-    AVFilterInOut *inputs  = avfilter_inout_alloc();
-    static const enum AVSampleFormat out_sample_fmts[] = { AV_SAMPLE_FMT_S16, -1 };
-    static const int64_t out_channel_layouts[] = { AV_CH_LAYOUT_STEREO, -1 };
-    static const int out_sample_rates[] = { 48000, -1 };
-    const AVFilterLink *outlink;
-    AVRational time_base = fmt_ctx->streams[audio_stream_index]->time_base;
+	char args[512];
+	int ret = 0;
+	AVFilter *abuffersrc  = avfilter_get_by_name("abuffer");
+	AVFilter *abuffersink = avfilter_get_by_name("abuffersink");
+	AVFilterInOut *outputs = avfilter_inout_alloc();
+	AVFilterInOut *inputs  = avfilter_inout_alloc();
+	static const enum AVSampleFormat out_sample_fmts[] = { AV_SAMPLE_FMT_S16, -1 };
+	static const int64_t out_channel_layouts[] = { AV_CH_LAYOUT_STEREO, -1 };
+	static const int out_sample_rates[] = { 48000, -1 };
+	const AVFilterLink *outlink;
+	AVRational time_base = fmt_ctx->streams[audio_stream_index]->time_base;
 
-    *filter_graph = avfilter_graph_alloc();
-    if (!outputs || !inputs || !*filter_graph) {
-        ret = AVERROR(ENOMEM);
-        goto end;
-    }
+	DEBUG_PRINT("player", "Initializing audio filters");
 
-    /* buffer audio source: the decoded frames from the decoder will be inserted here. */
-    if (!dec_ctx->channel_layout)
-        dec_ctx->channel_layout = av_get_default_channel_layout(dec_ctx->channels);
-    snprintf(args, sizeof(args),
-            "time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
-             time_base.num, time_base.den, dec_ctx->sample_rate,
-             av_get_sample_fmt_name(dec_ctx->sample_fmt), dec_ctx->channel_layout);
-    ret = avfilter_graph_create_filter(buffersrc_ctx, abuffersrc, "in",
-                                       args, NULL, *filter_graph);
-    if (ret < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot create audio buffer source\n");
-        goto end;
-    }
+	*filter_graph = avfilter_graph_alloc();
+	if (!outputs || !inputs || !*filter_graph) {
+		ret = AVERROR(ENOMEM);
+		goto end;
+	}
 
-    /* buffer audio sink: to terminate the filter chain. */
-    ret = avfilter_graph_create_filter(buffersink_ctx, abuffersink, "out",
-                                       NULL, NULL, *filter_graph);
-    if (ret < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot create audio buffer sink\n");
-        goto end;
-    }
+	/* buffer audio source: the decoded frames from the decoder will be inserted here. */
+	if (!dec_ctx->channel_layout) {
+		dec_ctx->channel_layout = av_get_default_channel_layout(dec_ctx->channels);
+	}
 
-    ret = av_opt_set_int_list(*buffersink_ctx, "sample_fmts", out_sample_fmts, -1,
-                              AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot set output sample format\n");
-        goto end;
-    }
+	snprintf(args, sizeof(args),
+		"time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
+		time_base.num, time_base.den, dec_ctx->sample_rate,
+		av_get_sample_fmt_name(dec_ctx->sample_fmt), dec_ctx->channel_layout);
+	ret = avfilter_graph_create_filter(buffersrc_ctx, abuffersrc, "in",
+		args, NULL, *filter_graph);
+	if (ret < 0) {
+		LOG_PRINT_ERROR("Cannot create audio buffer source!");
+		goto end;
+	}
 
-    ret = av_opt_set_int_list(*buffersink_ctx, "channel_layouts", out_channel_layouts, -1,
-                              AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot set output channel layout\n");
-        goto end;
-    }
+	/* buffer audio sink: to terminate the filter chain. */
+	ret = avfilter_graph_create_filter(buffersink_ctx, abuffersink, "out",
+		NULL, NULL, *filter_graph);
+	if (ret < 0) {
+		LOG_PRINT_ERROR("Cannot create audio buffer sink!");
+		goto end;
+	}
 
-    ret = av_opt_set_int_list(*buffersink_ctx, "sample_rates", out_sample_rates, -1,
-                              AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot set output sample rate\n");
-        goto end;
-    }
+	ret = av_opt_set_int_list(*buffersink_ctx, "sample_fmts", out_sample_fmts, -1,
+		AV_OPT_SEARCH_CHILDREN);
+	if (ret < 0) {
+		LOG_PRINT_ERROR("Cannot set output sample format!");
+		goto end;
+	}
 
-    /*
-     * Set the endpoints for the filter graph. The filter_graph will
-     * be linked to the graph described by filters_descr.
-     */
-    /*
-     * The buffer source output must be connected to the input pad of
-     * the first filter described by filters_descr; since the first
-     * filter input label is not specified, it is set to "in" by
-     * default.
-     */
-    outputs->name       = av_strdup("in");
-    outputs->filter_ctx = *buffersrc_ctx;
-    outputs->pad_idx    = 0;
-    outputs->next       = NULL;
+	ret = av_opt_set_int_list(*buffersink_ctx, "channel_layouts", out_channel_layouts, -1,
+		AV_OPT_SEARCH_CHILDREN);
+	if (ret < 0) {
+		LOG_PRINT_ERROR("Cannot set output channel layout!");
+		goto end;
+	}
 
-    /*
-     * The buffer sink input must be connected to the output pad of
-     * the last filter described by filters_descr; since the last
-     * filter output label is not specified, it is set to "out" by
-     * default.
-     */
-    inputs->name       = av_strdup("out");
-    inputs->filter_ctx = *buffersink_ctx;
-    inputs->pad_idx    = 0;
-    inputs->next       = NULL;
+	ret = av_opt_set_int_list(*buffersink_ctx, "sample_rates", out_sample_rates, -1,
+		AV_OPT_SEARCH_CHILDREN);
+	if (ret < 0) {
+		LOG_PRINT_ERROR("Cannot set output sample rate!");
+		goto end;
+	}
 
-    if ((ret = avfilter_graph_parse_ptr(*filter_graph, filters_descr,
-                                        &inputs, &outputs, NULL)) < 0)
-        goto end;
+	/*
+	 * Set the endpoints for the filter graph. The filter_graph will
+	 * be linked to the graph described by filters_descr.
+	 */
 
-    if ((ret = avfilter_graph_config(*filter_graph, NULL)) < 0)
-        goto end;
+	/*
+	 * The buffer source output must be connected to the input pad of
+	 * the first filter described by filters_descr; since the first
+	 * filter input label is not specified, it is set to "in" by
+	 * default.
+	 */
+	outputs->name       = av_strdup("in");
+	outputs->filter_ctx = *buffersrc_ctx;
+	outputs->pad_idx    = 0;
+	outputs->next       = NULL;
 
-    /* Print summary of the sink buffer
-     * Note: args buffer is reused to store channel layout string */
-    outlink = (*buffersink_ctx)->inputs[0];
-    av_get_channel_layout_string(args, sizeof(args), -1, outlink->channel_layout);
-    av_log(NULL, AV_LOG_INFO, "Output: srate:%dHz fmt:%s chlayout:%s\n",
-           (int)outlink->sample_rate,
-           (char *)av_x_if_null(av_get_sample_fmt_name(outlink->format), "?"),
-           args);
+	/*
+	 * The buffer sink input must be connected to the output pad of
+	 * the last filter described by filters_descr; since the last
+	 * filter output label is not specified, it is set to "out" by
+	 * default.
+	 */
+	inputs->name       = av_strdup("out");
+	inputs->filter_ctx = *buffersink_ctx;
+	inputs->pad_idx    = 0;
+	inputs->next       = NULL;
+
+	if ((ret = avfilter_graph_parse_ptr(*filter_graph,
+		filters_descr, &inputs, &outputs, NULL)) < 0) {
+		goto end;
+	}
+
+	if ((ret = avfilter_graph_config(*filter_graph, NULL)) < 0) {
+		goto end;
+	}
+
+	/* Print summary of the sink buffer
+	 * Note: args buffer is reused to store channel layout string */
+	outlink = (*buffersink_ctx)->inputs[0];
+	av_get_channel_layout_string(args, sizeof(args), -1, outlink->channel_layout);
+	DEBUG_VPRINT("player", "Output: srate:%dHz fmt:%s chlayout:%s",
+		(int) outlink->sample_rate,
+		(char*) av_x_if_null(av_get_sample_fmt_name(outlink->format), "?"),
+		args);
 
 end:
-    avfilter_inout_free(&inputs);
-    avfilter_inout_free(&outputs);
+	avfilter_inout_free(&inputs);
+	avfilter_inout_free(&outputs);
 
-    return ret;
+	return ret;
 }
 
 
@@ -908,8 +913,8 @@ open_codec_context(int *stream_idx,
 
 	ret = av_find_best_stream(fmt_ctx, type, -1, -1, NULL, 0);
 	if (ret < 0) {
-		fprintf(stderr, "Could not find %s stream in input file\n",
-		av_get_media_type_string(type));
+		LOG_VPRINT_ERROR("Could not find %s stream in input file!",
+			av_get_media_type_string(type));
 		return ret;
 	} else {
 		*stream_idx = ret;
@@ -919,7 +924,7 @@ open_codec_context(int *stream_idx,
 		dec_ctx = st->codec;
 		dec = avcodec_find_decoder(dec_ctx->codec_id);
 		if (!dec) {
-			fprintf(stderr, "Failed to find %s codec\n",
+			LOG_VPRINT_ERROR("Failed to find '%s' codec!",
 				av_get_media_type_string(type));
 			return AVERROR(EINVAL);
 		}
@@ -927,7 +932,7 @@ open_codec_context(int *stream_idx,
 		/* Init the video decoder */
 		av_dict_set(&opts, "flags2", "+export_mvs", 0);
 		if ((ret = avcodec_open2(dec_ctx, dec, &opts)) < 0) {
-			fprintf(stderr, "Failed to open %s codec\n",
+			LOG_VPRINT_ERROR("Failed to open '%s' codec!",
 				av_get_media_type_string(type));
 			return ret;
 		}
@@ -937,7 +942,7 @@ open_codec_context(int *stream_idx,
 
 
 /**
- * mb_player_video_decode() -- Decodes video frames in the background.
+ * Decodes video frames in the background.
  */
 static void *
 mb_player_video_decode(void *arg)
@@ -989,7 +994,7 @@ mb_player_video_decode(void *arg)
 	if (mb_player_initvideofilters(inst->fmt_ctx, inst->video_codec_ctx,
 		&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
 		video_filters, inst->video_stream_index) < 0) {
-		fprintf(stderr, "player: Could not init filter graph!\n");
+		LOG_PRINT_ERROR("Could not initialize filtergraph!");
 		goto decoder_exit;
 	}
 
@@ -1020,7 +1025,7 @@ mb_player_video_decode(void *arg)
 	video_frame_nat = av_frame_alloc(); /* native */
 	video_frame_flt = av_frame_alloc(); /* filtered */
 	if (video_frame_nat == NULL || video_frame_flt == NULL) {
-		fprintf(stderr, "player: Could not allocate frames\n");
+		LOG_PRINT_ERROR("Could not allocate frames!");
 		goto decoder_exit;
 	}
 
@@ -1459,10 +1464,7 @@ mb_player_stream_parse(void *arg)
 	inst->seek_to = -1;
 
 	/* get the size of the window */
-	if (mbv_window_getsize(inst->window, &inst->width, &inst->height) == -1) {
-		fprintf(stderr, "player: Could not get window size\n");
-		goto decoder_exit;
-	}
+	mbv_window_getcanvassize(inst->window, &inst->width, &inst->height);
 
 	DEBUG_VPRINT("player", "Attempting to play (%ix%i) '%s'",
 		inst->width, inst->height, inst->media_file);
@@ -1470,18 +1472,15 @@ mb_player_stream_parse(void *arg)
 	/* open file */
 	av_dict_set(&stream_opts, "timeout", "30000000", 0);
 	if (avformat_open_input(&inst->fmt_ctx, inst->media_file, NULL, &stream_opts) != 0) {
-		fprintf(stderr, "player: Could not open '%s'\n",
+		LOG_VPRINT_ERROR("Could not open stream '%s'",
 			inst->media_file);
 		goto decoder_exit;
 	}
 
 	if (avformat_find_stream_info(inst->fmt_ctx, NULL) < 0) {
-		fprintf(stderr, "player: Could not find stream info\n");
+		LOG_PRINT_ERROR("Could not find stream info!");
 		goto decoder_exit;
 	}
-
-	/* dump file info */
-	av_dump_format(inst->fmt_ctx, 0, inst->media_file, 0);
 
 	/* if the file contains a video stream fire the video decoder */
 	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0) >= 0) {
@@ -1509,7 +1508,8 @@ mb_player_stream_parse(void *arg)
 		pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
 		pthread_mutex_unlock(&inst->video_decoder_lock);
 
-		fprintf(stderr, "player: Video stream: %i\n", inst->video_stream_index);
+		DEBUG_VPRINT("player", "Video stream %i selected",
+			inst->video_stream_index);
 	}
 
 	/* if there's an audio stream start the audio decoder */
@@ -2077,7 +2077,7 @@ mb_player_play(struct mbp *inst, const char * const path)
 			}
 			return 0;
 		}
-		fprintf(stderr, "player: mb_player_play() failed -- NULL path\n");
+		LOG_PRINT_ERROR("Playback failed: NULL path!");
 		return -1;
 	}
 
@@ -2160,7 +2160,7 @@ mb_player_play(struct mbp *inst, const char * const path)
 	/* fire the video threads */
 	pthread_mutex_lock(&inst->video_output_lock);
 	if (pthread_create(&inst->video_output_thread, NULL, mb_player_video, inst) != 0) {
-		fprintf(stderr, "player: Could not start renderer thread\n");
+		LOG_PRINT_ERROR("Could not start renderer thread!");
 		pthread_mutex_unlock(&inst->video_output_lock);
 		mb_player_stop(inst);
 		return -1;
@@ -2234,7 +2234,7 @@ mb_player_pause(struct mbp* inst)
 
 	/* can't pause if we're not playing */
 	if (inst->status != MB_PLAYER_STATUS_PLAYING) {
-		fprintf(stderr, "player: Cannot puase, not playing\n");
+		LOG_PRINT_ERROR("Cannot pause: Not playing!");
 		return -1;
 	}
 
@@ -2262,7 +2262,7 @@ mb_player_stop(struct mbp* inst)
 
 	/* if the video is paused then unpause it first. */
 	if (inst->status == MB_PLAYER_STATUS_PAUSED) {
-		fprintf(stderr, "player: Unpausing stream\n");
+		DEBUG_PRINT("player", "Unpausing stream");
 		mb_player_play(inst, NULL);
 	}
 
@@ -2286,7 +2286,7 @@ mb_player_stop(struct mbp* inst)
 		}
 		return 0;
 	}
-	fprintf(stderr, "player: Nothing to stop\n");
+	LOG_PRINT_ERROR("Cannot stop: Nothing to stop!");
 	return -1;
 }
 
