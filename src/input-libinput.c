@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dirent.h>
+#include <poll.h>
 #include <libinput.h>
 
 #define LOG_MODULE "input-libinput"
@@ -74,6 +75,7 @@ static void*
 mbi_libinput_event_loop(void *arg)
 {
 	struct libinput_event *ev;
+	struct pollfd fds;
 
 	assert(li != NULL);
 
@@ -81,10 +83,15 @@ mbi_libinput_event_loop(void *arg)
 
 
 	DEBUG_PRINT("input-libinput", "Running libinput event loop");
+	MB_DEBUG_SET_THREAD_NAME("input-libinput");
 
-	while (!quit) {
+	fds.fd = libinput_get_fd(li);
+	fds.events = POLLIN;
+	fds.revents = 0;
+
+	do {
 		libinput_dispatch(li);
-		if ((ev = libinput_get_event(li)) != NULL) {
+		while ((ev = libinput_get_event(li)) != NULL) {
 			enum libinput_event_type et = libinput_event_get_type(ev);
 			switch (et) {
 			case LIBINPUT_EVENT_KEYBOARD_KEY:
@@ -155,6 +162,7 @@ mbi_libinput_event_loop(void *arg)
 			libinput_event_destroy(ev);
 		}
 	}
+	while (!quit && poll(&fds, 1, -1) > -1);
 
 	DEBUG_PRINT("input-libinput", "Exiting libinput event loop");
 
