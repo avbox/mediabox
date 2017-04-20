@@ -32,6 +32,20 @@ int
 settings_setbool(const char * const key, const int value);
 
 
+/**
+ * Sets an integer value on the settings database.
+ */
+int
+settings_setint(const char * const key, const int value);
+
+
+/**
+ * Gets an integer value from the settings database.
+ */
+int
+settings_getint(const char * key, const int defvalue);
+
+
 int
 settings_init();
 

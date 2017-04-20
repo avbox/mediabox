@@ -34,6 +34,8 @@ static pthread_t event_loop_thread;
 #define DIKS_CURSOR_RIGHT 	(106)
 #define DIKS_BACKSPACE 		(14)
 #define DIKS_SPACE		(57) 
+#define DIKS_LEFT_CTRL		(29)
+#define DIKS_LEFT_ALT		(56)
 
 #define DIKS_KEY_A		(30)
 #define DIKS_KEY_B		(48)
@@ -119,6 +121,8 @@ mbi_libinput_event_loop(void *arg)
 				case DIKS_CURSOR_RIGHT: mbi_event_send(MBI_EVENT_ARROW_RIGHT); break;
 				case DIKS_BACKSPACE:    mbi_event_send(MBI_EVENT_CLEAR); break;
 				case DIKS_SPACE:        mbi_event_send(MBI_EVENT_KBD_SPACE); break;
+				case DIKS_LEFT_CTRL:	mbi_event_send(MBI_EVENT_VOLUME_UP); break;
+				case DIKS_LEFT_ALT:	mbi_event_send(MBI_EVENT_VOLUME_DOWN); break;
 
 				CASE_KEYBOARD(A)
 				CASE_KEYBOARD(B)

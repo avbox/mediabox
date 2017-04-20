@@ -20,7 +20,7 @@
 #include "timers.h"
 #include "debug.h"
 #include "log.h"
-#include "alsa-volume.h"
+#include "volume.h"
 #include "library.h"
 #include "ui-progressbar.h"
 
@@ -465,7 +465,7 @@ mbs_showdialog(void)
 	mbs_start_clock();
 
 	/* initialize the volume control */
-	if (mb_alsa_volume_init(input_fd) != 0) {
+	if (avbox_volume_init(input_fd) != 0) {
 		fprintf(stderr, "shell: Could not initialize volume control");
 		return -1;
 	}
@@ -580,23 +580,23 @@ mbs_showdialog(void)
 		case MBI_EVENT_VOLUME_UP:
 		{
 			int volume;
-			volume = mb_alsa_volume_get();
+			volume = avbox_volume_get();
 			volume += 10;
 			if (volume > 100) {
 				volume = 100;
 			}
-			mb_alsa_volume_set(volume);
+			avbox_volume_set(volume);
 			break;
 		}
 		case MBI_EVENT_VOLUME_DOWN:
 		{
 			int volume;
-			volume = mb_alsa_volume_get();
+			volume = avbox_volume_get();
 			volume -= 10;
 			if (volume < 0) {
 				volume = 0;
 			}
-			mb_alsa_volume_set(volume);
+			avbox_volume_set(volume);
 			break;
 		}
 		case MBI_EVENT_TIMER:
@@ -639,7 +639,7 @@ mbs_showdialog(void)
 
 	DEBUG_PRINT("shell", "Exiting");
 
-	mb_alsa_volume_destroy();
+	avbox_volume_shutdown();
 
 	return 0;
 }

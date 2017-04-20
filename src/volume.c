@@ -10,12 +10,13 @@
 #include <alsa/asoundlib.h>
 #include <alsa/mixer.h>
 
-#define LOG_MODULE "soundctl"
+#define LOG_MODULE "volume"
 
 #include "debug.h"
 #include "log.h"
-#include "alsa-volume.h"
+#include "volume.h"
 #include "input.h"
+#include "settings.h"
 
 
 static int message_fd = -1;
@@ -24,13 +25,15 @@ static const char *selem_name = "Master";
 
 
 int
-mb_alsa_volume_get(void)
+avbox_volume_get(void)
 {
 	int err, ret = -1;
 	long min, max, volume;
 	snd_mixer_t *handle;
 	snd_mixer_selem_id_t *sid;
 	snd_mixer_elem_t* elem;
+
+	DEBUG_PRINT("volume", "avbox_volume_get()");
 
 	if ((err = snd_mixer_open(&handle, 0)) < 0) {
 		LOG_VPRINT_ERROR("snd_mixer_open() failed: %s", snd_strerror(err));
@@ -62,11 +65,15 @@ mb_alsa_volume_get(void)
 			snd_strerror(err));
 		goto end;
 	}
-	if ((err = snd_mixer_selem_get_playback_volume(elem, SND_MIXER_SCHN_UNKNOWN, &volume)) < 0) {
+	if ((err = snd_mixer_selem_get_playback_volume(elem,
+		SND_MIXER_SCHN_FRONT_LEFT, &volume)) < 0) {
 		LOG_VPRINT_ERROR("snd_mixer_selem_get_playback_volume() failed: %s",
 			snd_strerror(ret));
 		goto end;
 	}
+
+	DEBUG_VPRINT("volume", "min=%d max=%d vol=%d, percent=%d",
+		min, max, volume, (volume * 100) / max);
 
 	ret = (int) ((volume * 100) / max);
 
@@ -78,13 +85,16 @@ end:
 
 
 int
-mb_alsa_volume_set(int volume)
+avbox_volume_set(int volume)
 {
 	int err, ret = -1;
 	long min, max;
 	snd_mixer_t *handle;
 	snd_mixer_selem_id_t *sid;
 	snd_mixer_elem_t* elem;
+
+	DEBUG_VPRINT("volume", "Setting volume to %d",
+		volume);
 
 	if ((err = snd_mixer_open(&handle, 0)) < 0) {
 		LOG_VPRINT_ERROR("Could not open mixer: %s", snd_strerror(err));
@@ -125,6 +135,8 @@ mb_alsa_volume_set(int volume)
 			sizeof(volume));
 	}
 
+	/* save the volume */
+	settings_setint("volume", volume);
 	ret = 0;
 
 end:
@@ -135,9 +147,13 @@ end:
 
 
 int
-mb_alsa_volume_init(int msgfd)
+avbox_volume_init(int msgfd)
 {
 	assert(message_fd == -1);
+
+	/* set the volume to either the last known
+	 * volume or a default value of 60 */
+	avbox_volume_set(settings_getint("volume", 60));
 
 	message_fd = msgfd;
 
@@ -146,7 +162,7 @@ mb_alsa_volume_init(int msgfd)
 
 
 void
-mb_alsa_volume_destroy(void)
+avbox_volume_shutdown(void)
 {
 	message_fd = -1;
 }

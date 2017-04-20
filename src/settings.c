@@ -300,6 +300,38 @@ settings_setbool(const char * const key, const int value)
 
 
 /**
+ * Sets an integer value on the settings database.
+ */
+int
+settings_setint(const char * const key, const int value)
+{
+	char svalue[32];
+	DEBUG_VPRINT("settings", "Entering settings_setint(\"%s\", %i)",
+		key, value);
+	sprintf(svalue, "%d", value);
+	return settings_setstring(key, svalue);
+}
+
+
+/**
+ * Gets an integer value from the settings database.
+ */
+int
+settings_getint(const char * key, const int defvalue)
+{
+	char *svalue;
+	int ret = defvalue;
+	DEBUG_VPRINT("settings", "Entering settings_getint(\"%s\", %d)",
+		key, defvalue);
+	if ((svalue = settings_getstring(key)) != NULL) {
+		ret = atoi(svalue);
+		free(svalue);
+	}
+	return ret;
+}
+
+
+/**
  * Creates the settings database.
  */
 static int

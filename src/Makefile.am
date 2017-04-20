@@ -67,7 +67,7 @@ mediabox_SOURCES = \
 	library-backend.c \
 	library.c \
 	timers.c \
-	alsa-volume.c \
+	volume.c \
 	process.c \
 	sysinit.c \
 	log.c \

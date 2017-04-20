@@ -8,19 +8,18 @@
 
 
 int
-mb_alsa_volume_get(void);
+avbox_volume_get(void);
 
 
 int
-mb_alsa_volume_set(int volume);
+avbox_volume_set(int volume);
 
 
 int
-mb_alsa_volume_init(int msgfd);
+avbox_volume_init(int msgfd);
 
 
 void
-mb_alsa_volume_destroy(void);
-
+avbox_volume_shutdown(void);
 
 #endif
