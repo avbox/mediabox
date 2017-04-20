@@ -34,7 +34,7 @@
 #endif
 
 
-LISTABLE_STRUCT(mb_process,
+LISTABLE_STRUCT(avbox_process,
 	int id;
 	pid_t pid;
 	int stdin;
@@ -44,11 +44,11 @@ LISTABLE_STRUCT(mb_process,
 	int exitted;
 	unsigned force_kill_delay;
 	unsigned autorestart_delay;
-	enum mb_process_flags flags;
+	enum avbox_process_flags flags;
 	const char *name;
 	const char *binary;
 	char * const * args;
-	mb_process_exit exit_callback;
+	avbox_process_exit exit_callback;
 	void *exit_callback_data;
 	int stopping;
 	pthread_cond_t cond;
@@ -65,16 +65,16 @@ static int quit = 0, io_quit = 0;
 
 
 /**
- * mb_process_checkflagsoneof() -- Checks that only one of the specified
+ * avbox_process_checkflagsoneof() -- Checks that only one of the specified
  * flags is set
  */
 static int
-mb_process_checkflagsoneof(enum mb_process_flags proc_flags, enum mb_process_flags flags)
+avbox_process_checkflagsoneof(enum avbox_process_flags proc_flags, enum avbox_process_flags flags)
 {
 	int i;
 	if (proc_flags & flags) {
 		proc_flags &= flags;
-		for (i = 0; i < sizeof(enum mb_process_flags) * CHAR_BIT; i++) {
+		for (i = 0; i < sizeof(enum avbox_process_flags) * CHAR_BIT; i++) {
 			if ((proc_flags & 1) && proc_flags != 1) {
 				errno = EINVAL;
 				return -1;
@@ -87,18 +87,18 @@ mb_process_checkflagsoneof(enum mb_process_flags proc_flags, enum mb_process_fla
 
 
 /**
- * mb_process_getbyid() -- Gets a process from the list by it's id.
+ * avbox_process_getbyid() -- Gets a process from the list by it's id.
  */
-static struct mb_process*
-mb_process_getbyid(const int id, const int locked)
+static struct avbox_process*
+avbox_process_getbyid(const int id, const int locked)
 {
-	struct mb_process *proc, *ret = NULL;
+	struct avbox_process *proc, *ret = NULL;
 
 	if (!locked) {
 		pthread_mutex_lock(&process_list_lock);
 	}
 
-	LIST_FOREACH(struct mb_process*, proc, &process_list) {
+	LIST_FOREACH(struct avbox_process*, proc, &process_list) {
 		if (proc->id == id) {
 			ret = proc;
 			break;
@@ -114,10 +114,10 @@ mb_process_getbyid(const int id, const int locked)
 
 
 /**
- * mb_process_fork() -- Forks and execs a process.
+ * avbox_process_fork() -- Forks and execs a process.
  */
 static pid_t
-mb_process_fork(struct mb_process *proc)
+avbox_process_fork(struct avbox_process *proc)
 {
 	int ret = -1;
 	int in[2] = { -1, -1 }, out[2] = { -1, -1 }, err[2] = { -1, -1 };
@@ -164,7 +164,7 @@ mb_process_fork(struct mb_process *proc)
 	closefrom(3);
 
 	/* set the process niceness */
-	if (proc->flags & MB_PROCESS_NICE) {
+	if (proc->flags & AVBOX_PROCESS_NICE) {
 		if (nice(5) == -1) {
 			LOG_VPRINT(MB_LOGLEVEL_WARN, "process",
 				"I'm trying to be nice but I can't. (errno=%i)", errno);
@@ -173,13 +173,13 @@ mb_process_fork(struct mb_process *proc)
 
 #ifdef ENABLE_IONICE
 	/* set the process IO priority */
-	if (proc->flags & MB_PROCESS_IONICE_IDLE) {
+	if (proc->flags & AVBOX_PROCESS_IONICE_IDLE) {
 		(void) mb_su_gainroot();
 		if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)) == -1) {
 			fprintf(stderr, "process: WARNING: Could not set deluged IO priority to idle!!\n");
 		}
 		(void) mb_su_droproot();
-	} else if (proc->flags & MB_PROCESS_IONICE_BE) {
+	} else if (proc->flags & AVBOX_PROCESS_IONICE_BE) {
 		(void) mb_su_gainroot();
 		if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 0)) == -1) {
 			fprintf(stderr, "process: WARNING: Could not set deluged IO priority to idle!!\n");
@@ -189,7 +189,7 @@ mb_process_fork(struct mb_process *proc)
 #endif
 
 	/* if the process requires root then elevate privilege */
-	if (proc->flags & MB_PROCESS_SUPERUSER) {
+	if (proc->flags & AVBOX_PROCESS_SUPERUSER) {
 		mb_su_gainroot();
 	}
 
@@ -212,10 +212,10 @@ end:
 
 
 /**
- * mb_process_clone_args() -- Clones a list of arguments.
+ * avbox_process_clone_args() -- Clones a list of arguments.
  */
 static char * const*
-mb_process_clone_args(const char * const argv[])
+avbox_process_clone_args(const char * const argv[])
 {
 	char **args;
 	int sz = 0, i = 0;
@@ -254,10 +254,10 @@ mb_process_clone_args(const char * const argv[])
 
 
 /**
- * mb_process_free_args() -- Free's a cloned list of arguments.
+ * avbox_process_free_args() -- Free's a cloned list of arguments.
  */
 static void
-mb_process_free_args(char * const argv[]) {
+avbox_process_free_args(char * const argv[]) {
 	int i = 0;
 	while (argv[i] != NULL) {
 		free(argv[i++]);
@@ -267,10 +267,10 @@ mb_process_free_args(char * const argv[]) {
 
 
 /**
- * mb_process_free() -- Free a process structure.
+ * avbox_process_free() -- Free a process structure.
  */
 static void
-mb_process_free(struct mb_process *proc)
+avbox_process_free(struct avbox_process *proc)
 {
 	assert(proc != NULL);
 
@@ -281,48 +281,48 @@ mb_process_free(struct mb_process *proc)
 		free((void*) proc->binary);
 	}
 	if (proc->args != NULL) {
-		mb_process_free_args(proc->args);
+		avbox_process_free_args(proc->args);
 	}
 	free(proc);
 }
 
 
 /**
- * mb_process_get_next_id() -- Gets the next process id.
+ * avbox_process_get_next_id() -- Gets the next process id.
  */
 static inline int
-mb_process_get_next_id(void)
+avbox_process_get_next_id(void)
 {
 	return nextid++;
 }
 
 
 /**
- * mb_process_force_kill() -- This is the handler a timer that is set when
- * mb_process_stop() is called and the process does not have the
- * MB_PROCESS_SIGKILL flag set. It fires 5 seconds after stop() returns
+ * avbox_process_force_kill() -- This is the handler a timer that is set when
+ * avbox_process_stop() is called and the process does not have the
+ * AVBOX_PROCESS_SIGKILL flag set. It fires 5 seconds after stop() returns
  * and will SIGKILL the process (in case SIGTERM didn't work).
  */
-static enum mbt_result
-mb_process_force_kill(int id, void *data)
+static enum avbox_timer_result
+avbox_process_force_kill(int id, void *data)
 {
 	int proc_id = *((int*) data);
-	struct mb_process *proc;
-	enum mbt_result ret = MB_TIMER_CALLBACK_RESULT_STOP;
+	struct avbox_process *proc;
+	enum avbox_timer_result ret = AVBOX_TIMER_CALLBACK_RESULT_STOP;
 
 	DEBUG_VPRINT("process", "Force kill callback for process %id",
 		proc_id);
 
 	pthread_mutex_lock(&process_list_lock);
 
-	LIST_FOREACH(struct mb_process*, proc, &process_list) {
+	LIST_FOREACH(struct avbox_process*, proc, &process_list) {
 		if (proc->id == proc_id) {
 			DEBUG_VPRINT("process", "Force killing process %i (pid=%i)",
 				proc_id, proc->pid);
 			if (kill(proc->pid, SIGKILL) == -1) {
 				LOG_PRINT_ERROR("kill() regurned -1");
 			}
-			ret = MB_TIMER_CALLBACK_RESULT_CONTINUE;
+			ret = AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
 			break;
 		}
 	}
@@ -339,26 +339,26 @@ mb_process_force_kill(int id, void *data)
  * Restarts a process that is not currently running.
  * This is only called after a process chrashes.
  */
-static enum mbt_result
-mb_process_autorestart(int id, void *data)
+static enum avbox_timer_result
+avbox_process_autorestart(int id, void *data)
 {
-	struct mb_process * const proc = (struct mb_process * const) data;
-	proc->pid = mb_process_fork(proc);
-	return MB_TIMER_CALLBACK_RESULT_STOP;
+	struct avbox_process * const proc = (struct avbox_process * const) data;
+	proc->pid = avbox_process_fork(proc);
+	return AVBOX_TIMER_CALLBACK_RESULT_STOP;
 }
 
 
 /**
- * mb_process_io_thread() -- Runs on it's own thread and handles standard IO
+ * avbox_process_io_thread() -- Runs on it's own thread and handles standard IO
  * to/from processes.
  */
 static void *
-mb_process_io_thread(void *arg)
+avbox_process_io_thread(void *arg)
 {
 	fd_set fds;
 	int fd_max, res;
 	char buf[1024];
-	struct mb_process *proc;
+	struct avbox_process *proc;
 	struct timeval tv;
 
 	MB_DEBUG_SET_THREAD_NAME("proc-io");
@@ -371,7 +371,7 @@ mb_process_io_thread(void *arg)
 
 		/* build a file descriptor set to select() */
 		pthread_mutex_lock(&process_list_lock);
-		LIST_FOREACH(struct mb_process*, proc, &process_list) {
+		LIST_FOREACH(struct avbox_process*, proc, &process_list) {
 			if (proc->stdout != -1) {
 				FD_SET(proc->stdout, &fds);
 				fd_max = MAX(fd_max, proc->stdout);
@@ -400,14 +400,14 @@ mb_process_io_thread(void *arg)
 
 		/* process all pending output */
 		pthread_mutex_lock(&process_list_lock);
-		LIST_FOREACH(struct mb_process*, proc, &process_list) {
+		LIST_FOREACH(struct avbox_process*, proc, &process_list) {
 			if (proc->stdout != -1 && FD_ISSET(proc->stdout, &fds)) {
-				if (!(proc->flags & MB_PROCESS_STDOUT_PIPE)) {
+				if (!(proc->flags & AVBOX_PROCESS_STDOUT_PIPE)) {
 					if ((res = read(proc->stdout, buf, sizeof(buf))) == -1) {
 						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 							"read() returned -1 (errno=%i)", errno);
 					}
-					if (proc->flags & MB_PROCESS_STDOUT_LOG) {
+					if (proc->flags & AVBOX_PROCESS_STDOUT_LOG) {
 						/* TODO: We need to break the output in lines */
 						LOG_VPRINT(MB_LOGLEVEL_WARN, "process",
 							"%s: %s", proc->name, buf);
@@ -415,12 +415,12 @@ mb_process_io_thread(void *arg)
 				}
 			}
 			if (proc->stderr != -1 && FD_ISSET(proc->stderr, &fds)) {
-				if (!(proc->flags & MB_PROCESS_STDERR_PIPE)) {
+				if (!(proc->flags & AVBOX_PROCESS_STDERR_PIPE)) {
 					if ((res = read(proc->stderr, buf, sizeof(buf))) == -1) {
 						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 							"read() returned -1 (errno=%i)", errno);
 					}
-					if (proc->flags & MB_PROCESS_STDERR_LOG) {
+					if (proc->flags & AVBOX_PROCESS_STDERR_LOG) {
 						/* TODO: We need to break the output in lines */
 						LOG_VPRINT(MB_LOGLEVEL_WARN, "process",
 							"%s: %s", proc->name, buf);
@@ -444,11 +444,11 @@ mb_process_io_thread(void *arg)
  * the event appropriately.
  */
 static void *
-mb_process_monitor_thread(void *arg)
+avbox_process_monitor_thread(void *arg)
 {
 	pid_t pid;
 	int status;
-	struct mb_process *proc;
+	struct avbox_process *proc;
 
 	MB_DEBUG_SET_THREAD_NAME("proc-mon");
 	DEBUG_PRINT("process", "Starting process monitor thread");
@@ -470,7 +470,7 @@ mb_process_monitor_thread(void *arg)
 
 		pthread_mutex_lock(&process_list_lock);
 
-		LIST_FOREACH_SAFE(struct mb_process*, proc, &process_list, {
+		LIST_FOREACH_SAFE(struct avbox_process*, proc, &process_list, {
 			if (proc->pid == pid) {
 				DEBUG_VPRINT("process", "Process %i exitted with status %i",
 					proc->id, WEXITSTATUS(status));
@@ -496,8 +496,8 @@ mb_process_monitor_thread(void *arg)
 
 				/* if the process terminated abormally and the AUTORESTART flag is
 				 * set then restart the process */
-				if (proc->flags & MB_PROCESS_AUTORESTART_ALWAYS ||
-					(WEXITSTATUS(status) != 0 && (proc->flags & MB_PROCESS_AUTORESTART))) {
+				if (proc->flags & AVBOX_PROCESS_AUTORESTART_ALWAYS ||
+					(WEXITSTATUS(status) != 0 && (proc->flags & AVBOX_PROCESS_AUTORESTART))) {
 					if (!proc->stopping) {
 						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 							"Auto restarting process '%s' (id=%i,pid=%i)",
@@ -506,15 +506,15 @@ mb_process_monitor_thread(void *arg)
 						if (proc->autorestart_delay == 0) {
 							/* if the process is set to restart without
 							 * delay then restart it now */
-							mb_process_autorestart(0, proc);
+							avbox_process_autorestart(0, proc);
 						} else {
 							/* set a timer to restart the process
 							 * after a delay */
 							struct timespec tv;
 							tv.tv_sec = proc->autorestart_delay;
 							tv.tv_nsec = 0;
-							if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, -1,
-								mb_process_autorestart, proc) == -1) {
+							if (avbox_timer_register(&tv, AVBOX_TIMER_TYPE_AUTORELOAD, -1,
+								avbox_process_autorestart, proc) == -1) {
 								LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
 									"Could not register autorestart timer");
 							}
@@ -529,7 +529,7 @@ mb_process_monitor_thread(void *arg)
 						WEXITSTATUS(status), proc->exit_callback_data);
 				}
 
-				if (proc->flags & MB_PROCESS_WAIT) {
+				if (proc->flags & AVBOX_PROCESS_WAIT) {
 					/* save exit status and wake any threads waiting
 					 * on this process */
 					DEBUG_VPRINT("process", "Signaling process %i", proc->id);
@@ -541,7 +541,7 @@ mb_process_monitor_thread(void *arg)
 					/* remove process from list */
 					LIST_REMOVE(proc);
 					/* cleanup */
-					mb_process_free(proc);
+					avbox_process_free(proc);
 				}
 
 				break;
@@ -558,17 +558,17 @@ mb_process_monitor_thread(void *arg)
 
 
 /**
- * mb_process_getpid() -- Gets the pid of a process.
+ * avbox_process_getpid() -- Gets the pid of a process.
  *
  * NOTE: The PID cannot be used to identify a process using the process
  * API since a process may crash or get restarted and get a new PID.
  */
 pid_t
-mb_process_getpid(int id)
+avbox_process_getpid(int id)
 {
-	struct mb_process *proc;
+	struct avbox_process *proc;
 
-	if ((proc = mb_process_getbyid(id, 0)) != NULL) {
+	if ((proc = avbox_process_getbyid(id, 0)) != NULL) {
 		return proc->pid;
 	}
 	return -1;
@@ -576,7 +576,7 @@ mb_process_getpid(int id)
 
 
 /**
- * mb_process_openfd() -- Opens one of the standard file descriptors for
+ * avbox_process_openfd() -- Opens one of the standard file descriptors for
  * the process.
  *
  * NOTE: After opening a file descriptor with this function the process
@@ -584,17 +584,17 @@ mb_process_getpid(int id)
  * on it when you're done using it.
  */
 int
-mb_process_openfd(int id, int std_fileno)
+avbox_process_openfd(int id, int std_fileno)
 {
 	int result = -1;
-	struct mb_process *proc;
+	struct avbox_process *proc;
 
 	assert(std_fileno == STDIN_FILENO ||
 		std_fileno == STDOUT_FILENO ||
 		std_fileno == STDERR_FILENO);
 
 	/* get the process object */
-	if ((proc = mb_process_getbyid(id, 0)) == NULL) {
+	if ((proc = avbox_process_getbyid(id, 0)) == NULL) {
 		DEBUG_VPRINT("process", "Process id %i not found", id);
 		errno = ENOENT;
 		return -1;
@@ -627,10 +627,10 @@ mb_process_openfd(int id, int std_fileno)
  * to exit after sending SIGTERM before sending SIGKILL.
  */
 int
-mb_process_setsigkilldelay(int procid, unsigned delay)
+avbox_process_setsigkilldelay(int procid, unsigned delay)
 {
-	struct mb_process * const proc =
-		mb_process_getbyid(procid, 0);
+	struct avbox_process * const proc =
+		avbox_process_getbyid(procid, 0);
 	if (proc == NULL) {
 		return -ENOENT;
 	}
@@ -640,49 +640,49 @@ mb_process_setsigkilldelay(int procid, unsigned delay)
 
 
 /**
- * mb_process_start() -- Starts and monitors a child process.
+ * avbox_process_start() -- Starts and monitors a child process.
  */
 int
-mb_process_start(const char *binary, const char * const argv[],
-	enum mb_process_flags flags, const char *name, mb_process_exit exit_callback,
+avbox_process_start(const char *binary, const char * const argv[],
+	enum avbox_process_flags flags, const char *name, avbox_process_exit exit_callback,
 	void *callback_data)
 {
 	int ret = -1;
-	struct mb_process *proc;
+	struct avbox_process *proc;
 
 	assert(binary != NULL);
 	assert(argv != NULL);
 	assert(name != NULL);
 
 	/* check for conflicting IO priority flags */
-	if (mb_process_checkflagsoneof(flags, MB_PROCESS_IONICE) == -1) {
+	if (avbox_process_checkflagsoneof(flags, AVBOX_PROCESS_IONICE) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
 			"Multiple IO priorities set!");
 		return -1;
 	}
 
 	/* check for conflicting STDOUT flags */
-	if (mb_process_checkflagsoneof(flags, MB_PROCESS_STDOUT) == -1) {
+	if (avbox_process_checkflagsoneof(flags, AVBOX_PROCESS_STDOUT) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR,  "process",
 			"Multiple STDOUT flags set!");
 		return -1;
 	}
 
 	/* check for conflicting STDERR flags */
-	if (mb_process_checkflagsoneof(flags, MB_PROCESS_STDERR) == -1) {
+	if (avbox_process_checkflagsoneof(flags, AVBOX_PROCESS_STDERR) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR,  "process",
 			"Multiple STDERR flags set!");
 		return -1;
 	}
 
 	/* allocate memory for process structure */
-	if ((proc = malloc(sizeof(struct mb_process))) == NULL) {
+	if ((proc = malloc(sizeof(struct avbox_process))) == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR,  "process", "Out of memory");
 		return -1;
 	}
 
 	/* initialize process structure and add it to list */
-	proc->id = mb_process_get_next_id();
+	proc->id = avbox_process_get_next_id();
 	proc->stdin = -1;
 	proc->stdout = -1;
 	proc->stderr = -1;
@@ -692,7 +692,7 @@ mb_process_start(const char *binary, const char * const argv[],
 	proc->flags = flags;
 	proc->force_kill_delay = 30;
 	proc->autorestart_delay = 5;
-	proc->args = mb_process_clone_args(argv);
+	proc->args = avbox_process_clone_args(argv);
 	proc->name = strdup(name);
 	proc->binary = strdup(binary);
 	proc->exit_callback = exit_callback;
@@ -702,13 +702,13 @@ mb_process_start(const char *binary, const char * const argv[],
 	if (pthread_cond_init(&proc->cond, NULL) != 0) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
 			"Failed to initialize pthread primitives");
-		mb_process_free(proc);
+		avbox_process_free(proc);
 	}
 
 	/* check that all memory allocations succeeded */
 	if (proc->binary == NULL || proc->args == NULL || proc->name == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR,  "process", "Out of memory");
-		mb_process_free(proc);
+		avbox_process_free(proc);
 		return -1;
 	}
 
@@ -733,7 +733,7 @@ mb_process_start(const char *binary, const char * const argv[],
 	 * the child dies right away the exit code is caught and processed */
 	pthread_mutex_lock(&process_list_lock);
 	LIST_ADD(&process_list, proc);
-	if ((proc->pid = mb_process_fork(proc)) == -1) {
+	if ((proc->pid = avbox_process_fork(proc)) == -1) {
 		LIST_REMOVE(proc);
 	}
 	ret = proc->id;
@@ -744,21 +744,21 @@ mb_process_start(const char *binary, const char * const argv[],
 
 
 /**
- * mb_process_wait() -- Wait for a process to exit.
+ * avbox_process_wait() -- Wait for a process to exit.
  *
- * NOTE: This function will fail if MB_PROCESS_WAIT is not set
+ * NOTE: This function will fail if AVBOX_PROCESS_WAIT is not set
  * when starting the process!
  */
 int
-mb_process_wait(int id, int *exit_status)
+avbox_process_wait(int id, int *exit_status)
 {
 	int ret = -1;
-	struct mb_process *proc;
+	struct avbox_process *proc;
 
 	pthread_mutex_lock(&process_list_lock);
 
 	/* find the process to wait for */
-	if ((proc = mb_process_getbyid(id, 1)) == NULL) {
+	if ((proc = avbox_process_getbyid(id, 1)) == NULL) {
 		LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 			"Cannot wait for process id %i (no such process)", id);
 		errno = ENOENT;
@@ -766,7 +766,7 @@ mb_process_wait(int id, int *exit_status)
 	}
 
 	/* if the process doesn't have the wait flag return error */
-	if ((proc->flags & MB_PROCESS_WAIT) == 0) {
+	if ((proc->flags & AVBOX_PROCESS_WAIT) == 0) {
 		errno = EINVAL;
 		goto end;
 	}
@@ -785,7 +785,7 @@ mb_process_wait(int id, int *exit_status)
 
 	/* free the process */
 	LIST_REMOVE(proc);
-	mb_process_free(proc);
+	avbox_process_free(proc);
 	ret = 0;
 end:
 	pthread_mutex_unlock(&process_list_lock);
@@ -794,23 +794,23 @@ end:
 
 
 /**
- * mb_process_stop() -- Stops a running child process.
+ * Stops a running child process.
  */
 int
-mb_process_stop(int id)
+avbox_process_stop(int id)
 {
-	struct mb_process *proc;
+	struct avbox_process *proc;
 
 	DEBUG_VPRINT("process", "Stopping process id %i", id);
 
-	if ((proc = mb_process_getbyid(id, 0)) != NULL) {
+	if ((proc = avbox_process_getbyid(id, 0)) != NULL) {
 
 		DEBUG_VPRINT("process", "Found process %i (pid=%i name='%s')",
 			id, proc->pid, proc->name);
 
 		proc->stopping = 1;
 
-		if (proc->flags & MB_PROCESS_SIGKILL) {
+		if (proc->flags & AVBOX_PROCESS_SIGKILL) {
 			/* send SIGKILL to the process */
 			if (kill(proc->pid, SIGKILL) == -1) {
 				/* TODO: Is this guaranteed to succeed?
@@ -841,7 +841,7 @@ mb_process_stop(int id)
 			tv.tv_sec = proc->force_kill_delay;
 			tv.tv_nsec = 0;
 			*id_copy = id;
-			if (mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD, -1, mb_process_force_kill, id_copy) == -1) {
+			if (avbox_timer_register(&tv, AVBOX_TIMER_TYPE_AUTORELOAD, -1, avbox_process_force_kill, id_copy) == -1) {
 				LOG_PRINT(MB_LOGLEVEL_ERROR, "process",
 					"Could not register force stop timer");
 				free(id_copy);
@@ -859,10 +859,10 @@ mb_process_stop(int id)
 
 
 /**
- * mb_process_init() -- Initialize the child process monitor
+ * avbox_process_init() -- Initialize the child process monitor
  */
 int
-mb_process_init(void)
+avbox_process_init(void)
 {
 	DEBUG_PRINT("process", "Initializing process monitor");
 
@@ -871,12 +871,12 @@ mb_process_init(void)
 	quit = 0;
 	io_quit = 0;
 
-	if (pthread_create(&monitor_thread, NULL, mb_process_monitor_thread, NULL) != 0) {
+	if (pthread_create(&monitor_thread, NULL, avbox_process_monitor_thread, NULL) != 0) {
 		fprintf(stderr, "process: Could not start thread\n");
 		return -1;
 	}
 
-	if (pthread_create(&io_thread, NULL, mb_process_io_thread, NULL) != 0) {
+	if (pthread_create(&io_thread, NULL, avbox_process_io_thread, NULL) != 0) {
 		fprintf(stderr, "process: Could not start IO thread\n");
 		quit = 1;
 		pthread_join(io_thread, 0);
@@ -888,30 +888,30 @@ mb_process_init(void)
 
 
 /**
- * mb_process_shutdown() -- Shutdown the process monitor.
+ * avbox_process_shutdown() -- Shutdown the process monitor.
  */
 void
-mb_process_shutdown(void)
+avbox_process_shutdown(void)
 {
-	struct mb_process *proc;
+	struct avbox_process *proc;
 
 	DEBUG_PRINT("process", "Shutting down process monitor");
 
 	/* set the exit flag and stop all processes */
 	quit = 1;
-	LIST_FOREACH_SAFE(struct mb_process*, proc, &process_list, {
-		if (!proc->stopping || !(proc->flags & MB_PROCESS_WAIT)) {
-			mb_process_stop(proc->id);
+	LIST_FOREACH_SAFE(struct avbox_process*, proc, &process_list, {
+		if (!proc->stopping || !(proc->flags & AVBOX_PROCESS_WAIT)) {
+			avbox_process_stop(proc->id);
 		}
 	});
 
 	/* if any process remains dump them to the log */
 	if (LIST_SIZE(&process_list) > 0) {
 		DEBUG_VPRINT("process", "Remaining processes: %zd", LIST_SIZE(&process_list));
-		LIST_FOREACH(struct mb_process*, proc, &process_list) {
+		LIST_FOREACH(struct avbox_process*, proc, &process_list) {
 			DEBUG_VPRINT("process", "Process id %i: %s pid=%i waiting=%i stopping=%i",
 				proc->id, proc->name, proc->pid,
-				(proc->flags & MB_PROCESS_WAIT) ? 1 : 0,
+				(proc->flags & AVBOX_PROCESS_WAIT) ? 1 : 0,
 				proc->stopping);
 		}
 

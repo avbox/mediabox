@@ -26,7 +26,7 @@
 #include "log.h"
 
 
-LISTABLE_TYPE(mbi_sink,
+LISTABLE_STRUCT(avbox_input_sink,
 	int readfd;
 	int writefd;
 );
@@ -70,20 +70,20 @@ realloc_safe(void *buf, size_t sz)
  * mbi_dispatchmessage() -- Dispatch a message.
  */
 static int
-mbi_dispatchmessage(struct mb_message *msg)
+avbox_input_dispatchmessage(struct avbox_message *msg)
 {
 	int ret;
 	int dispatched = 0;
-	mbi_sink *sink;
+	struct avbox_input_sink *sink;
 
 	pthread_mutex_lock(&dispatch_lock);
 
 	/* if the message specifies a recipient sent it to the recipient's
 	 * queue and return success if the message is successfully queued */
 	if (msg->recipient != MBI_RECIPIENT_ANY) {
-		LIST_FOREACH_SAFE(mbi_sink*, sink, &sinks, {
+		LIST_FOREACH_SAFE(struct avbox_input_sink*, sink, &sinks, {
 			if (sink->readfd == msg->recipient) {
-				if (write_or_epipe(sink->writefd, msg, sizeof(struct mb_message) + msg->size) == -1) {
+				if (write_or_epipe(sink->writefd, msg, sizeof(struct avbox_message) + msg->size) == -1) {
 					pthread_mutex_lock(&sinks_lock);
 					LIST_REMOVE(sink);
 					pthread_mutex_unlock(&sinks_lock);
@@ -99,8 +99,8 @@ mbi_dispatchmessage(struct mb_message *msg)
 	}
 
 	/* first send the message to all nonblocking sinks */
-	LIST_FOREACH_SAFE(mbi_sink*, sink, &nonblock_sinks, {
-		if (write_or_epipe(sink->writefd, msg, sizeof(struct mb_message) + msg->size) == -1) {
+	LIST_FOREACH_SAFE(struct avbox_input_sink*, sink, &nonblock_sinks, {
+		if (write_or_epipe(sink->writefd, msg, sizeof(struct avbox_message) + msg->size) == -1) {
 			pthread_mutex_lock(&sinks_lock);
 			LIST_REMOVE(sink);
 			pthread_mutex_unlock(&sinks_lock);
@@ -108,11 +108,11 @@ mbi_dispatchmessage(struct mb_message *msg)
 		}
 	});
 
-	sink = LIST_TAIL(mbi_sink*, &sinks);
+	sink = LIST_TAIL(struct avbox_input_sink*, &sinks);
 	if (sink == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_INFO, "input", "Input event dropped. No sinks");
 
-	} else if ((ret = write_or_epipe(sink->writefd, msg, sizeof(struct mb_message) + msg->size)) == 0) {
+	} else if ((ret = write_or_epipe(sink->writefd, msg, sizeof(struct avbox_message) + msg->size)) == 0) {
 		pthread_mutex_lock(&sinks_lock);
 		LIST_REMOVE(sink);
 		pthread_mutex_unlock(&sinks_lock);
@@ -134,55 +134,55 @@ end:
 
 
 /**
- * mbi_dispatch_event() -- Sends a message without data to the thread that currently
+ * Sends a message without data to the thread that currently
  * receives input messages
  */
 int
-mbi_dispatchevent(enum mbi_event e)
+avbox_input_dispatchevent(enum avbox_input_event e)
 {
-	struct mb_message msg;
+	struct avbox_message msg;
 	msg.msg = e;
 	msg.recipient = -1;
 	msg.size = 0;
-	return mbi_dispatchmessage(&msg);
+	return avbox_input_dispatchmessage(&msg);
 }
 
 
 /**
- * mbi_getmessage() -- Gets the next message at the queue specified
+ * Gets the next message at the queue specified
  * by the file descriptor.
  */
-struct mb_message *
-mbi_getmessage(int fd)
+struct avbox_message *
+avbox_input_getmessage(int fd)
 {
-	struct mb_message *msg;
+	struct avbox_message *msg;
 
-	msg = malloc_safe(sizeof(struct mb_message));
+	msg = malloc_safe(sizeof(struct avbox_message));
 
 	/* read the next message */
-	if (read_or_eof(fd, msg, sizeof(struct mb_message)) == -1) {
+	if (read_or_eof(fd, msg, sizeof(struct avbox_message)) == -1) {
 		free(msg);
 		return NULL;
 	}
 
 	/* if the message has data read it */
 	if (msg->size > 0) {
-		msg = realloc_safe(msg, sizeof(struct mb_message) + msg->size);
-		read_or_die(fd, ((uint8_t*) msg) + sizeof(struct mb_message), msg->size);
+		msg = realloc_safe(msg, sizeof(struct avbox_message) + msg->size);
+		read_or_die(fd, ((uint8_t*) msg) + sizeof(struct avbox_message), msg->size);
 	}
 	return msg;
 }
 
 
 /**
- * mbi_getevent() -- Gets the event code for the next message in the
+ * Gets the event code for the next message in the
  * queue and discards the rest of the message.
  */
 int
-mbi_getevent(int fd, enum mbi_event *e)
+avbox_input_getevent(int fd, enum avbox_input_event *e)
 {
-	struct mb_message *msg;
-	if ((msg = mbi_getmessage(fd)) == NULL) {
+	struct avbox_message *msg;
+	if ((msg = avbox_input_getmessage(fd)) == NULL) {
 		return -1;
 	}
 	*e = msg->msg;
@@ -192,13 +192,13 @@ mbi_getevent(int fd, enum mbi_event *e)
 
 
 /**
- * mbi_loop() -- Runs on the background receiving and dispatching
+ * Runs on the background receiving and dispatching
  * messages.
  */
 static void*
-mbi_loop(void *arg)
+avbox_input_loop(void *arg)
 {
-	struct mb_message *msg;
+	struct avbox_message *msg;
 	size_t msgsz;
 
 	(void) arg;
@@ -207,20 +207,20 @@ mbi_loop(void *arg)
 	DEBUG_PRINT("input", "Starting input dispatcher thread");
 
 	msgsz = 0;
-	msg = malloc_safe(sizeof(struct mb_message));
+	msg = malloc_safe(sizeof(struct avbox_message));
 
 	while (1) {
 
 		/* read the next event */
-		read_or_die(readfd, msg, sizeof(struct mb_message));
+		read_or_die(readfd, msg, sizeof(struct avbox_message));
 
 		/* if the message has data read it */
 		if (msg->size != 0) {
 			if (msg->size > msgsz) {
-				msg = realloc_safe(msg, sizeof(struct mb_message) + msg->size);
+				msg = realloc_safe(msg, sizeof(struct avbox_message) + msg->size);
 				msgsz = msg->size;
 			}
-			read_or_die(readfd, ((uint8_t*) msg) + sizeof(struct mb_message), msg->size);
+			read_or_die(readfd, ((uint8_t*) msg) + sizeof(struct avbox_message), msg->size);
 		}
 
 		/* if this is the special exit message then quit */
@@ -229,7 +229,7 @@ mbi_loop(void *arg)
 			break;
 		}
 
-		while (mbi_dispatchmessage(msg) == -1);
+		while (avbox_input_dispatchmessage(msg) == -1);
 	}
 
 	DEBUG_PRINT("input", "Input dispatcher thread exiting");
@@ -241,18 +241,18 @@ mbi_loop(void *arg)
 
 
 /**
- * mbi_grab_input() -- Returns a file descriptor to a pipe where
+ * Returns a file descriptor to a pipe where
  * all input events will be sent until the file descriptor is closed,
  * in which case the prior descriptor is closed or until mbi_grab_input()
  * is called again
  */
 static int
-mbi_grab_input_internal(int block)
+avbox_input_grabinternal(int block)
 {
 	int inputfd[2];
-	mbi_sink *input_sink;
+	struct avbox_input_sink *input_sink;
 
-	input_sink = malloc(sizeof(mbi_sink));
+	input_sink = malloc(sizeof(struct avbox_input_sink));
 	if (input_sink == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "mbi_grab_input(): Out of memory");
 		return -1;
@@ -285,32 +285,32 @@ mbi_grab_input_internal(int block)
 
 
 int
-mbi_grab_input(void)
+avbox_input_grab(void)
 {
-	return mbi_grab_input_internal(1);
+	return avbox_input_grabinternal(1);
 }
 
 
 int
-mbi_grab_input_nonblock(void)
+avbox_input_grabnonblock(void)
 {
-	return mbi_grab_input_internal(0);
+	return avbox_input_grabinternal(0);
 }
 
 
 /**
- * mbi_sendmessage() -- Sends a message.
+ * Sends a message.
  */
 void
-mbi_sendmessage(int recipient, enum mbi_event e, void *data, size_t sz)
+avbox_input_sendmessage(int recipient, enum avbox_input_event e, void *data, size_t sz)
 {
-	struct mb_message msg;
+	struct avbox_message msg;
 	msg.msg = e;
 	msg.recipient = recipient;
 	msg.size = sz;
 
 	pthread_mutex_lock(&lock);
-	write_or_die(writefd, &msg, sizeof(struct mb_message));
+	write_or_die(writefd, &msg, sizeof(struct avbox_message));
 	if (sz > 0) {
 		write_or_die(writefd, data, sz);
 	}
@@ -319,17 +319,17 @@ mbi_sendmessage(int recipient, enum mbi_event e, void *data, size_t sz)
 
 
 void
-mbi_event_send(enum mbi_event e)
+avbox_input_sendevent(enum avbox_input_event e)
 {
-	mbi_sendmessage(MBI_RECIPIENT_ANY, e, NULL, 0);
+	avbox_input_sendmessage(MBI_RECIPIENT_ANY, e, NULL, 0);
 }
 
 
 /**
- * mbi_init() -- Initialize input subsystem
+ * Initialize input subsystem
  */
 int
-mbi_init(void)
+avbox_input_init(void)
 {
 	int event_pipe[2];
 	int got_keyboard = 0;
@@ -379,7 +379,7 @@ mbi_init(void)
 	}
 #endif
 
-	if (pthread_create(&input_loop_thread, NULL, mbi_loop, NULL) != 0) {
+	if (pthread_create(&input_loop_thread, NULL, avbox_input_loop, NULL) != 0) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "input",
 			"Could not start input dispatch thread");
 		return -1;
@@ -390,14 +390,14 @@ mbi_init(void)
 
 
 void
-mbi_destroy(void)
+avbox_input_shutdown(void)
 {
 	mbi_directfb_destroy();
 	mbi_tcp_destroy();
 #ifdef ENABLE_BLUETOOTH
 	mbi_bluetooth_destroy();
 #endif
-	mbi_event_send(MBI_EVENT_EXIT);
+	avbox_input_sendevent(MBI_EVENT_EXIT);
 	pthread_join(input_loop_thread, NULL);
 	close(writefd);
 	close(readfd);

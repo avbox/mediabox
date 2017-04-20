@@ -62,10 +62,10 @@ sysinit_execargs(const char * const filepath, ...)
 	assert(i < 8);
 	assert(args[i] == NULL);
 
-	if ((proc_tmp = mb_process_start(filepath, args,
-		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
+	if ((proc_tmp = avbox_process_start(filepath, args,
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT,
 		filepath, NULL, NULL)) > 0) {
-		mb_process_wait(proc_tmp, &ret_tmp);
+		avbox_process_wait(proc_tmp, &ret_tmp);
 	}
 
 	return ret_tmp;
@@ -144,7 +144,7 @@ sysinit_hostname()
 	char *hostname = NULL;
 
 	/* get the hostname from database */
-	if ((hostname = settings_getstring("hostname")) == NULL) {
+	if ((hostname = avbox_settings_getstring("hostname")) == NULL) {
 		LOG_VPRINT_ERROR("Could not get hostname setting: %s",
 			strerror(errno));
 		return;
@@ -221,10 +221,10 @@ sysinit_udevd()
 	};
 
 
-	if ((proc_tmp = mb_process_start(UDEVD_BIN, udevd_args,
-		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
+	if ((proc_tmp = avbox_process_start(UDEVD_BIN, udevd_args,
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT,
 		"udevd", NULL, NULL)) > 0) {
-		mb_process_wait(proc_tmp, &ret_tmp);
+		avbox_process_wait(proc_tmp, &ret_tmp);
 		if (ret_tmp != 0) {
 			LOG_VPRINT_ERROR("ifup returned %i", ret_tmp);
 			return;
@@ -273,18 +273,18 @@ sysinit_network()
 	};
 
 
-	if ((proc_tmp = mb_process_start("/sbin/ifup", ifup_args,
-		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
+	if ((proc_tmp = avbox_process_start("/sbin/ifup", ifup_args,
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT,
 		"ifup", NULL, NULL)) > 0) {
-		mb_process_wait(proc_tmp, &ret_tmp);
+		avbox_process_wait(proc_tmp, &ret_tmp);
 		if (ret_tmp != 0) {
 			LOG_VPRINT_ERROR("ifup returned %i", ret_tmp);
 		}
 	}
-	if ((proc_tmp = mb_process_start("/sbin/ifconfig", ifconfig_lo_args,
-		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
+	if ((proc_tmp = avbox_process_start("/sbin/ifconfig", ifconfig_lo_args,
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT,
 		"ifconfig_lo", NULL, NULL)) > 0) {
-		mb_process_wait(proc_tmp, &ret_tmp);
+		avbox_process_wait(proc_tmp, &ret_tmp);
 		if (ret_tmp != 0) {
 			LOG_VPRINT_ERROR("ifconfig lo up returned %i", ret_tmp);
 		}
@@ -299,10 +299,10 @@ sysinit_network()
 		NULL
 	};
 
-	if ((proc_tmp = mb_process_start("/sbin/udhcpc", udhcpc_eth0_args,
-		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
+	if ((proc_tmp = avbox_process_start("/sbin/udhcpc", udhcpc_eth0_args,
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT,
 		"udhcpc_eth0", NULL, NULL)) > 0) {
-		mb_process_wait(proc_tmp, &ret_tmp);
+		avbox_process_wait(proc_tmp, &ret_tmp);
 		if (ret_tmp != 0) {
 			LOG_VPRINT_ERROR("`udhcpc -i eth0 -n` returned %i", ret_tmp);
 		}
@@ -317,10 +317,10 @@ sysinit_network()
 		NULL
 	};
 
-	if ((proc_tmp = mb_process_start("/sbin/ifconfig", ifconfig_eth0_args,
-		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT,
+	if ((proc_tmp = avbox_process_start("/sbin/ifconfig", ifconfig_eth0_args,
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT,
 		"ifconfig_eth0", NULL, NULL)) > 0) {
-		mb_process_wait(proc_tmp, &ret_tmp);
+		avbox_process_wait(proc_tmp, &ret_tmp);
 		if (ret_tmp != 0) {
 			LOG_VPRINT_ERROR("ifconfig eth0 10.0.2.15 returned %i", ret_tmp);
 		}
@@ -359,14 +359,14 @@ sysinit_dbus()
 	}
 
 	/* ensure that a machine id has been generated */
-	if ((proc_uuidgen = mb_process_start("/bin/dbus-uuidgen", uuidgen_args,
-		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT, "dbus-uuidgen", NULL, NULL)) > 0) {
-		mb_process_wait(proc_uuidgen, &ret);
+	if ((proc_uuidgen = avbox_process_start("/bin/dbus-uuidgen", uuidgen_args,
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT, "dbus-uuidgen", NULL, NULL)) > 0) {
+		avbox_process_wait(proc_uuidgen, &ret);
 	}
 
 	/* start the dbus daemon */
-	if ((proc_dbus = mb_process_start("/bin/dbus-daemon", dbus_args,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_SUPERUSER,
+	if ((proc_dbus = avbox_process_start("/bin/dbus-daemon", dbus_args,
+		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_SUPERUSER,
 		"dropbear", NULL, NULL)) == -1) {
 		LOG_PRINT_ERROR("Could not start dropbear deamon!");
 	}
@@ -386,8 +386,8 @@ sysinit_dropbear()
 		NULL
 	};
 
-	if ((proc_dropbear = mb_process_start("/sbin/dropbear", args,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_SUPERUSER,
+	if ((proc_dropbear = avbox_process_start("/sbin/dropbear", args,
+		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_SUPERUSER,
 		"dropbear", NULL, NULL)) == -1) {
 		LOG_PRINT_ERROR("Could not start dropbear deamon!");
 	}
@@ -413,8 +413,8 @@ sysinit_console()
 		NULL
 	};
 
-	if ((proc_getty = mb_process_start("/sbin/getty", args,
-		MB_PROCESS_AUTORESTART_ALWAYS | MB_PROCESS_SUPERUSER,
+	if ((proc_getty = avbox_process_start("/sbin/getty", args,
+		AVBOX_PROCESS_AUTORESTART_ALWAYS | AVBOX_PROCESS_SUPERUSER,
 		"getty", NULL, NULL)) == -1) {
 		LOG_PRINT_ERROR("Could not start getty program!");
 	}

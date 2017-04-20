@@ -8,43 +8,43 @@
 
 
 /* Process flags enumerator */
-enum mb_process_flags
+enum avbox_process_flags
 {
-	MB_PROCESS_NONE			= 0x00000000,
-	MB_PROCESS_AUTORESTART		= 0x00000001,
-	MB_PROCESS_SIGKILL		= 0x00000002,
-	MB_PROCESS_SUPERUSER		= 0x00000004,
-	MB_PROCESS_NICE			= 0x00000008,
-	MB_PROCESS_IONICE_IDLE		= 0x00000010,
-	MB_PROCESS_IONICE_BE		= 0x00000020,
-	MB_PROCESS_IONICE_RT		= 0x00000040,
-	MB_PROCESS_STDOUT_LOG		= 0x00000080,
-	MB_PROCESS_STDOUT_PIPE		= 0x00000100,
-	MB_PROCESS_STDERR_LOG		= 0x00000200,
-	MB_PROCESS_STDERR_PIPE		= 0x00000400,
-	MB_PROCESS_WAIT			= 0x00000800,
-	MB_PROCESS_AUTORESTART_ALWAYS	= 0x00001000,
+	AVBOX_PROCESS_NONE			= 0x00000000,
+	AVBOX_PROCESS_AUTORESTART		= 0x00000001,
+	AVBOX_PROCESS_SIGKILL		= 0x00000002,
+	AVBOX_PROCESS_SUPERUSER		= 0x00000004,
+	AVBOX_PROCESS_NICE			= 0x00000008,
+	AVBOX_PROCESS_IONICE_IDLE		= 0x00000010,
+	AVBOX_PROCESS_IONICE_BE		= 0x00000020,
+	AVBOX_PROCESS_IONICE_RT		= 0x00000040,
+	AVBOX_PROCESS_STDOUT_LOG		= 0x00000080,
+	AVBOX_PROCESS_STDOUT_PIPE		= 0x00000100,
+	AVBOX_PROCESS_STDERR_LOG		= 0x00000200,
+	AVBOX_PROCESS_STDERR_PIPE		= 0x00000400,
+	AVBOX_PROCESS_WAIT			= 0x00000800,
+	AVBOX_PROCESS_AUTORESTART_ALWAYS	= 0x00001000,
 
-	MB_PROCESS_IONICE = (MB_PROCESS_IONICE_IDLE | MB_PROCESS_IONICE_BE | MB_PROCESS_IONICE_RT),
-	MB_PROCESS_STDOUT = (MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDOUT_PIPE),
-	MB_PROCESS_STDERR = (MB_PROCESS_STDERR_LOG | MB_PROCESS_STDERR_PIPE)
+	AVBOX_PROCESS_IONICE = (AVBOX_PROCESS_IONICE_IDLE | AVBOX_PROCESS_IONICE_BE | AVBOX_PROCESS_IONICE_RT),
+	AVBOX_PROCESS_STDOUT = (AVBOX_PROCESS_STDOUT_LOG | AVBOX_PROCESS_STDOUT_PIPE),
+	AVBOX_PROCESS_STDERR = (AVBOX_PROCESS_STDERR_LOG | AVBOX_PROCESS_STDERR_PIPE)
 };
 
 
 /* Process exit callback function */
-typedef void (*mb_process_exit)(int id, int exit_status,
+typedef void (*avbox_process_exit)(int id, int exit_status,
 	void *data);
 
 
 /**
- * mb_process_wait() -- Wait for a process to exit.
+ * Wait for a process to exit.
  */
 int
-mb_process_wait(int id, int *exit_status);
+avbox_process_wait(int id, int *exit_status);
 
 
 /**
- * mb_process_openfd() -- Opens one of the standard file descriptors for
+ * Opens one of the standard file descriptors for
  * the process.
  *
  * NOTE: After opening a file descriptor with this function the process
@@ -52,7 +52,7 @@ mb_process_wait(int id, int *exit_status);
  * on it when you're done using it.
  */
 int
-mb_process_openfd(int id, int std_fileno);
+avbox_process_openfd(int id, int std_fileno);
 
 
 /**
@@ -60,23 +60,23 @@ mb_process_openfd(int id, int std_fileno);
  * to exit after sending SIGTERM before sending SIGKILL.
  */
 int
-mb_process_setsigkilldelay(int procid, unsigned delay);
+avbox_process_setsigkilldelay(int procid, unsigned delay);
 
 
 int
-mb_process_start(const char *binary, const char * const argv[], enum mb_process_flags flags,
-	const char *name, mb_process_exit exit_callback, void *exit_callback_data);
+avbox_process_start(const char *binary, const char * const argv[], enum avbox_process_flags flags,
+	const char *name, avbox_process_exit exit_callback, void *exit_callback_data);
 
 
 int
-mb_process_stop(int id);
+avbox_process_stop(int id);
 
 
 int
-mb_process_init(void);
+avbox_process_init(void);
 
 
 void
-mb_process_shutdown(void);
+avbox_process_shutdown(void);
 
 #endif

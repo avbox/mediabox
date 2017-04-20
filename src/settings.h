@@ -7,14 +7,14 @@
  * be freed with free().
  */
 char *
-settings_getstring(const char * const key);
+avbox_settings_getstring(const char * const key);
 
 
 /**
  * Sets a string value on the settings database.
  */
 int
-settings_setstring(const char * const key,
+avbox_settings_setstring(const char * const key,
 	const char * const value);
 
 
@@ -22,38 +22,38 @@ settings_setstring(const char * const key,
  * Gets a boolean value from the settings database.
  */
 int
-settings_getbool(const char * const key);
+avbox_settings_getbool(const char * const key);
 
 
 /**
  * Sets a boolean value on the settings database.
  */
 int
-settings_setbool(const char * const key, const int value);
+avbox_settings_setbool(const char * const key, const int value);
 
 
 /**
  * Sets an integer value on the settings database.
  */
 int
-settings_setint(const char * const key, const int value);
+avbox_settings_setint(const char * const key, const int value);
 
 
 /**
  * Gets an integer value from the settings database.
  */
 int
-settings_getint(const char * key, const int defvalue);
+avbox_settings_getint(const char * key, const int defvalue);
 
 
 int
-settings_init();
+avbox_settings_init();
 
 
 /**
  * Shutdown settings database.
  */
 void
-settings_shutdown();
+avbox_settings_shutdown();
 
 #endif

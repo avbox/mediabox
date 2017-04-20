@@ -122,19 +122,19 @@ int
 mb_about_showdialog(void)
 {
 	int fd;
-	enum mbi_event e;
+	enum avbox_input_event e;
 	/* show the menu window */
 	dirty = 1;
         mbv_window_show(window);
 
 	/* grab the input device */
-	if ((fd = mbi_grab_input()) == -1) {
+	if ((fd = avbox_input_grab()) == -1) {
 		fprintf(stderr, "mbs_about_showdialog() -- mbi_grab_input failed\n");
 		return -1;
 	}
 
 	/* wait for any input */
-	mbi_getevent(fd, &e);
+	avbox_input_getevent(fd, &e);
 
 	/* hide the mainmenu window */
 	mbv_window_hide(window);

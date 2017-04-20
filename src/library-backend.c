@@ -107,9 +107,9 @@ mb_library_backend_startmediatomb(const char * iface_name, void  *data)
 	}
 
 	/* launch the mediatomb process */
-	if ((inst->procid = mb_process_start(MEDIATOMB_BIN, (const char **) mtargs,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE |
-		MB_PROCESS_SUPERUSER/* | MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDERR_LOG */,
+	if ((inst->procid = avbox_process_start(MEDIATOMB_BIN, (const char **) mtargs,
+		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
+		AVBOX_PROCESS_SUPERUSER/* | AVBOX_PROCESS_STDOUT_LOG | AVBOX_PROCESS_STDERR_LOG */,
 		"mediatomb", NULL, NULL)) == -1) {
 		LOG_PRINT_ERROR("Could not start mediatomb daemon");
 		free(inst);
@@ -493,9 +493,9 @@ mb_library_backend_init(const int launch_avmount,
 		DEBUG_VPRINT("library-backend", "Running " AVMOUNT_BIN " -l %s --lobind -f "
 			"-p 49152 -o allow_other " AVMOUNT_MOUNTPOINT, avmount_logfile);
 
-		if ((avmount_process_id = mb_process_start(AVMOUNT_BIN, (const char **) avargs,
-			MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE |
-			MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_LOG | MB_PROCESS_STDERR_LOG,
+		if ((avmount_process_id = avbox_process_start(AVMOUNT_BIN, (const char **) avargs,
+			AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
+			AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_STDOUT_LOG | AVBOX_PROCESS_STDERR_LOG,
 			"avmount", NULL, NULL)) == -1) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "library-backend", "Could not start avmount daemon");
 			return -1;
@@ -514,10 +514,10 @@ mb_library_backend_shutdown(void)
 {
 	struct mb_mediatomb_inst *inst;
 	LIST_FOREACH_SAFE(struct mb_mediatomb_inst*, inst, &mediatomb_instances, {
-		mb_process_stop(inst->procid);
+		avbox_process_stop(inst->procid);
 		LIST_REMOVE(inst);
 	});
 	if (avmount_process_id != -1) {
-		mb_process_stop(avmount_process_id);
+		avbox_process_stop(avmount_process_id);
 	}
 }

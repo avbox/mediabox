@@ -46,7 +46,7 @@ static char date_string[256] = "";
  * mbs_get_active_player() -- Gets the currently active player instance.
  */
 struct mbp *
-mbs_get_active_player(void)
+avbox_shell_getactiveplayer(void)
 {
 	return player;
 }
@@ -56,7 +56,7 @@ mbs_get_active_player(void)
  * Gets the shell's message queue fd.
  */
 int
-mbs_getqueue(void)
+avbox_shell_getqueue(void)
 {
 	return input_fd;
 }
@@ -66,14 +66,14 @@ mbs_getqueue(void)
  * Draws the welcome screen.
  */
 static int
-mbs_welcomescreen_paint(struct mbv_window *window)
+avbox_shell_paint(struct mbv_window *window)
 {
 	int w, h;
 	cairo_t *context;
 	PangoLayout *layout_time, *layout_date;
 	PangoFontDescription *font_desc;
 
-	DEBUG_VPRINT("shell", "mbs_welcomescreen_paint(0x%p)",
+	DEBUG_VPRINT("shell", "avbox_shell_paint(0x%p)",
 		window);
 
 	/* assert(mbv_window_isvisible(window)); */
@@ -129,8 +129,8 @@ mbs_welcomescreen_paint(struct mbv_window *window)
  * This is the callback function for the timer
  * that updates the clock on the welcome screen.
  */
-static enum mbt_result
-mbs_welcomescreen(int id, void *data)
+static enum avbox_timer_result
+avbox_shell_welcomescreen(int id, void *data)
 {
 	time_t now;
 	static char old_time_string[256] = { 0 };
@@ -145,7 +145,7 @@ mbs_welcomescreen(int id, void *data)
 
 	/* if the time has not changed there's no need to repaint */
 	if (!strcmp(old_time_string, time_string)) {
-		return MB_TIMER_CALLBACK_RESULT_CONTINUE;
+		return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
 	} else {
 		/* save the time string */
 		strcpy(old_time_string, time_string);
@@ -158,28 +158,29 @@ mbs_welcomescreen(int id, void *data)
 	/* repaint the window */
         mbv_window_update(main_window);
 
-	return MB_TIMER_CALLBACK_RESULT_CONTINUE;
+	return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
 }
 
 
 static void
-mbs_start_clock(void)
+avbox_shell_startclock(void)
 {
 	struct timespec tv;
 	
 	DEBUG_PRINT("shell", "Starting clock");
 
-	mbs_welcomescreen(0, NULL);
+	avbox_shell_welcomescreen(0, NULL);
 
 	tv.tv_sec = 2;
 	tv.tv_nsec = 0;
-	clock_timer_id = mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD | MB_TIMER_MESSAGE,
+	clock_timer_id = avbox_timer_register(&tv,
+		AVBOX_TIMER_TYPE_AUTORELOAD | AVBOX_TIMER_MESSAGE,
 		input_fd, NULL, NULL);
 }
 
 
-static enum mbt_result
-mbs_dismissvolumebar(int id, void *data)
+static enum avbox_timer_result
+avbox_shell_dismissvolumebar(int id, void *data)
 {
 	if (id == volumebar_timer_id) {
 		DEBUG_VPRINT("shell", "Dismissing volume indicator (id=%i)",
@@ -197,7 +198,7 @@ mbs_dismissvolumebar(int id, void *data)
 			id);
 	}
 
-	return MB_TIMER_CALLBACK_RESULT_STOP;
+	return AVBOX_TIMER_CALLBACK_RESULT_STOP;
 }
 
 
@@ -205,7 +206,7 @@ mbs_dismissvolumebar(int id, void *data)
  * Handles volume changes.
  */
 static void
-mbs_volumechanged(int volume)
+avbox_shell_volumechanged(int volume)
 {
 	int x, y, w, h;
 	int new_timer_id;
@@ -250,7 +251,7 @@ mbs_volumechanged(int volume)
 	/* Register timer to dismiss volume bar */
 	tv.tv_sec = 5;
 	tv.tv_nsec = 0;
-	new_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT | MB_TIMER_MESSAGE,
+	new_timer_id = avbox_timer_register(&tv, AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
 		input_fd, NULL, NULL);
 	if (new_timer_id == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "shell", "Could not register volume bar timer");
@@ -272,7 +273,7 @@ mbs_volumechanged(int volume)
 
 	/* if there is a timer running already cancel it */
 	if (volumebar_timer_id != -1) {
-		mbt_cancel(volumebar_timer_id);
+		avbox_timer_cancel(volumebar_timer_id);
 	}
 
 	volumebar_timer_id = new_timer_id;
@@ -283,7 +284,7 @@ mbs_volumechanged(int volume)
  * mbs_playerstatuschanged() -- Handle player state change events
  */
 static void
-mbs_playerstatuschanged(struct mbp *inst,
+avbox_shell_playerstatuschanged(struct mbp *inst,
 	enum mb_player_status status, enum mb_player_status last_status)
 {
 	if (inst == player) {
@@ -317,7 +318,7 @@ mbs_playerstatuschanged(struct mbp *inst,
 			mbv_window_hide(main_window);
 
 			DEBUG_PRINT("shell", "Stoping clock timer");
-			if (mbt_cancel(clock_timer_id) == 0) {
+			if (avbox_timer_cancel(clock_timer_id) == 0) {
 				DEBUG_PRINT("shell", "Cancelled clock timer");
 				clock_timer_id = 0;
 			} else {
@@ -332,7 +333,7 @@ mbs_playerstatuschanged(struct mbp *inst,
 			if (clock_timer_id == 0) {
 				assert(!mbv_window_isvisible(main_window));
 				mbv_window_show(main_window);
-				mbs_start_clock();
+				avbox_shell_startclock();
 			}
 			break;
 
@@ -416,7 +417,7 @@ mbs_playerstatuschanged(struct mbp *inst,
  * Initialize the MediaBox shell
  */
 int
-mbs_init(void)
+avbox_shell_init(void)
 {
 	int w, h;
 	struct mbv_window *root_window;
@@ -429,7 +430,7 @@ mbs_init(void)
 
 	/* create the welcome screen window */
         main_window = mbv_window_new("welcome", NULL, 0, 0, w, h,
-		&mbs_welcomescreen_paint);
+		&avbox_shell_paint);
 	if (main_window == NULL) {
 		fprintf(stderr, "Could not create root window\n");
 		return -1;
@@ -445,8 +446,8 @@ mbs_init(void)
 	}
 
 	/* grab the input device */
-	if ((input_fd = mbi_grab_input()) == -1) {
-		fprintf(stderr, "mbs_show() -- mbi_grab_input failed\n");
+	if ((input_fd = avbox_input_grab()) == -1) {
+		fprintf(stderr, "mbs_show() -- avbox_input_grab() failed\n");
 		return -1;
 	}
 
@@ -455,14 +456,14 @@ mbs_init(void)
 
 
 int
-mbs_showdialog(void)
+avbox_shell_run(void)
 {
 	int quit = 0;
-	struct mb_message *message;
+	struct avbox_message *message;
 
 	/* start the clock timer */
 	mbv_window_show(main_window);
-	mbs_start_clock();
+	avbox_shell_startclock();
 
 	/* initialize the volume control */
 	if (avbox_volume_init(input_fd) != 0) {
@@ -471,13 +472,13 @@ mbs_showdialog(void)
 	}
 
 	/* register our queue as the player's notification queue */
-	if (mb_player_registernotificationqueue(mbs_get_active_player(), input_fd) == -1) {
+	if (mb_player_registernotificationqueue(avbox_shell_getactiveplayer(), input_fd) == -1) {
 		LOG_PRINT_ERROR("Could not reqister notification queue");
 		return -1;
 	}
 
 	/* run the message loop */
-	while (!quit && (message = mbi_getmessage(input_fd)) != NULL) {
+	while (!quit && (message = avbox_input_getmessage(input_fd)) != NULL) {
 		switch (message->msg) {
 		case MBI_EVENT_KBD_Q:
 		case MBI_EVENT_QUIT:
@@ -601,16 +602,16 @@ mbs_showdialog(void)
 		}
 		case MBI_EVENT_TIMER:
 		{
-			struct mbt_timer_data *timer_data;
-			timer_data = (struct mbt_timer_data*) message->payload;
+			struct avbox_timer_data *timer_data;
+			timer_data = (struct avbox_timer_data*) message->payload;
 
 			/* DEBUG_VPRINT("shell", "Received timer message id=%i",
 				timer_data->id); */
 
 			if (timer_data->id == clock_timer_id) {
-				mbs_welcomescreen(timer_data->id, timer_data->data);
+				avbox_shell_welcomescreen(timer_data->id, timer_data->data);
 			} else if (timer_data->id == volumebar_timer_id) {
-				mbs_dismissvolumebar(timer_data->id, timer_data->data);
+				avbox_shell_dismissvolumebar(timer_data->id, timer_data->data);
 			}
 			break;
 		}
@@ -618,14 +619,14 @@ mbs_showdialog(void)
 		{
 			int *vol;
 			vol = ((int*) message->payload);
-			mbs_volumechanged(*vol);
+			avbox_shell_volumechanged(*vol);
 			break;
 		}
 		case MBI_EVENT_PLAYER_NOTIFICATION:
 		{
 			struct mb_player_status_data *status_data;
 			status_data = (struct mb_player_status_data*) message->payload;
-			mbs_playerstatuschanged(status_data->sender,
+			avbox_shell_playerstatuschanged(status_data->sender,
 				status_data->status, status_data->last_status);
 			break;
 		}
@@ -633,7 +634,6 @@ mbs_showdialog(void)
 			DEBUG_VPRINT("shell", "Received event %i", (int) message->msg);
 			break;
 		}
-		/* mb_player_update(player); */
 		free(message);
 	}
 
@@ -646,7 +646,7 @@ mbs_showdialog(void)
 
 
 void
-mbs_reboot(void)
+avbox_shell_reboot(void)
 {
 	if (mb_su_gainroot() == 0) {
 		close(input_fd);
@@ -665,7 +665,7 @@ mbs_reboot(void)
  * Destroy the shell.
  */
 void
-mbs_destroy(void)
+avbox_shell_shutdown(void)
 {
 	if (player != NULL) {
 		mb_player_destroy(player);

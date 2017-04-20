@@ -57,8 +57,8 @@ signal_handler(int signum)
 	{
 		int queue;
 		DEBUG_PRINT("main", "Received SIGTERM");
-		if ((queue = mbs_getqueue()) != -1) {
-			mbi_sendmessage(queue, MBI_EVENT_QUIT, NULL, 0);
+		if ((queue = avbox_shell_getqueue()) != -1) {
+			avbox_input_sendmessage(queue, MBI_EVENT_QUIT, NULL, 0);
 		} else {
 			LOG_PRINT_ERROR("Could not get the shell's message queue");
 		}
@@ -288,19 +288,19 @@ main (int argc, char **cargv)
 	}
 
 	/* initialize settings database */
-	if (settings_init() == -1) {
+	if (avbox_settings_init() == -1) {
 		fprintf(stderr, "Could not initialize settings database!\n");
 		exit(EXIT_FAILURE);
 	}
 
 	/* initialize timers system */
-	if (mbt_init() != 0) {
+	if (avbox_timers_init() != 0) {
 		fprintf(stderr, "Could not initialize timers system. Exiting.\n");
 		exit(EXIT_FAILURE);
 	}
 
 	/* initialize process manager */
-	if (mb_process_init() != 0) {
+	if (avbox_process_init() != 0) {
 		fprintf(stderr, "Could not initialize daemons launcher. Exiting.\n");
 		exit(EXIT_FAILURE);
 	}
@@ -317,7 +317,7 @@ main (int argc, char **cargv)
 	DEBUG_PRINT("main", "Initializing input system");
 
 	/* initialize input system */
-	if (mbi_init() != 0) {
+	if (avbox_input_init() != 0) {
 		fprintf(stderr, "Could not initialize input device(s)\n");
 		exit(EXIT_FAILURE);
 	}
@@ -332,7 +332,7 @@ main (int argc, char **cargv)
 	mb_su_droproot();
 
 	/* initialize the shell */
-	if (mbs_init() != 0) {
+	if (avbox_shell_init() != 0) {
 		fprintf(stderr, "Could not initialize shell\n");
 		exit(EXIT_FAILURE);
 	}
@@ -349,7 +349,7 @@ main (int argc, char **cargv)
 	}
 
 	/* initialize the discovery service */
-	if (mb_announce_start() == -1) {
+	if (avbox_discovery_init() == -1) {
 		fprintf(stderr, "Could not start announcer.\n");
 		mb_downloadmanager_destroy();
 		exit(EXIT_FAILURE);
@@ -370,17 +370,16 @@ main (int argc, char **cargv)
 	}
 
 	/* show the shell */
-	mbs_showdialog();
+	avbox_shell_run();
 
 	/* cleanup */
-	mb_announce_stop();
+	avbox_discovery_shutdown();
 	mb_downloadmanager_destroy();
-	mbs_destroy();
-
-	mb_process_shutdown();
-	mbt_shutdown();
-	settings_shutdown();
-	mbi_destroy();
+	avbox_shell_shutdown();
+	avbox_process_shutdown();
+	avbox_timers_shutdown();
+	avbox_settings_shutdown();
+	avbox_input_shutdown();
 	mbv_destroy();
 
 	snd_config_update_free_global();

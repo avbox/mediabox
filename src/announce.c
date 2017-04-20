@@ -62,7 +62,7 @@ genid(void)
  * Broadcast the interface address.
  */
 static int
-mb_broadcast_address(const char * const iface_name, void *arg)
+avbox_discovery_broadcast(const char * const iface_name, void *arg)
 {
 	char ann[512];
 	char *ip;
@@ -96,12 +96,12 @@ mb_broadcast_address(const char * const iface_name, void *arg)
 /**
  * Send broadcast for each interface.
  */
-static enum mbt_result
-mb_announce_sendbroadcast(int timer_id, void *data)
+static enum avbox_timer_result
+avbox_discovery_sendbroadcast(int timer_id, void *data)
 {
 	iface_index = 0;
-	ifaceutil_enumifaces(mb_broadcast_address, NULL);
-	return MB_TIMER_CALLBACK_RESULT_CONTINUE;
+	ifaceutil_enumifaces(avbox_discovery_broadcast, NULL);
+	return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
 }
 
 
@@ -109,7 +109,7 @@ mb_announce_sendbroadcast(int timer_id, void *data)
  * Start the announce service.
  */
 int
-mb_announce_start(void)
+avbox_discovery_init(void)
 {
 	int broadcast = 1;
 	struct timespec tv;
@@ -139,13 +139,13 @@ mb_announce_start(void)
 	}
 
 	/* send the first announcement immediately */
-	mb_announce_sendbroadcast(0, NULL);
+	avbox_discovery_sendbroadcast(0, NULL);
 
 	/* register a timer to send announcements */
 	tv.tv_sec = MB_ANNOUNCE_INTERVAL;
 	tv.tv_nsec = 0;
-	if ((timerid = mbt_register(&tv, MB_TIMER_TYPE_AUTORELOAD,
-		-1, mb_announce_sendbroadcast, NULL)) == -1) {
+	if ((timerid = avbox_timer_register(&tv, AVBOX_TIMER_TYPE_AUTORELOAD,
+		-1, avbox_discovery_sendbroadcast, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "announce", "Could not register timer");
 		close(sockfd);
 		return sockfd = -1;
@@ -156,11 +156,11 @@ mb_announce_start(void)
 
 
 void
-mb_announce_stop(void)
+avbox_discovery_shutdown(void)
 {
 	/* cancel timer before closing socket */
 	if (timerid != -1) {
-		mbt_cancel(timerid);
+		avbox_timer_cancel(timerid);
 		timerid = -1;
 	}
 	if (sockfd != -1) {

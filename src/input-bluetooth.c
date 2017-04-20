@@ -137,18 +137,18 @@ static int
 mbi_bluetooth_devinit()
 {
 	int process_id, fd, exit_code;
-	char * const btctl_args[] = { "bluetoothctl", NULL };
+	const char * const btctl_args[] = { "bluetoothctl", NULL };
 
 	/* run the bluetoothctl process */
-	if ((process_id = mb_process_start(BLUETOOTHCTL_BIN, btctl_args,
-		MB_PROCESS_NICE | MB_PROCESS_STDOUT_PIPE | MB_PROCESS_WAIT,
+	if ((process_id = avbox_process_start(BLUETOOTHCTL_BIN, btctl_args,
+		AVBOX_PROCESS_NICE | AVBOX_PROCESS_STDOUT_PIPE | AVBOX_PROCESS_WAIT,
 		"bluetoothctl", NULL, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "input-bluetooth", "Could not execute bluetoothctl");
 		return -1;
 	}
 
 	/* get the process' standard input */
-	fd = mb_process_openfd(process_id, STDIN_FILENO);
+	fd = avbox_process_openfd(process_id, STDIN_FILENO);
 	if (fd == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "input-bluetooth",
 			"Could not open STDIN file descriptor for process");
@@ -170,9 +170,9 @@ mbi_bluetooth_devinit()
 	close(fd);
 
 	/* wait for process to exit */
-	if (mb_process_wait(process_id, &exit_code) == -1) {
+	if (avbox_process_wait(process_id, &exit_code) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_WARN, "input-bluetooth",
-			"mb_process_wait() returned -1");
+			"avbox_process_wait() returned -1");
 	}
 
 	return (exit_code == 0) ? 0 : -1;
@@ -372,7 +372,7 @@ int
 mbi_bluetooth_init(void)
 {
 	/* GError *error = NULL; */
-	char * const bluetoothd_args[] =
+	const char * const bluetoothd_args[] =
 	{
 		BLUETOOTHD_BIN,
 		"--compat",
@@ -383,8 +383,8 @@ mbi_bluetooth_init(void)
 	LIST_INIT(&sockets);
 
 	/* launch the bluetoothd process */
-	if ((bluetooth_daemon_id = mb_process_start(BLUETOOTHD_BIN, bluetoothd_args,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE | MB_PROCESS_SUPERUSER,
+	if ((bluetooth_daemon_id = avbox_process_start(BLUETOOTHD_BIN, bluetoothd_args,
+		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE | AVBOX_PROCESS_SUPERUSER,
 		"bluetoothd", NULL, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "input-bluetooth", "Could not start bluetooth daemon");
 		return -1;
@@ -425,7 +425,7 @@ mbi_bluetooth_destroy(void)
 	DEBUG_PRINT("input-bluetooth", "Exiting (give me 2 secs)");
 
 	if (bluetooth_daemon_id != -1) {
-		mb_process_stop(bluetooth_daemon_id);
+		avbox_process_stop(bluetooth_daemon_id);
 	}
 
 	/* close the dbus connection */

@@ -26,7 +26,7 @@ static pthread_mutex_t dblock;
 
 
 static char *
-settings_getdbfile()
+avbox_settings_getdbfile()
 {
 	static int done = 0;
 	static char dbfile[PATH_MAX] = "";
@@ -64,7 +64,7 @@ end:
 
 
 static char *
-settings_escapesql(const char * const sql)
+avbox_settings_escapesql(const char * const sql)
 {
 	char *safesql, *psafesql;
 	const char *psql;
@@ -104,7 +104,7 @@ settings_escapesql(const char * const sql)
  * Callback function to get getstring() result.
  */
 static int
-settings_getstring_callback(void *data,
+avbox_settings_getstring_callback(void *data,
 	int argc, char **argv, char **azColName)
 {
 	char **value = (char**) data;
@@ -124,7 +124,7 @@ settings_getstring_callback(void *data,
  * be freed with free().
  */
 char *
-settings_getstring(const char * const key)
+avbox_settings_getstring(const char * const key)
 {
 	int res;
 	char *value = NULL, sql[SQLBUFLEN];
@@ -135,7 +135,7 @@ settings_getstring(const char * const key)
 
 	assert(key != NULL);
 
-	char * const safekey = settings_escapesql(key);
+	char * const safekey = avbox_settings_escapesql(key);
 	if (safekey == NULL) {
 		errno = ENOMEM;
 		return NULL;
@@ -149,14 +149,14 @@ settings_getstring(const char * const key)
 		safekey);
 
 	/* open db and exec statement */
-	if ((res = sqlite3_open_v2(settings_getdbfile(),
+	if ((res = sqlite3_open_v2(avbox_settings_getdbfile(),
 		&db, SQLITE_OPEN_READONLY, NULL)) != SQLITE_OK) {
 		LOG_VPRINT_ERROR("Could not open database '%s': %s (%d)",
-			settings_getdbfile(), sqlite3_errmsg(db), res);
+			avbox_settings_getdbfile(), sqlite3_errmsg(db), res);
 		goto end;
 	}
 	if ((res = sqlite3_exec(db, sql,
-		&settings_getstring_callback, &value, NULL)) != SQLITE_OK) {
+		&avbox_settings_getstring_callback, &value, NULL)) != SQLITE_OK) {
 		LOG_VPRINT_ERROR("Query '%s' failed (%d)",
 			sql, res);
 		goto end;
@@ -176,7 +176,7 @@ end:
  * Sets a string value on the settings database.
  */
 int
-settings_setstring(const char * const key,
+avbox_settings_setstring(const char * const key,
 	const char * const value)
 {
 	int ret = -1, res;
@@ -189,8 +189,8 @@ settings_setstring(const char * const key,
 
 	assert(key != NULL);
 
-	char * const safekey = settings_escapesql(key);
-	char * const safevalue = settings_escapesql(value);
+	char * const safekey = avbox_settings_escapesql(key);
+	char * const safevalue = avbox_settings_escapesql(value);
 	if (safekey == NULL || safevalue == NULL) {
 		errno = ENOMEM;
 		goto end;
@@ -198,7 +198,7 @@ settings_setstring(const char * const key,
 
 	pthread_mutex_lock(&dblock);
 
-	existing = settings_getstring(key);
+	existing = avbox_settings_getstring(key);
 
 	if (existing == NULL) {
 		/* doesn't exist and value is NULL */
@@ -221,9 +221,10 @@ settings_setstring(const char * const key,
 	}
 
 	/* open db and exec query */
-	if ((res = sqlite3_open_v2(settings_getdbfile(), &db, SQLITE_OPEN_READWRITE, NULL)) != SQLITE_OK) {
+	if ((res = sqlite3_open_v2(avbox_settings_getdbfile(), &db,
+		SQLITE_OPEN_READWRITE, NULL)) != SQLITE_OK) {
 		LOG_VPRINT_ERROR("Could not open database '%s': %s (%d)",
-			settings_getdbfile(), sqlite3_errmsg(db), res);
+			avbox_settings_getdbfile(), sqlite3_errmsg(db), res);
 	}
 	if ((res = sqlite3_exec(db, sql, NULL, NULL, NULL)) != SQLITE_OK) {
 		LOG_VPRINT_ERROR("Could not exec query '%s' (%d)",
@@ -254,7 +255,7 @@ end:
  * Gets a boolean value from the settings database.
  */
 int
-settings_getbool(const char * const key)
+avbox_settings_getbool(const char * const key)
 {
 	int ret = 0;
 	char *str;
@@ -262,7 +263,7 @@ settings_getbool(const char * const key)
 	DEBUG_VPRINT("settings", "Entering settings_getbool(\"%s\")",
 		key);
 
-	str = settings_getstring(key);
+	str = avbox_settings_getstring(key);
 	if (str == NULL || !strcmp(str, "0")) {
 		goto end;
 	} else if (!strcmp(str, "1")) {
@@ -285,16 +286,16 @@ end:
  * Sets a boolean value on the settings database.
  */
 int
-settings_setbool(const char * const key, const int value)
+avbox_settings_setbool(const char * const key, const int value)
 {
 	DEBUG_VPRINT("settings", "Entering settings_setbool(\"%s\", %i)",
 		key, value);
 
 	assert(value == 0 || value == 1);
 	if (value == 0) {
-		return settings_setstring(key, "0");
+		return avbox_settings_setstring(key, "0");
 	} else {
-		return settings_setstring(key, "1");
+		return avbox_settings_setstring(key, "1");
 	}
 }
 
@@ -303,13 +304,13 @@ settings_setbool(const char * const key, const int value)
  * Sets an integer value on the settings database.
  */
 int
-settings_setint(const char * const key, const int value)
+avbox_settings_setint(const char * const key, const int value)
 {
 	char svalue[32];
 	DEBUG_VPRINT("settings", "Entering settings_setint(\"%s\", %i)",
 		key, value);
 	sprintf(svalue, "%d", value);
-	return settings_setstring(key, svalue);
+	return avbox_settings_setstring(key, svalue);
 }
 
 
@@ -317,13 +318,13 @@ settings_setint(const char * const key, const int value)
  * Gets an integer value from the settings database.
  */
 int
-settings_getint(const char * key, const int defvalue)
+avbox_settings_getint(const char * key, const int defvalue)
 {
 	char *svalue;
 	int ret = defvalue;
 	DEBUG_VPRINT("settings", "Entering settings_getint(\"%s\", %d)",
 		key, defvalue);
-	if ((svalue = settings_getstring(key)) != NULL) {
+	if ((svalue = avbox_settings_getstring(key)) != NULL) {
 		ret = atoi(svalue);
 		free(svalue);
 	}
@@ -335,7 +336,7 @@ settings_getint(const char * key, const int defvalue)
  * Creates the settings database.
  */
 static int
-settings_createdb()
+avbox_settings_createdb()
 {
 	int ret = -1, res;
 	sqlite3 *db = NULL;
@@ -349,10 +350,10 @@ settings_createdb()
 
 	pthread_mutex_lock(&dblock);
 
-	if (sqlite3_open_v2(settings_getdbfile(), &db,
+	if (sqlite3_open_v2(avbox_settings_getdbfile(), &db,
 		SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) != SQLITE_OK) {
 		LOG_VPRINT_ERROR("Could not open database '%s': %s",
-			settings_getdbfile(), sqlite3_errmsg(db));
+			avbox_settings_getdbfile(), sqlite3_errmsg(db));
 		goto end;
 	}
 	if ((res = sqlite3_exec(db, sql, NULL, NULL, NULL)) != SQLITE_OK) {
@@ -361,11 +362,11 @@ settings_createdb()
 	}
 
 	/* set some defaults */
-	if (settings_setstring("hostname", DEFAULT_HOSTNAME) == -1) {
+	if (avbox_settings_setstring("hostname", DEFAULT_HOSTNAME) == -1) {
 		LOG_VPRINT_ERROR("settings_setstring() failed: %s",
 			strerror(errno));
 	}
-	if (settings_setbool("use_dhcp", 1) == -1) {
+	if (avbox_settings_setbool("use_dhcp", 1) == -1) {
 		LOG_VPRINT_ERROR("settings_setbool() failed: %s",
 			strerror(errno));
 	}
@@ -384,7 +385,7 @@ end:
  * Initialize settings database.
  */
 int
-settings_init()
+avbox_settings_init()
 {
 	struct stat st;
 	pthread_mutexattr_t lockattr;
@@ -400,9 +401,9 @@ settings_init()
 
 	/* check that the database exists and we can
 	 * access it. If it's not try to create it */
-	while (stat(settings_getdbfile(), &st) == -1 ||
-		access(settings_getdbfile(), R_OK|W_OK) == -1) {
-		if (settings_createdb() == -1) {
+	while (stat(avbox_settings_getdbfile(), &st) == -1 ||
+		access(avbox_settings_getdbfile(), R_OK|W_OK) == -1) {
+		if (avbox_settings_createdb() == -1) {
 			LOG_VPRINT_ERROR("Could not create database: %s (%d)",
 				strerror(errno), errno);
 			return -1;
@@ -417,6 +418,6 @@ settings_init()
  * Shutdown settings database.
  */
 void
-settings_shutdown()
+avbox_settings_shutdown()
 {
 }

@@ -330,7 +330,7 @@ int
 mb_ui_menu_showdialog(struct mb_ui_menu *inst)
 {
 	int fd, quit = 0, ret = 0;
-	enum mbi_event e;
+	enum avbox_input_event e;
 
 	if (!mbv_window_isvisible(inst->window)) {
 		DEBUG_PRINT("ui-menu", "Not showing invisible window!");
@@ -338,13 +338,13 @@ mb_ui_menu_showdialog(struct mb_ui_menu *inst)
 	}
 
 	/* grab the input device */
-	if ((fd = mbi_grab_input()) == -1) {
+	if ((fd = avbox_input_grab()) == -1) {
 		fprintf(stderr, "mbs_show() -- mbi_grab_input failed\n");
 		return -1;
 	}
 
 	/* run the message loop */
-	while (!quit && mbi_getevent(fd, &e) != -1) {
+	while (!quit && avbox_input_getevent(fd, &e) != -1) {
 		switch (e) {
 		case MBI_EVENT_BACK:
 		{

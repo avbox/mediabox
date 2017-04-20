@@ -301,7 +301,7 @@ static void *
 mb_mediasearch_inputthread(void *arg)
 {
 	int fd;
-	enum mbi_event e;
+	enum avbox_input_event e;
 
 #define CASE_KBD(x) \
 	case MBI_EVENT_KBD_ ## x: \
@@ -312,12 +312,12 @@ mb_mediasearch_inputthread(void *arg)
 	(void) arg;
 
 	/* grab the input device */
-	if ((fd = mbi_grab_input_nonblock()) == -1) {
+	if ((fd = avbox_input_grabnonblock()) == -1) {
 		fprintf(stderr, "mbs_show() -- mbi_grab_input failed\n");
 		return NULL;
 	}
 
-	while (input_quit == 0 && mbi_getevent(fd, &e) != -1) {
+	while (input_quit == 0 && avbox_input_getevent(fd, &e) != -1) {
 		int istext = 0;
 
 		switch (e) {
@@ -507,7 +507,7 @@ mb_mediasearch_showdialog(void)
 			fprintf(stderr, "mediasearch: Could not start updater thread\n");
 			pthread_mutex_unlock(&updater_lock);
 			input_quit = 1;
-			mbi_dispatchevent(MBI_EVENT_NONE);
+			avbox_input_dispatchevent(MBI_EVENT_NONE);
 			pthread_join(input_thread, NULL);
 			return -1;
 		}
@@ -528,7 +528,7 @@ mb_mediasearch_showdialog(void)
 		}
 
 		input_quit = 1;
-		mbi_dispatchevent(MBI_EVENT_NONE);
+		avbox_input_dispatchevent(MBI_EVENT_NONE);
 		pthread_join(input_thread, NULL);
 		updater_quit = 1;
 		pthread_cond_signal(&updater_signal);

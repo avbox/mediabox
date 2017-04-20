@@ -422,7 +422,7 @@ mb_library_showdialog(void)
 				assert(LIST_SIZE(&playlist) > 0);
 
 				/* get the active player instance */
-				player = mbs_get_active_player();
+				player = avbox_shell_getactiveplayer();
 				if (player == NULL) {
 					fprintf(stderr, "mb_library: Could not get active player\n");
 					break;

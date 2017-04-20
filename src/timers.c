@@ -24,13 +24,13 @@
 /**
  * Timer structure
  */
-LISTABLE_TYPE(mb_timer_state,
-	struct mbt_timer_data public;
+LISTABLE_TYPE(avbox_timer_state,
+	struct avbox_timer_data public;
 	struct timespec interval;
 	struct timespec value;
-	enum mbt_timer_flags flags;
+	enum avbox_timer_flags flags;
 	int message_fd;
-	mbt_timer_callback callback;
+	avbox_timer_callback callback;
 );
 
 
@@ -47,11 +47,11 @@ static int nextid = 1;
  * processes it, and goes back to sleep
  */
 void *
-mbt_timers_thread(void *arg)
+avbox_timers_thread(void *arg)
 {
 	struct timespec last_sleep, elapsed, now, sleeptime;
-	mb_timer_state *tmr;
-	enum mbt_result ret;
+	avbox_timer_state *tmr;
+	enum avbox_timer_result ret;
 
 	(void) arg;
 
@@ -73,23 +73,23 @@ mbt_timers_thread(void *arg)
 		elapsed = timediff(&last_sleep, &now);
 
 		/* iterate through all timers */
-		LIST_FOREACH_SAFE(mb_timer_state*, tmr, &timers, {
+		LIST_FOREACH_SAFE(avbox_timer_state*, tmr, &timers, {
 			if (timelte(&tmr->value, &elapsed)) {
 				/* the timer has elapsed so invoke the callback */
 				if (tmr->callback != NULL) {
 					ret = tmr->callback(tmr->public.id, tmr->public.data);
 				} else {
-					ret = MB_TIMER_CALLBACK_RESULT_CONTINUE;
+					ret = AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
 				}
-				if (tmr->flags & MB_TIMER_MESSAGE) {
+				if (tmr->flags & AVBOX_TIMER_MESSAGE) {
 					if (tmr->message_fd != -1) {
-						mbi_sendmessage(tmr->message_fd, MBI_EVENT_TIMER,
-							&tmr->public, sizeof(struct mbt_timer_data));
+						avbox_input_sendmessage(tmr->message_fd, MBI_EVENT_TIMER,
+							&tmr->public, sizeof(struct avbox_timer_data));
 					}
 				}
-				if (tmr->flags & MB_TIMER_TYPE_AUTORELOAD) {
+				if (tmr->flags & AVBOX_TIMER_TYPE_AUTORELOAD) {
 					/* if this is an autoreload timer reload it */
-					if (ret == MB_TIMER_CALLBACK_RESULT_CONTINUE) {
+					if (ret == AVBOX_TIMER_CALLBACK_RESULT_CONTINUE) {
 						tmr->value = tmr->interval;
 						if (timelt(&tmr->value, &sleeptime)) {
 							sleeptime = tmr->interval;
@@ -126,26 +126,26 @@ mbt_timers_thread(void *arg)
 
 
 static int
-mbt_getnextid(void)
+avbox_timers_getnextid(void)
 {
 	return nextid++;
 }
 
 
 /**
- * mbt_cancel() -- Cancel a timer.
+ * Cancel a timer.
  */
 int
-mbt_cancel(int timer_id)
+avbox_timer_cancel(int timer_id)
 {
-	mb_timer_state *tmr;
+	avbox_timer_state *tmr;
 	int ret = -1;
 
 	DEBUG_VPRINT("timers", "Cancelling timer id %i", timer_id);
 
 	pthread_mutex_lock(&timers_lock);
 
-	LIST_FOREACH_SAFE(mb_timer_state*, tmr, &timers, {
+	LIST_FOREACH_SAFE(avbox_timer_state*, tmr, &timers, {
 		if (tmr->public.id == timer_id) {
 			LIST_REMOVE(tmr);
 			free(tmr);
@@ -161,20 +161,20 @@ mbt_cancel(int timer_id)
 
 
 /**
- * mbt_register() -- Register a timer.
+ * Register a timer.
  */
 int
-mbt_register(struct timespec *interval,
-	enum mbt_timer_flags flags, int message_fd, mbt_timer_callback func, void *data)
+avbox_timer_register(struct timespec *interval,
+	enum avbox_timer_flags flags, int message_fd, avbox_timer_callback func, void *data)
 {
-	mb_timer_state *timer;
+	avbox_timer_state *timer;
 
 	DEBUG_PRINT("timers", "Registering timer");
 
 	assert(message_fd == -1 || message_fd > 2);
 
 	/* allocate and initialize timer entry */
-	if ((timer = malloc(sizeof(mb_timer_state))) == NULL) {
+	if ((timer = malloc(sizeof(avbox_timer_state))) == NULL) {
 		fprintf(stderr, "timers: Could not allocate timer. Out of memory\n");
 		return -1;
 	}
@@ -190,7 +190,7 @@ mbt_register(struct timespec *interval,
 
 	/* add entry to list */
 	pthread_mutex_lock(&timers_lock);
-	timer->public.id = mbt_getnextid();
+	timer->public.id = avbox_timers_getnextid();
 	LIST_ADD(&timers, timer);
 	pthread_mutex_unlock(&timers_lock);
 
@@ -201,53 +201,32 @@ mbt_register(struct timespec *interval,
 }
 
 
-#if 0
-static enum mbt_result
-mbt_test_timer_handler(int id, void *data)
-{
-	(void) data;
-	DEBUG_VPRINT("timers", "Test timer (id=%i) expired", id);
-	return MB_TIMER_CALLBACK_RESULT_CONTINUE;
-}
-#endif
-
-
 /**
- * mb_timers_init() -- Initialize the timers system.
+ * Initialize the timers system.
  */
 int
-mbt_init(void)
+avbox_timers_init(void)
 {
 	DEBUG_PRINT("timers", "Initializing timers system");
 
 	LIST_INIT(&timers);
 
-	if (pthread_create(&timers_thread, NULL, mbt_timers_thread, NULL) != 0) {
+	if (pthread_create(&timers_thread, NULL, avbox_timers_thread, NULL) != 0) {
 		fprintf(stderr, "timers: Could not start thread\n");
 		return -1;
 	}
-
-	/* register a test timer */
-	#if 0
-	struct timespec tv;
-	tv.tv_sec = 1;
-	tv.tv_nsec = 0;
-	if (mbt_register(&tv, MB_TIMER_TYPE_ONESHOT, &mbt_test_timer_handler, NULL) == -1) {
-		DEBUG_PRINT("timers", "Could not register test timer");
-	}
-	#endif
 
 	return 0;
 }
 
 
 /**
- * mbt_shutdown() -- Shutdown the timers system.
+ * Shutdown the timers system.
  */
 void
-mbt_shutdown(void)
+avbox_timers_shutdown(void)
 {
-	mb_timer_state *tmr;
+	avbox_timer_state *tmr;
 
 	DEBUG_PRINT("timers", "Shutting down timers system");
 
@@ -255,7 +234,7 @@ mbt_shutdown(void)
 	pthread_cond_signal(&timers_signal);
 	pthread_join(timers_thread, NULL);
 
-	LIST_FOREACH_SAFE(mb_timer_state*, tmr, &timers, {
+	LIST_FOREACH_SAFE(avbox_timer_state*, tmr, &timers, {
 		LIST_REMOVE(tmr);
 		free(tmr);
 	});

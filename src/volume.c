@@ -131,12 +131,12 @@ avbox_volume_set(int volume)
 	}
 
 	if (message_fd != -1) {
-		mbi_sendmessage(message_fd, MBI_EVENT_VOLUME_CHANGED, &volume,
+		avbox_input_sendmessage(message_fd, MBI_EVENT_VOLUME_CHANGED, &volume,
 			sizeof(volume));
 	}
 
 	/* save the volume */
-	settings_setint("volume", volume);
+	avbox_settings_setint("volume", volume);
 	ret = 0;
 
 end:
@@ -153,7 +153,7 @@ avbox_volume_init(int msgfd)
 
 	/* set the volume to either the last known
 	 * volume or a default value of 60 */
-	avbox_volume_set(settings_getint("volume", 60));
+	avbox_volume_set(avbox_settings_getint("volume", 60));
 
 	message_fd = msgfd;
 

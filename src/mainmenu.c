@@ -133,7 +133,7 @@ mb_mainmenu_showdialog(void)
 
 			} else if (!memcmp("REBOOT", selected, 6)) {
 				mbv_window_hide(window);
-				mbs_reboot();
+				avbox_shell_reboot();
 
 			} else if (!memcmp("ABOUT", selected, 5)) {
 				mb_about_init();

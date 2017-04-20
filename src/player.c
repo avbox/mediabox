@@ -220,7 +220,7 @@ mb_player_updatestatus(struct mbp *inst, enum mb_player_status status)
 		status_data.last_status = last_status;
 		status_data.status = status;
 
-		mbi_sendmessage(inst->status_notification_fd, MBI_EVENT_PLAYER_NOTIFICATION,
+		avbox_input_sendmessage(inst->status_notification_fd, MBI_EVENT_PLAYER_NOTIFICATION,
 			&status_data, sizeof(struct mb_player_status_data));
 	}
 }
@@ -1962,7 +1962,7 @@ mb_player_getmediafile(struct mbp *inst)
  * mb_player_dismiss_top_overlay() -- Callback function to dismiss
  * overlay text
  */
-static enum mbt_result
+static enum avbox_timer_result
 mb_player_dismiss_top_overlay(int timer_id, void *data)
 {
 	struct mbp *inst = (struct mbp*) data;
@@ -1985,7 +1985,7 @@ mb_player_dismiss_top_overlay(int timer_id, void *data)
 
 	pthread_mutex_unlock(&inst->top_overlay_lock);
 
-	return MB_TIMER_CALLBACK_RESULT_CONTINUE; /* doesn't matter for ONESHOT timers */
+	return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE; /* doesn't matter for ONESHOT timers */
 }
 
 
@@ -2004,7 +2004,7 @@ mb_player_showoverlaytext(struct mbp *inst,
 	/* if there's an overlay text being displayed then  dismiss it first */
 	if (inst->top_overlay_timer_id != 0) {
 		DEBUG_PRINT("player", "Cancelling existing overlay");
-		mbt_cancel(inst->top_overlay_timer_id);
+		avbox_timer_cancel(inst->top_overlay_timer_id);
 		if (inst->top_overlay_text != NULL) {
 			free(inst->top_overlay_text);
 		}
@@ -2017,7 +2017,7 @@ mb_player_showoverlaytext(struct mbp *inst,
 	tv.tv_nsec = 0;
 	inst->top_overlay_alignment = alignment;
 	inst->top_overlay_text = strdup(text);
-	inst->top_overlay_timer_id = mbt_register(&tv, MB_TIMER_TYPE_ONESHOT,
+	inst->top_overlay_timer_id = avbox_timer_register(&tv, AVBOX_TIMER_TYPE_ONESHOT,
 		-1, &mb_player_dismiss_top_overlay, inst);
 
 	pthread_mutex_unlock(&inst->top_overlay_lock);

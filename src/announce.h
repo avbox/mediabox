@@ -8,10 +8,10 @@
 
 
 int
-mb_announce_start(void);
+avbox_discovery_init(void);
 
 
 void
-mb_announce_stop(void);
+avbox_discovery_shutdown(void);
 
 #endif

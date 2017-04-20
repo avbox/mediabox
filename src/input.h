@@ -15,7 +15,7 @@
 #define MBI_RECIPIENT_ANY	(-1)
 
 
-enum mbi_event
+enum avbox_input_event
 {
 	MBI_EVENT_NONE,
 	MBI_EVENT_PLAY,
@@ -70,9 +70,9 @@ enum mbi_event
 
 
 /* Message passing structure */
-struct mb_message
+struct avbox_message
 {
-	enum mbi_event msg;
+	enum avbox_input_event msg;
 	int recipient;
 	size_t size;
 	char payload[];
@@ -80,51 +80,52 @@ struct mb_message
 
 
 void
-mbi_event_send(enum mbi_event e);
+avbox_input_sendevent(enum avbox_input_event e);
 
 
 int
-mbi_dispatchevent(enum mbi_event e);
+avbox_input_dispatchevent(enum avbox_input_event e);
 
 
 /**
- * mbi_getmessage() -- Gets the next message at the queue specified
+ * Gets the next message at the queue specified
  * by the file descriptor.
  */
-struct mb_message *
-mbi_getmessage(int fd);
+struct avbox_message *
+avbox_input_getmessage(int fd);
 
 
 int
-mbi_getevent(int fd, enum mbi_event *e);
+avbox_input_getevent(int fd, enum avbox_input_event *e);
 
 
 /**
- * mbi_grab_input() -- Returns a file descriptor to a pipe where
+ * Returns a file descriptor to a pipe where
  * all input events will be sent until the file descriptor is closed,
  * in which case the prior descriptor is closed or until mbi_grab_input()
  * is called again
  */
 int
-mbi_grab_input(void);
+avbox_input_grab(void);
 
 
 int
-mbi_grab_input_nonblock(void);
+avbox_input_grabnonblock(void);
 
 
 /**
- * mbi_sendmessage() -- Sends a message.
+ * Sends a message.
  */
 void
-mbi_sendmessage(int recipient, enum mbi_event e, void *data, size_t sz);
+avbox_input_sendmessage(int recipient,
+	enum avbox_input_event e, void *data, size_t sz);
 
 
 int
-mbi_init(void);
+avbox_input_init(void);
 
 void
-mbi_destroy(void);
+avbox_input_shutdown(void);
 
 #endif
 

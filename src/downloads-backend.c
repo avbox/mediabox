@@ -54,16 +54,16 @@ mb_downloadmanager_addurl(char *url)
 	};
 
 	/* launch the deluged process */
-	if ((process_id = mb_process_start(DELUGED_BIN, (const char **) args,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE |
-		MB_PROCESS_SUPERUSER | MB_PROCESS_WAIT, "deluge-console", NULL, NULL)) == -1) {
+	if ((process_id = avbox_process_start(DELUGED_BIN, (const char **) args,
+		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT, "deluge-console", NULL, NULL)) == -1) {
 		LOG_VPRINT(MB_LOGLEVEL_ERROR, "download-backend",
 			"Could not execute deluge-console (errno=%i)", errno);
 		return -1;
 	}
 
 	/* wait for process to exit */
-	mb_process_wait(process_id, &exit_status);
+	avbox_process_wait(process_id, &exit_status);
 
 	return exit_status;
 }
@@ -97,8 +97,8 @@ mb_downloadmanager_init(void)
 	unlink("/tmp/mediabox/deluge/deluged.pid");
 
 	/* launch the deluged process */
-	if ((daemon_id = mb_process_start(DELUGED_BIN, (const char **) args,
-		MB_PROCESS_AUTORESTART | MB_PROCESS_NICE | MB_PROCESS_IONICE_IDLE | MB_PROCESS_SUPERUSER,
+	if ((daemon_id = avbox_process_start(DELUGED_BIN, (const char **) args,
+		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE | AVBOX_PROCESS_SUPERUSER,
 		"Deluge Daemon", NULL, NULL)) == -1) {
 		fprintf(stderr, "download-backend: Could not start deluge daemon\n");
 		return -1;
@@ -116,6 +116,6 @@ mb_downloadmanager_destroy(void)
 	DEBUG_PRINT("download-backend", "Shutting down download manager");
 
 	if (daemon_id != -1) {
-		mb_process_stop(daemon_id);
+		avbox_process_stop(daemon_id);
 	}
 }

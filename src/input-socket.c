@@ -76,43 +76,43 @@ mbi_socket_connection(void *arg)
 		}
 
 		if (!memcmp("MENU", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_MENU);
+			avbox_input_sendevent(MBI_EVENT_MENU);
 		} else if (!memcmp("LEFT", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_ARROW_LEFT);
+			avbox_input_sendevent(MBI_EVENT_ARROW_LEFT);
 		} else if (!memcmp("RIGHT", buffer, 5)) {
-			mbi_event_send(MBI_EVENT_ARROW_RIGHT);
+			avbox_input_sendevent(MBI_EVENT_ARROW_RIGHT);
 		} else if (!memcmp("UP", buffer, 2)) {
-			mbi_event_send(MBI_EVENT_ARROW_UP);
+			avbox_input_sendevent(MBI_EVENT_ARROW_UP);
 		} else if (!memcmp("DOWN", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_ARROW_DOWN);
+			avbox_input_sendevent(MBI_EVENT_ARROW_DOWN);
 		} else if (!memcmp("ENTER", buffer, 5)) {
-			mbi_event_send(MBI_EVENT_ENTER);
+			avbox_input_sendevent(MBI_EVENT_ENTER);
 		} else if (!memcmp("BACK", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_BACK);
+			avbox_input_sendevent(MBI_EVENT_BACK);
 		} else if (!memcmp("PLAY", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_PLAY);
+			avbox_input_sendevent(MBI_EVENT_PLAY);
 		} else if (!memcmp("STOP", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_STOP);
+			avbox_input_sendevent(MBI_EVENT_STOP);
 		} else if (!memcmp("CLEAR", buffer, 5)) {
-			mbi_event_send(MBI_EVENT_CLEAR);
+			avbox_input_sendevent(MBI_EVENT_CLEAR);
 		} else if (!memcmp("PREV", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_PREV);
+			avbox_input_sendevent(MBI_EVENT_PREV);
 		} else if (!memcmp("NEXT", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_NEXT);
+			avbox_input_sendevent(MBI_EVENT_NEXT);
 		} else if (!memcmp("INFO", buffer, 4)) {
-			mbi_event_send(MBI_EVENT_INFO);
+			avbox_input_sendevent(MBI_EVENT_INFO);
 		} else if (!memcmp("VOLUP", buffer, 5)) {
-			mbi_event_send(MBI_EVENT_VOLUME_UP);
+			avbox_input_sendevent(MBI_EVENT_VOLUME_UP);
 		} else if (!memcmp("VOLDOWN", buffer, 7)) {
-			mbi_event_send(MBI_EVENT_VOLUME_DOWN);
+			avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN);
 		} else if (!memcmp("KEY:", buffer, 4)) {
 #define ELIF_KEY(x) \
 	else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \
-		mbi_event_send(MBI_EVENT_KBD_ ##x ); \
+		avbox_input_sendevent(MBI_EVENT_KBD_ ##x ); \
 	}
 
 			if (!memcmp(buffer + 4, " ", 1)) {
-				mbi_event_send(MBI_EVENT_KBD_SPACE);
+				avbox_input_sendevent(MBI_EVENT_KBD_SPACE);
 			}
 			ELIF_KEY(A)
 			ELIF_KEY(B)

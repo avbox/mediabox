@@ -114,7 +114,7 @@ mb_downloads_freeitems(void *item, void *data)
 /**
  * mb_downloads_populatelist() -- Populates the downloads list
  */
-static enum mbt_result
+static enum avbox_timer_result
 mb_downloads_populatelist(int _id, void *data)
 {
 	int process_id, exit_status = -1;
@@ -138,17 +138,17 @@ mb_downloads_populatelist(int _id, void *data)
 	(void) data;
 
 	/* run the deluge-console process */
-	if ((process_id = mb_process_start(DELUGE_BIN, deluge_args,
-		MB_PROCESS_NICE | MB_PROCESS_SUPERUSER | MB_PROCESS_STDOUT_PIPE | MB_PROCESS_WAIT,
+	if ((process_id = avbox_process_start(DELUGE_BIN, deluge_args,
+		AVBOX_PROCESS_NICE | AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_STDOUT_PIPE | AVBOX_PROCESS_WAIT,
 		"deluge-console", NULL, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "downloads", "Could not execute deluge-console");
-		return MB_TIMER_CALLBACK_RESULT_STOP;
+		return AVBOX_TIMER_CALLBACK_RESULT_STOP;
 	}
 
-	f = fdopen(mb_process_openfd(process_id, STDOUT_FILENO), "r");
+	f = fdopen(avbox_process_openfd(process_id, STDOUT_FILENO), "r");
 	if (f == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "download", "Could not open stream");
-		return MB_TIMER_CALLBACK_RESULT_STOP;
+		return AVBOX_TIMER_CALLBACK_RESULT_STOP;
 	} else {
 		while (getline(&str, &n, f) != -1) {
 			if (str != NULL) {
@@ -246,13 +246,13 @@ mb_downloads_populatelist(int _id, void *data)
 	mbv_window_update(window);
 
 	/* wait for process to exit */
-	if (mb_process_wait(process_id, &exit_status) == -1) {
-		LOG_PRINT(MB_LOGLEVEL_ERROR, "download", "mb_process_wait() failed");
-		return MB_TIMER_CALLBACK_RESULT_STOP;
+	if (avbox_process_wait(process_id, &exit_status) == -1) {
+		LOG_PRINT(MB_LOGLEVEL_ERROR, "download", "avbox_process_wait() failed");
+		return AVBOX_TIMER_CALLBACK_RESULT_STOP;
 	}
 
-	return (exit_status == 0) ? MB_TIMER_CALLBACK_RESULT_CONTINUE
-		: MB_TIMER_CALLBACK_RESULT_STOP;
+	return (exit_status == 0) ? AVBOX_TIMER_CALLBACK_RESULT_CONTINUE
+		: AVBOX_TIMER_CALLBACK_RESULT_STOP;
 }
 
 
@@ -319,8 +319,8 @@ mb_downloads_showdialog(void)
 	/* register the update timer */
 	tv.tv_sec = 2;
 	tv.tv_nsec = 0;
-	update_timer_id = mbt_register(&tv,
-		MB_TIMER_TYPE_AUTORELOAD, -1, mb_downloads_populatelist, NULL);
+	update_timer_id = avbox_timer_register(&tv,
+		AVBOX_TIMER_TYPE_AUTORELOAD, -1, mb_downloads_populatelist, NULL);
 	if (update_timer_id == -1) {
 		mbv_window_hide(window);
 		return -1;
@@ -337,7 +337,7 @@ mb_downloads_showdialog(void)
 	}
 
 	/* cancel the update timer */
-	mbt_cancel(update_timer_id);
+	avbox_timer_cancel(update_timer_id);
 
 	/* hide the mainmenu window */
 	mbv_window_hide(window);

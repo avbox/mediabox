@@ -66,7 +66,7 @@ static pthread_t event_loop_thread;
 
 #define CASE_KEYBOARD(x) \
 	case DIKS_KEY_ ## x: \
-		mbi_event_send(MBI_EVENT_KBD_ ## x); \
+		avbox_input_sendevent(MBI_EVENT_KBD_ ## x); \
 		break;
 
 
@@ -112,17 +112,17 @@ mbi_libinput_event_loop(void *arg)
 				}
 
 				switch (keycode) {
-				case DIKS_ESCAPE:       mbi_event_send(MBI_EVENT_BACK); break;
-				case DIKS_RETURN:       mbi_event_send(MBI_EVENT_ENTER); break;
-				case DIKS_SHIFT:        mbi_event_send(MBI_EVENT_MENU); break;
-				case DIKS_CURSOR_UP:    mbi_event_send(MBI_EVENT_ARROW_UP); break;
-				case DIKS_CURSOR_DOWN:  mbi_event_send(MBI_EVENT_ARROW_DOWN); break;
-				case DIKS_CURSOR_LEFT:  mbi_event_send(MBI_EVENT_ARROW_LEFT); break;
-				case DIKS_CURSOR_RIGHT: mbi_event_send(MBI_EVENT_ARROW_RIGHT); break;
-				case DIKS_BACKSPACE:    mbi_event_send(MBI_EVENT_CLEAR); break;
-				case DIKS_SPACE:        mbi_event_send(MBI_EVENT_KBD_SPACE); break;
-				case DIKS_LEFT_CTRL:	mbi_event_send(MBI_EVENT_VOLUME_UP); break;
-				case DIKS_LEFT_ALT:	mbi_event_send(MBI_EVENT_VOLUME_DOWN); break;
+				case DIKS_ESCAPE:       avbox_input_sendevent(MBI_EVENT_BACK); break;
+				case DIKS_RETURN:       avbox_input_sendevent(MBI_EVENT_ENTER); break;
+				case DIKS_SHIFT:        avbox_input_sendevent(MBI_EVENT_MENU); break;
+				case DIKS_CURSOR_UP:    avbox_input_sendevent(MBI_EVENT_ARROW_UP); break;
+				case DIKS_CURSOR_DOWN:  avbox_input_sendevent(MBI_EVENT_ARROW_DOWN); break;
+				case DIKS_CURSOR_LEFT:  avbox_input_sendevent(MBI_EVENT_ARROW_LEFT); break;
+				case DIKS_CURSOR_RIGHT: avbox_input_sendevent(MBI_EVENT_ARROW_RIGHT); break;
+				case DIKS_BACKSPACE:    avbox_input_sendevent(MBI_EVENT_CLEAR); break;
+				case DIKS_SPACE:        avbox_input_sendevent(MBI_EVENT_KBD_SPACE); break;
+				case DIKS_LEFT_CTRL:	avbox_input_sendevent(MBI_EVENT_VOLUME_UP); break;
+				case DIKS_LEFT_ALT:	avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN); break;
 
 				CASE_KEYBOARD(A)
 				CASE_KEYBOARD(B)
