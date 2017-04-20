@@ -4,17 +4,22 @@ ARCH="x86_64"
 BOARD="qemu"
 KERNEL="build/${ARCH}/${BOARD}/output/images/bzImage"
 ROOTFS="build/${ARCH}/${BOARD}/output/images/rootfs.ext4"
-VIDEO=directfb
+VIDEO=libdrm
 BUSYBOX_INIT=0
 KVM=1
 EMU_VIDEO=std
 NCORES=2
+SDL=1
 
 echo_e()
 {
 	echo -e "$@"
 }
 
+warn()
+{
+	echo_e "WARNING!: $@" >&2
+}
 
 while [ $# != 0 ];
 do
@@ -46,19 +51,31 @@ do
 			echo_e "  --video=<drv>\t\tThe mediabox video driver"
 			echo_e "  --emu-video=<drv>\tThe QEMU video driver to use"
 			echo_e "  --busybox-init\t\tBoot using BusyBox's init system"
-			echo_e "  --[no-]kvm\t\t\tEnable/disable kvm support"
-			echo_e "  --help\t\t\tShow this."
+			echo_e "  --[no-]kvm\t\tEnable/disable kvm support"
+			echo_e "  --help\t\tShow this."
 			echo_e ""
 			exit 0
 		;;
 	esac
 	shift
 done
+
+# find binaries
+QEMU_BIN="$(which qemu-system-${ARCH})"
+GREP_BIN="$(which grep)"
 			
 if [ -c /dev/kvm ]; then
-	EXTRA_ARGS="--enable-kvm"
+	if [ ${KVM} -eq 1 ]; then
+		EXTRA_ARGS="--enable-kvm"
+	fi
 fi
 
+# if the sdl backend is enabled use it
+if [ "$(${QEMU_BIN} -help | ${GREP_BIN} '\-sdl')" != "" ]; then
+	EXTRA_ARGS="${EXTRA_ARGS} -sdl"
+else
+	warn "QEMU build does not support SDL backend!!"
+fi
 
 KARGS=
 KARGS="${KARGS} video=mode:1024x600x32"
@@ -71,11 +88,11 @@ if [ ${BUSYBOX_INIT} -eq 0 ]; then
 	KARGS="${KARGS} mediabox.video:driver=${VIDEO}"
 fi
 
-
+# start qemu
 QEMU_AUDIO_DRV=pa \
-QEMU_ALSA_DAC_DEV=sysdefault \
+QEMU_ALSA_DAC_DEV=front \
 QEMU_ALSA_ADC_DEV=sysdefault \
-qemu-system-${ARCH} \
+${QEMU_BIN} \
 	${EXTRA_ARGS} \
 	-kernel ${KERNEL} \
 	-smp ${NCORES} \
