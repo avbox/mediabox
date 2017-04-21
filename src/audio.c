@@ -20,7 +20,7 @@
 /**
  * Structure for storing audio packets.
  */
-LISTABLE_STRUCT(mb_audio_packet,
+LISTABLE_STRUCT(avbox_audio_packet,
 	size_t n_frames;
 	uint8_t *data;
 );
@@ -29,7 +29,7 @@ LISTABLE_STRUCT(mb_audio_packet,
 /**
  * Audio stream structure.
  */
-struct mb_audio_stream
+struct avbox_audiostream
 {
 	snd_pcm_t *pcm_handle;
 	pthread_mutex_t lock;
@@ -53,7 +53,7 @@ struct mb_audio_stream
  * Get the size in bytes of a number of audio samples.
  */
 static inline size_t
-mb_audio_stream_frames2size(struct mb_audio_stream * const stream, ssize_t frames)
+avbox_audiostream_frames2size(struct avbox_audiostream * const stream, ssize_t frames)
 {
 	/* For now this is hardcoded to 4 bytes per frame since we
 	 * only support 16-bit stereo */
@@ -66,11 +66,11 @@ mb_audio_stream_frames2size(struct mb_audio_stream * const stream, ssize_t frame
  * Flush the queue
  */
 static void
-mb_audio_stream_dropqueue(struct mb_audio_stream * const stream)
+avbox_audiostream_dropqueue(struct avbox_audiostream * const stream)
 {
-	struct mb_audio_packet *packet;
+	struct avbox_audio_packet *packet;
 	pthread_mutex_lock(&stream->queue_lock);
-	LIST_FOREACH_SAFE(struct mb_audio_packet *, packet, &stream->packets, {
+	LIST_FOREACH_SAFE(struct avbox_audio_packet *, packet, &stream->packets, {
 		LIST_REMOVE(packet);
 		ATOMIC_DEC(&stream->frames);
 		free(packet);
@@ -83,18 +83,17 @@ mb_audio_stream_dropqueue(struct mb_audio_stream * const stream)
  * Flush an audio stream.
  */
 void
-mb_audio_stream_drop(struct mb_audio_stream * const inst)
+avbox_audiostream_drop(struct avbox_audiostream * const inst)
 {
-	/* mb_player_flushaudio */
 	pthread_mutex_lock(&inst->lock);
-	mb_audio_stream_dropqueue(inst);
+	avbox_audiostream_dropqueue(inst);
 	pthread_cond_signal(&inst->wake);
 	pthread_mutex_unlock(&inst->lock);
 }
 
 
 static void
-mb_audio_stream_dumpstatus(struct mb_audio_stream * const stream)
+avbox_audiostream_dumpstatus(struct avbox_audiostream * const stream)
 {
 #ifndef NDEBUG
 	int err;
@@ -130,7 +129,7 @@ mb_audio_stream_dumpstatus(struct mb_audio_stream * const stream)
 
 
 static inline int64_t
-mb_audio_stream_gettime_internal(struct mb_audio_stream * const inst, snd_pcm_status_t *pcm_status)
+avbox_audiostream_gettime_internal(struct avbox_audiostream * const inst, snd_pcm_status_t *pcm_status)
 {
 	uint64_t time;
 	snd_pcm_state_t state;
@@ -174,7 +173,7 @@ mb_audio_stream_gettime_internal(struct mb_audio_stream * const inst, snd_pcm_st
  * or underruns.
  */
 int64_t
-mb_audio_stream_gettime(struct mb_audio_stream * const inst)
+avbox_audiostream_gettime(struct avbox_audiostream * const inst)
 {
 	int err = 0;
 	snd_pcm_status_t *status;
@@ -190,7 +189,7 @@ mb_audio_stream_gettime(struct mb_audio_stream * const inst)
 		return inst->lasttime;
 	}
 
-	return mb_audio_stream_gettime_internal(inst, status);
+	return avbox_audiostream_gettime_internal(inst, status);
 }
 
 
@@ -199,7 +198,7 @@ mb_audio_stream_gettime(struct mb_audio_stream * const inst)
  * the audio clock.
  */
 int
-mb_audio_stream_pause(struct mb_audio_stream * const inst)
+avbox_audiostream_pause(struct avbox_audiostream * const inst)
 {
 	int err, ret = -1;
 	snd_pcm_status_t *status;
@@ -237,7 +236,7 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 		goto end;
 	case SND_PCM_STATE_RUNNING:
 		DEBUG_VPRINT("audio", "Pausing RUNNING stream (offset=%li,time=%li)",
-			inst->clock_offset, mb_audio_stream_gettime(inst));
+			inst->clock_offset, avbox_audiostream_gettime(inst));
 
 		/* start draining the buffer */
 		inst->paused = 1;
@@ -258,7 +257,7 @@ mb_audio_stream_pause(struct mb_audio_stream * const inst)
 		inst->lasttime = inst->clock_offset = inst->xruntime;
 
 		/* dump the stream status */
-		mb_audio_stream_dumpstatus(inst);
+		avbox_audiostream_dumpstatus(inst);
 
 		ret = 0;
 		goto end;
@@ -282,12 +281,12 @@ end:
  * Resume audio playback
  */
 int
-mb_audio_stream_resume(struct mb_audio_stream * const inst)
+avbox_audiostream_resume(struct avbox_audiostream * const inst)
 {
 	int err, ret = -1;
 
 	DEBUG_VPRINT("audio", "Resuming audio stream (time=%li)",
-		mb_audio_stream_gettime(inst));
+		avbox_audiostream_gettime(inst));
 
 	pthread_mutex_lock(&inst->lock);
 
@@ -313,7 +312,7 @@ mb_audio_stream_resume(struct mb_audio_stream * const inst)
 	ret = 0;
 end:
 	DEBUG_VPRINT("audio", "Audio stream resumed (time=%li)",
-		mb_audio_stream_gettime(inst));
+		avbox_audiostream_gettime(inst));
 
 	/* signal IO thread */
 	pthread_cond_signal(&inst->wake);
@@ -327,7 +326,7 @@ end:
  * Calculate the next underrun time.
  */
 static void
-mb_audio_stream_calcxruntime(struct mb_audio_stream * const stream)
+avbox_audiostream_calcxruntime(struct avbox_audiostream * const stream)
 {
 	int err;
 	uint64_t time;
@@ -343,7 +342,7 @@ mb_audio_stream_calcxruntime(struct mb_audio_stream * const stream)
 	}
 
 	/* get the current stream time */
-	time = mb_audio_stream_gettime_internal(stream, status);
+	time = avbox_audiostream_gettime_internal(stream, status);
 
 	/* add the time that will take to play what's left of the buffer */
 	time += ((stream->buffer_size - snd_pcm_status_get_avail(status)) * 1000L * 1000L) /
@@ -358,12 +357,12 @@ mb_audio_stream_calcxruntime(struct mb_audio_stream * const stream)
  * This is the main playback loop.
  */
 static void*
-mb_audio_stream_output(void *arg)
+avbox_audiostream_output(void *arg)
 {
 	int ret;
 	size_t n_frames;
-	struct mb_audio_stream * const inst = (struct mb_audio_stream * const) arg;
-	struct mb_audio_packet * packet;
+	struct avbox_audiostream * const inst = (struct avbox_audiostream * const) arg;
+	struct avbox_audio_packet * packet;
 	const char *device = "sysdefault";
 	unsigned int period_usecs = 10;
 	int dir;
@@ -452,7 +451,7 @@ mb_audio_stream_output(void *arg)
 			snd_strerror(ret));
 	}
 
-	frames_write_max = inst->buffer_size / (mb_audio_stream_frames2size(inst, 1) * 4);
+	frames_write_max = inst->buffer_size / (avbox_audiostream_frames2size(inst, 1) * 4);
 
 	/* print debug info */
 	DEBUG_VPRINT("audio", "ALSA buffer size: %lu bytes", (unsigned long) inst->buffer_size);
@@ -461,10 +460,10 @@ mb_audio_stream_output(void *arg)
 	DEBUG_VPRINT("audio", "ALSA framerate: %u Hz", inst->framerate);
 	DEBUG_VPRINT("audio", "ALSA fragment size: %lu frames", frames_write_max);
 	DEBUG_VPRINT("audio", "ALSA frame size: %lu bytes",
-		mb_audio_stream_frames2size(inst, 1));
+		avbox_audiostream_frames2size(inst, 1));
 
 	/* dump ALSA status */
-	mb_audio_stream_dumpstatus(inst);
+	avbox_audiostream_dumpstatus(inst);
 
 	(void) mb_su_droproot();
 
@@ -497,7 +496,7 @@ mb_audio_stream_output(void *arg)
 		}
 
 		/* get the next packet */
-		packet = LIST_TAIL(struct mb_audio_packet*, &inst->packets);
+		packet = LIST_TAIL(struct avbox_audio_packet*, &inst->packets);
 		assert(!LIST_ISNULL(&inst->packets, packet));
 
 		/* calculate the number of frames to write */
@@ -532,7 +531,7 @@ mb_audio_stream_output(void *arg)
 			}
 
 			/* dump the stream status */
-			mb_audio_stream_dumpstatus(inst);
+			avbox_audiostream_dumpstatus(inst);
 
 			/* if we have underrun try to recover */
 			if (LIKELY(frames == -EPIPE || frames == -EINTR || frames == -ESTRPIPE)) {
@@ -565,14 +564,14 @@ mb_audio_stream_output(void *arg)
 		assert(frames <= n_frames);
 
 		/* calculate the next underrun time */
-		mb_audio_stream_calcxruntime(inst);
+		avbox_audiostream_calcxruntime(inst);
 
 		/* unlock stream */
 		pthread_mutex_unlock(&inst->lock);
 
 		/* update the packet structure */
 		packet->n_frames -= frames;
-		packet->data += mb_audio_stream_frames2size(inst, frames);
+		packet->data += avbox_audiostream_frames2size(inst, frames);
 
 		/* if there's no samples left in the packet then
 		 * remove it from the queue and free it */
@@ -596,7 +595,7 @@ audio_exit:
 	}
 
 	/* free any remaining packets */
-	mb_audio_stream_dropqueue(inst);
+	avbox_audiostream_dropqueue(inst);
 
 	inst->playback_running = 0;
 
@@ -613,11 +612,11 @@ audio_exit:
  * Writes n_frames audio frames to the stream.
  */
 int
-mb_audio_stream_write(struct mb_audio_stream * const stream,
+avbox_audiostream_write(struct avbox_audiostream * const stream,
 	const uint8_t * const data, const size_t n_frames)
 {
-	struct mb_audio_packet *packet;
-	const int sz = mb_audio_stream_frames2size(stream, n_frames);
+	struct avbox_audio_packet *packet;
+	const int sz = avbox_audiostream_frames2size(stream, n_frames);
 
 	assert(stream != NULL);
 
@@ -626,7 +625,7 @@ mb_audio_stream_write(struct mb_audio_stream * const stream,
 	}
 
 	/* allocate memory for packet */
-	if ((packet = malloc(sizeof(struct mb_audio_packet) + sz)) == NULL) {
+	if ((packet = malloc(sizeof(struct avbox_audio_packet) + sz)) == NULL) {
 		LOG_PRINT_ERROR("Could not allocate packet");
 		errno = ENOMEM;
 		return -1;
@@ -656,7 +655,7 @@ mb_audio_stream_write(struct mb_audio_stream * const stream,
  * Starts the stream playback.
  */
 int
-mb_audio_stream_start(struct mb_audio_stream * const stream)
+avbox_audiostream_start(struct avbox_audiostream * const stream)
 {
 	int ret = -1;
 
@@ -669,7 +668,7 @@ mb_audio_stream_start(struct mb_audio_stream * const stream)
 
 	if (!stream->playback_running) {
 		stream->playback_running = 1;
-		if (pthread_create(&stream->thread, NULL, mb_audio_stream_output, stream) != 0) {
+		if (pthread_create(&stream->thread, NULL, avbox_audiostream_output, stream) != 0) {
 			LOG_PRINT_ERROR("Could not start IO thread");
 			stream->playback_running = 0;
 			goto end;
@@ -694,7 +693,7 @@ end:
  * Get the number of frames buffered.
  */
 unsigned int
-mb_audio_stream_getframecount(struct mb_audio_stream * const stream)
+avbox_audiostream_getframecount(struct avbox_audiostream * const stream)
 {
 	assert(stream != NULL);
 	return stream->frames;
@@ -705,7 +704,7 @@ mb_audio_stream_getframecount(struct mb_audio_stream * const stream)
  * Check if the audio stream is paused.
  */
 int
-mb_audio_stream_ispaused(const struct mb_audio_stream * const stream)
+avbox_audiostream_ispaused(const struct avbox_audiostream * const stream)
 {
 	assert(stream != NULL);
 	return stream->paused;
@@ -716,7 +715,7 @@ mb_audio_stream_ispaused(const struct mb_audio_stream * const stream)
  * Set the audio clock offset.
  */
 int
-mb_audio_stream_setclock(struct mb_audio_stream * const stream, const int64_t clock)
+avbox_audiostream_setclock(struct avbox_audiostream * const stream, const int64_t clock)
 {
 	assert(stream != NULL);
 	stream->clock_offset = clock;
@@ -729,20 +728,20 @@ mb_audio_stream_setclock(struct mb_audio_stream * const stream, const int64_t cl
 /**
  * Create a new sound stream
  */
-struct mb_audio_stream *
-mb_audio_stream_new(void)
+struct avbox_audiostream *
+avbox_audiostream_new(void)
 {
-	struct mb_audio_stream *inst;
+	struct avbox_audiostream *inst;
 
 	/* allocate stream object */
-	if ((inst = malloc(sizeof(struct mb_audio_stream))) == NULL) {
+	if ((inst = malloc(sizeof(struct avbox_audiostream))) == NULL) {
 		LOG_PRINT_ERROR("Could not create audio stream. Out of memory");
 		errno = ENOMEM;
 		return NULL;
 	}
 
 	/* initialize stream object */
-	memset(inst, 0, sizeof(struct mb_audio_stream));
+	memset(inst, 0, sizeof(struct avbox_audiostream));
 	LIST_INIT(&inst->packets);
 
 	/* initialize pthread primitives */
@@ -762,7 +761,7 @@ mb_audio_stream_new(void)
  * Destroy a sound stream.
  */
 void
-mb_audio_stream_destroy(struct mb_audio_stream * const stream)
+avbox_audiostream_destroy(struct avbox_audiostream * const stream)
 {
 	/* wait for IO thread */
 	pthread_mutex_lock(&stream->lock);
@@ -777,7 +776,7 @@ mb_audio_stream_destroy(struct mb_audio_stream * const stream)
 	pthread_mutex_unlock(&stream->lock);
 
 	/* free any remaining packets */
-	mb_audio_stream_dropqueue(stream);
+	avbox_audiostream_dropqueue(stream);
 
 	/* free stream object */
 	free(stream);

@@ -96,7 +96,7 @@ struct mbp
 
 	AVFormatContext *fmt_ctx;
 
-	struct mb_audio_stream *audio_stream;
+	struct avbox_audiostream *audio_stream;
 	int audio_packets;
 
 	int audio_decoder_quit;
@@ -232,7 +232,7 @@ mb_player_printstatus(const struct mbp * const inst, const int fps)
 	static int i = 0, audio_frames = 0;;
 	if ((i++ % 10) == 0) {
 		if (inst->have_audio) {
-			audio_frames = mb_audio_stream_getframecount(inst->audio_stream);
+			audio_frames = avbox_audiostream_getframecount(inst->audio_stream);
 		}
 		fprintf(stdout, "| Fps: %03i | Video Packets: %03i | Video Frames: %03i | Audio Packets: %03i | Audio Frames: %03i |\r",
 			fps, inst->video_packets, inst->video_frames, inst->audio_packets,audio_frames);
@@ -367,7 +367,7 @@ static int64_t
 mb_player_getaudiotime(struct mbp * const inst)
 {
 	assert(inst->audio_stream != NULL);
-	return inst->lasttime = mb_audio_stream_gettime(inst->audio_stream);
+	return inst->lasttime = avbox_audiostream_gettime(inst->audio_stream);
 }
 
 
@@ -486,11 +486,11 @@ mb_player_video(void *arg)
 			}
 			if (LIKELY(inst->frame_state[inst->video_playback_index] != 1)) {
 				if (inst->have_audio) {
-					mb_audio_stream_pause(inst->audio_stream);
+					avbox_audiostream_pause(inst->audio_stream);
 					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
 					pthread_mutex_unlock(&inst->video_output_lock);
 					mb_player_wait4buffers(inst, &inst->video_quit);
-					mb_audio_stream_resume(inst->audio_stream);
+					avbox_audiostream_resume(inst->audio_stream);
 				} else {
 					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
 					pthread_mutex_unlock(&inst->video_output_lock);
@@ -559,8 +559,8 @@ mb_player_video(void *arg)
 					 * the video fell behing and the audio stream dryed out, but why
 					 * is the audio clock behind the last video frame??
 					 */
-					if (mb_audio_stream_ispaused(inst->audio_stream) && inst->audio_packets == 0 &&
-						mb_audio_stream_getframecount(inst->audio_stream) == 0) {
+					if (avbox_audiostream_ispaused(inst->audio_stream) && inst->audio_packets == 0 &&
+						avbox_audiostream_getframecount(inst->audio_stream) == 0) {
 						mb_player_dumpvideo(inst, elapsed, 1);
 						LOG_PRINT_ERROR("Deadlock detected, recovered (I hope)");
 					}
@@ -1379,14 +1379,14 @@ mb_player_audio_decode(void * arg)
 						pts = av_rescale_q(audio_frame->pts,
 							inst->fmt_ctx->streams[inst->audio_stream_index]->time_base,
 							AV_TIME_BASE_Q);
-						mb_audio_stream_setclock(inst->audio_stream, pts);
+						avbox_audiostream_setclock(inst->audio_stream, pts);
 						DEBUG_VPRINT("player", "First audio pts: %li",
 							pts);
 						inst->audio_time_set = 1;
 					}
 
 					/* write frame to audio stream and free it */
-					mb_audio_stream_write(inst->audio_stream, audio_frame->data[0],
+					avbox_audiostream_write(inst->audio_stream, audio_frame->data[0],
 						audio_frame->nb_samples);
 					av_frame_unref(audio_frame);
 				}
@@ -1526,7 +1526,7 @@ mb_player_stream_parse(void *arg)
 		inst->have_audio = 1;
 
 		/* create audio stream */
-		if ((inst->audio_stream = mb_audio_stream_new()) == NULL) {
+		if ((inst->audio_stream = avbox_audiostream_new()) == NULL) {
 			goto decoder_exit;
 		}
 
@@ -1680,15 +1680,15 @@ mb_player_stream_parse(void *arg)
 
 				/* drop all decoded audio frames */
 				if (inst->have_audio) {
-					mb_audio_stream_pause(inst->audio_stream);
-					mb_audio_stream_drop(inst->audio_stream);
-					mb_audio_stream_setclock(inst->audio_stream, inst->seek_to);
-					mb_audio_stream_resume(inst->audio_stream);
+					avbox_audiostream_pause(inst->audio_stream);
+					avbox_audiostream_drop(inst->audio_stream);
+					avbox_audiostream_setclock(inst->audio_stream, inst->seek_to);
+					avbox_audiostream_resume(inst->audio_stream);
 					avcodec_flush_buffers(inst->audio_codec_ctx);
 					inst->audio_time_set = 0;
 
 					DEBUG_VPRINT("player", "Audio time: %li",
-						mb_audio_stream_gettime(inst->audio_stream));
+						avbox_audiostream_gettime(inst->audio_stream));
 				}
 
 				DEBUG_VPRINT("player", "Frames dropped. (time=%li,v_packets=%i,a_packets=%i,v_frames=%i)",
@@ -1699,7 +1699,7 @@ mb_player_stream_parse(void *arg)
 				assert(inst->video_packets == 0);
 				assert(inst->audio_packets == 0);
 				assert(inst->video_frames == 0);
-				assert(mb_audio_stream_getframecount(inst->audio_stream) == 0);
+				assert(avbox_audiostream_getframecount(inst->audio_stream) == 0);
 				assert(inst->getmastertime(inst) == inst->seek_to);
 
 				DEBUG_VPRINT("player", "Seeking (newpos=%li)",
@@ -1754,7 +1754,7 @@ decoder_exit:
 		DEBUG_PRINT("player", "Audio decoder exiting");
 
 		/* destroy the audio stream */
-		mb_audio_stream_destroy(inst->audio_stream);
+		avbox_audiostream_destroy(inst->audio_stream);
 		inst->audio_stream = NULL;
 		inst->audio_time_set = 0;
 
@@ -2068,8 +2068,8 @@ mb_player_play(struct mbp *inst, const char * const path)
 		if (inst->status == MB_PLAYER_STATUS_PAUSED) {
 			mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
 			if (inst->have_audio) {
-				if (mb_audio_stream_ispaused(inst->audio_stream)) {
-					mb_audio_stream_resume(inst->audio_stream);
+				if (avbox_audiostream_ispaused(inst->audio_stream)) {
+					avbox_audiostream_resume(inst->audio_stream);
 				}
 			} else {
 				mb_player_resetsystemtime(inst, inst->video_decoder_pts);
@@ -2082,8 +2082,8 @@ mb_player_play(struct mbp *inst, const char * const path)
 	}
 
 	/* if the audio stream is paused unpause it */
-	if (inst->have_audio && mb_audio_stream_ispaused(inst->audio_stream)) {
-		mb_audio_stream_resume(inst->audio_stream);
+	if (inst->have_audio && avbox_audiostream_ispaused(inst->audio_stream)) {
+		avbox_audiostream_resume(inst->audio_stream);
 	}
 
 	/* if we're already playing a file stop it first */
@@ -2170,7 +2170,7 @@ mb_player_play(struct mbp *inst, const char * const path)
 
 	/* fire the audio output thread */
 	if (inst->have_audio) {
-		if (mb_audio_stream_start(inst->audio_stream) == -1) {
+		if (avbox_audiostream_start(inst->audio_stream) == -1) {
 			LOG_PRINT_ERROR("Could not start audio stream");
 			inst->have_audio = 0;
 			if (!inst->have_video) {
@@ -2243,7 +2243,7 @@ mb_player_pause(struct mbp* inst)
 
 	/* wait for player to pause */
 	if (inst->have_audio) {
-		mb_audio_stream_pause(inst->audio_stream);
+		avbox_audiostream_pause(inst->audio_stream);
 	} else {
 		inst->video_paused = 1;
 	}
@@ -2273,8 +2273,8 @@ mb_player_stop(struct mbp* inst)
 		pthread_cond_broadcast(&inst->video_decoder_signal);
 
 		if (inst->have_audio) {
-			if (mb_audio_stream_ispaused(inst->audio_stream)) {
-				mb_audio_stream_resume(inst->audio_stream);
+			if (avbox_audiostream_ispaused(inst->audio_stream)) {
+				avbox_audiostream_resume(inst->audio_stream);
 			}
 		} else {
 			/* video should have been taken care of by stop() */

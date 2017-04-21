@@ -5,14 +5,14 @@
 /**
  * Opaque stream structure
  */
-struct mb_audio_stream;
+struct avbox_audiostream;
 
 
 /**
  * Flush an audio stream.
  */
 void
-mb_audio_stream_drop(struct mb_audio_stream * const inst);
+avbox_audiostream_drop(struct avbox_audiostream * const inst);
 
 
 /**
@@ -21,7 +21,7 @@ mb_audio_stream_drop(struct mb_audio_stream * const inst);
  * or underruns.
  */
 int64_t
-mb_audio_stream_gettime(struct mb_audio_stream * const inst);
+avbox_audiostream_gettime(struct avbox_audiostream * const inst);
 
 
 /**
@@ -29,21 +29,21 @@ mb_audio_stream_gettime(struct mb_audio_stream * const inst);
  * the audio clock.
  */
 int
-mb_audio_stream_pause(struct mb_audio_stream * const inst);
+avbox_audiostream_pause(struct avbox_audiostream * const inst);
 
 
 /**
  * Resume audio playback
  */
 void
-mb_audio_stream_resume(struct mb_audio_stream * const inst);
+avbox_audiostream_resume(struct avbox_audiostream * const inst);
 
 
 /**
  * Writes n_frames audio frames to the stream.
  */
 int
-mb_audio_stream_write(struct mb_audio_stream * const stream,
+avbox_audiostream_write(struct avbox_audiostream * const stream,
 	const uint8_t * const data, const size_t n_frames);
 
 
@@ -51,41 +51,41 @@ mb_audio_stream_write(struct mb_audio_stream * const stream,
  * Check if the audio stream is paused.
  */
 int
-mb_audio_stream_ispaused(const struct mb_audio_stream * const stream);
+avbox_audiostream_ispaused(const struct avbox_audiostream * const stream);
 
 
 /**
  * Get the number of frames buffered.
  */
 unsigned int
-mb_audio_stream_getframecount(struct mb_audio_stream * const stream);
+avbox_audiostream_getframecount(struct avbox_audiostream * const stream);
 
 
 /**
  * Starts the stream playback.
  */
 int
-mb_audio_stream_start(struct mb_audio_stream * const stream);
+avbox_audiostream_start(struct avbox_audiostream * const stream);
 
 
 /**
  * Set the audio clock offset.
  */
 int
-mb_audio_stream_setclock(struct mb_audio_stream * const stream, const int64_t clock);
+avbox_audiostream_setclock(struct avbox_audiostream * const stream, const int64_t clock);
 
 
 /**
  * Create a new sound stream.
  */
-struct mb_audio_stream *
-mb_audio_stream_new(void);
+struct avbox_audiostream *
+avbox_audiostream_new(void);
 
 
 /**
  * Destroy a sound stream.
  */
 void
-mb_audio_stream_destroy(struct mb_audio_stream * const stream);
+avbox_audiostream_destroy(struct avbox_audiostream * const stream);
 
 #endif
