@@ -370,7 +370,8 @@ mb_audio_stream_output(void *arg)
 	snd_pcm_hw_params_t *params;
 	snd_pcm_sw_params_t *swparams;
 	snd_pcm_sframes_t frames;
-	snd_pcm_uframes_t period_frames = 8, frames_write_max = 8;
+	snd_pcm_sframes_t avail;
+	snd_pcm_uframes_t period_frames = 1024, frames_write_max = 8;
 
 	MB_DEBUG_SET_THREAD_NAME("audio_playback");
 	DEBUG_PRINT("player", "Audio playback thread started");
@@ -435,29 +436,32 @@ mb_audio_stream_output(void *arg)
 	}
 
 	if ((ret = snd_pcm_hw_params_get_period_time(params, &period_usecs, &dir)) < 0) {
-		fprintf(stderr, "player: Could not get ALSA period time. %s\n",
+		LOG_VPRINT_ERROR("Could not get period time: %s",
 			snd_strerror(ret));
 	}
 	if ((ret = snd_pcm_hw_params_get_rate(params, &inst->framerate, &dir)) < 0) {
-		fprintf(stderr, "player: Could not get ALSA framerate. %s\n",
+		LOG_VPRINT_ERROR("Could not get framerate: %s",
 			snd_strerror(ret));
 	}
 	if ((ret = snd_pcm_hw_params_get_period_size(params, &period_frames, &dir)) < 0) {
-		fprintf(stderr, "player: Could not get ALSA period size. %s\n",
+		LOG_VPRINT_ERROR("Could not get period size: %s",
 			snd_strerror(ret));
 	}
 	if ((ret = snd_pcm_hw_params_get_buffer_size(params, &inst->buffer_size)) < 0) {
-		fprintf(stderr, "player: Could not get ALSA buffer size. %s\n",
+		LOG_VPRINT_ERROR("Could not get buffer size: %s",
 			snd_strerror(ret));
 	}
 
 	frames_write_max = inst->buffer_size / (mb_audio_stream_frames2size(inst, 1) * 4);
 
-	DEBUG_VPRINT("audio", "ALSA buffer size: %lu", (unsigned long) inst->buffer_size);
-	DEBUG_VPRINT("audio", "ALSA period size: %lu", (unsigned long) period_frames);
-	DEBUG_VPRINT("audio", "ALSA period time: %u", period_usecs);
-	DEBUG_VPRINT("audio", "ALSA framerate: %u", inst->framerate);
-	DEBUG_VPRINT("audio", "ALSA fragment size: %lu", frames_write_max);
+	/* print debug info */
+	DEBUG_VPRINT("audio", "ALSA buffer size: %lu bytes", (unsigned long) inst->buffer_size);
+	DEBUG_VPRINT("audio", "ALSA period size: %lu frames", (unsigned long) period_frames);
+	DEBUG_VPRINT("audio", "ALSA period time: %u usecs", period_usecs);
+	DEBUG_VPRINT("audio", "ALSA framerate: %u Hz", inst->framerate);
+	DEBUG_VPRINT("audio", "ALSA fragment size: %lu frames", frames_write_max);
+	DEBUG_VPRINT("audio", "ALSA frame size: %lu bytes",
+		mb_audio_stream_frames2size(inst, 1));
 
 	/* dump ALSA status */
 	mb_audio_stream_dumpstatus(inst);
@@ -499,21 +503,30 @@ mb_audio_stream_output(void *arg)
 		/* calculate the number of frames to write */
 		n_frames = MIN(frames_write_max, packet->n_frames);
 
-		/* play the frame */
+		/* get the available space on ringbuffer */
+		if ((avail = snd_pcm_avail_update(inst->pcm_handle)) < 0) {
+			LOG_VPRINT_ERROR("Cannot get free buffer space: %s",
+				snd_strerror(avail));
+		}
+
+		/* if there's not enough room sleep until there is */
+		if (n_frames > avail) {
+			const int64_t waitusecs =
+				((n_frames - avail) * 1000L * 1000L) /
+				inst->framerate;
+			struct timespec waittime = { .tv_sec = 0, .tv_nsec = 0 };
+			timeaddu(&waittime, waitusecs);
+			delay2abstime(&waittime);
+			pthread_cond_timedwait(&inst->wake, &inst->lock, &waittime);
+			pthread_mutex_unlock(&inst->lock);
+			continue;
+		}
+
+		/* write fragment to sound card */
 		frames = snd_pcm_writei(inst->pcm_handle, packet->data, n_frames);
 		if (UNLIKELY(frames < 0)) {
 			if (UNLIKELY(frames == -EAGAIN)) {
-				/* the ring buffer is full so we sleep for as long as it
-				 * takes to play the current fragment to ensure there's enough
-				 * room next time we try. Since the max fragment size is 1/4
-				 * the buffer size this will ensure the buffer never gets much
-				 * more than half empty */
-				const int64_t waitusecs =
-					(n_frames * 1000L * 1000L) / inst->framerate;
-				struct timespec waittime = { .tv_sec = 0, .tv_nsec = 0 };
-				timeaddu(&waittime, waitusecs);
-				delay2abstime(&waittime);
-				pthread_cond_timedwait(&inst->wake, &inst->lock, &waittime);
+				DEBUG_PRINT("audio", "Could not write frames: EAGAIN!");
 				pthread_mutex_unlock(&inst->lock);
 				continue;
 			}
@@ -544,6 +557,12 @@ mb_audio_stream_output(void *arg)
 			pthread_mutex_unlock(&inst->lock);
 			goto audio_exit;
 		}
+		if (UNLIKELY(frames < n_frames)) {
+			DEBUG_VPRINT("audio", "Only %d out of %d frames written",
+				frames, n_frames);
+		}
+
+		assert(frames <= n_frames);
 
 		/* calculate the next underrun time */
 		mb_audio_stream_calcxruntime(inst);
