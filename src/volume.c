@@ -130,6 +130,16 @@ avbox_volume_set(int volume)
 		goto end;
 	}
 
+	/* if the device has a playback switch try to enable it */
+	if (snd_mixer_selem_has_common_switch(elem) ||
+		snd_mixer_selem_has_playback_switch(elem)) {
+		DEBUG_PRINT("volume", "Setting common switch on");
+		if ((err = snd_mixer_selem_set_playback_switch_all(elem, 1)) < 0) {
+			LOG_VPRINT_ERROR("Could not set playback switch: %s",
+				snd_strerror(err));
+		}
+	}
+
 	if (message_fd != -1) {
 		avbox_input_sendmessage(message_fd, MBI_EVENT_VOLUME_CHANGED, &volume,
 			sizeof(volume));
