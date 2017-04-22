@@ -32,6 +32,7 @@
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
+#include <libavutil/imgutils.h>
 #include <pango/pangocairo.h>
 
 #define LOG_MODULE "player"
@@ -901,9 +902,9 @@ end:
 }
 
 
-static int
+static AVCodecContext *
 open_codec_context(int *stream_idx,
-                              AVFormatContext *fmt_ctx, enum AVMediaType type)
+	AVFormatContext *fmt_ctx, enum AVMediaType type)
 {
 	int ret;
 	AVStream *st;
@@ -915,18 +916,28 @@ open_codec_context(int *stream_idx,
 	if (ret < 0) {
 		LOG_VPRINT_ERROR("Could not find %s stream in input file!",
 			av_get_media_type_string(type));
-		return ret;
+		return NULL;
 	} else {
 		*stream_idx = ret;
 		st = fmt_ctx->streams[*stream_idx];
 
 		/* find decoder for the stream */
-		dec_ctx = st->codec;
-		dec = avcodec_find_decoder(dec_ctx->codec_id);
+		dec = avcodec_find_decoder(st->codecpar->codec_id);
 		if (!dec) {
 			LOG_VPRINT_ERROR("Failed to find '%s' codec!",
 				av_get_media_type_string(type));
-			return AVERROR(EINVAL);
+			return NULL;
+		}
+
+		/* allocate decoder context */
+		if ((dec_ctx = avcodec_alloc_context3(dec)) == NULL) {
+			LOG_PRINT_ERROR("Could not allocate decoder context!");
+			return NULL;
+		}
+		if ((ret = avcodec_parameters_to_context(dec_ctx, st->codecpar)) < 0) {
+			LOG_VPRINT_ERROR("Could not convert decoder params to context: %d!",
+				ret);
+			return NULL;
 		}
 
 		/* Init the video decoder */
@@ -934,10 +945,10 @@ open_codec_context(int *stream_idx,
 		if ((ret = avcodec_open2(dec_ctx, dec, &opts)) < 0) {
 			LOG_VPRINT_ERROR("Failed to open '%s' codec!",
 				av_get_media_type_string(type));
-			return ret;
+			return NULL;
 		}
 	}
-	return 0;
+	return dec_ctx;
 }
 
 
@@ -947,7 +958,7 @@ open_codec_context(int *stream_idx,
 static void *
 mb_player_video_decode(void *arg)
 {
-	int i, finished, video_time_set = 0;
+	int i, video_time_set = 0;
 	struct mbp *inst = (struct mbp*) arg;
 	char video_filters[512];
 	AVPacket packet;
@@ -975,10 +986,7 @@ mb_player_video_decode(void *arg)
 	}
 
 	/* open the video codec */
-	if (open_codec_context(&inst->video_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_VIDEO) >= 0) {
-		inst->video_codec_ctx = inst->fmt_ctx->streams[inst->video_stream_index]->codec;
-	}
-	if (inst->video_codec_ctx == NULL) {
+	if ((inst->video_codec_ctx = open_codec_context(&inst->video_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_VIDEO)) == NULL) {
 		LOG_PRINT_ERROR("Could not open video codec context");
 		goto decoder_exit;
 	}
@@ -999,7 +1007,8 @@ mb_player_video_decode(void *arg)
 	}
 
 	/* calculate the size of each frame and allocate buffer for it */
-	inst->bufsz = avpicture_get_size(MB_DECODER_PIX_FMT, inst->width, inst->height);
+	inst->bufsz = av_image_get_buffer_size(MB_DECODER_PIX_FMT, inst->width, inst->height,
+		av_image_get_linesize(MB_DECODER_PIX_FMT, inst->width, 0));
 #ifdef ENABLE_DOUBLE_BUFFERING
 	inst->video_buffer = av_malloc(inst->bufsz * sizeof(int8_t));
 	if (inst->video_buffer == NULL) {
@@ -1085,12 +1094,11 @@ mb_player_video_decode(void *arg)
 						   * on mb_player_stream_decode() */
 		pthread_mutex_unlock(&inst->video_decoder_lock);
 
-		/* decode frame */
-		if (UNLIKELY((i = avcodec_decode_video2(inst->video_codec_ctx, video_frame_nat,
-			&finished, &packet)) < 0)) {
+		/* decode packet */
+		if (UNLIKELY((i = avcodec_send_packet(inst->video_codec_ctx, &packet)) < 0)) {
 			LOG_VPRINT_ERROR("Error decoding video packet (ret=%i)", i);
-
-		} else if (LIKELY(finished)) {
+		}
+		while (LIKELY((i = avcodec_receive_frame(inst->video_codec_ctx, video_frame_nat))) == 0) {
 			int64_t frame_pts;
 
 			if (packet.dts != AV_NOPTS_VALUE) {
@@ -1145,9 +1153,10 @@ mb_player_video_decode(void *arg)
 				}
 
 				/* copy picture to buffer */
-				avpicture_layout((const AVPicture*) video_frame_flt,
+				av_image_copy_to_buffer(inst->frame_data[inst->video_decode_index],
+					inst->bufsz, (const uint8_t **) video_frame_flt->data, video_frame_flt->linesize,
 					MB_DECODER_PIX_FMT, inst->width, inst->height,
-					inst->frame_data[inst->video_decode_index], inst->bufsz);
+					av_image_get_linesize(MB_DECODER_PIX_FMT, inst->width, 0));
 
 				inst->frame_pts[inst->video_decode_index] = frame_pts;
 				inst->frame_time_base[inst->video_decode_index] = 
@@ -1182,12 +1191,18 @@ frame_done:
 				av_frame_unref(video_frame_flt);
 			}
 			av_frame_unref(video_frame_nat);
-		} else {
-			av_frame_unref(video_frame_nat);
+		}
+		if (i != 0) {
+			if (i == AVERROR(EAGAIN)) {
+				continue;
+			} else {
+				LOG_VPRINT_ERROR("ERROR: avcodec_receive_frame() returned %d",
+					i);
+			}
 		}
 
 		/* free packet */
-		av_free_packet(&packet);
+		av_packet_unref(&packet);
 	}
 decoder_exit:
 	DEBUG_PRINT("player", "Video decoder exiting");
@@ -1257,7 +1272,7 @@ decoder_exit:
 static void *
 mb_player_audio_decode(void * arg)
 {
-	int finished = 0, ret;
+	int ret;
 	struct mbp * const inst = (struct mbp * const) arg;
 	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
 	AVFrame *audio_frame_nat = NULL;
@@ -1265,7 +1280,7 @@ mb_player_audio_decode(void * arg)
 	AVFilterGraph *audio_filter_graph = NULL;
 	AVFilterContext *audio_buffersink_ctx = NULL;
 	AVFilterContext *audio_buffersrc_ctx = NULL;
-	AVPacket packet, packet1;
+	AVPacket packet;
 
 	MB_DEBUG_SET_THREAD_NAME("audio_decoder");
 
@@ -1279,10 +1294,8 @@ mb_player_audio_decode(void * arg)
 	DEBUG_PRINT("player", "Audio decoder starting");
 
 	/* open the audio codec */
-	if (open_codec_context(&inst->audio_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_AUDIO) >= 0) {
-		inst->audio_codec_ctx = inst->fmt_ctx->streams[inst->audio_stream_index]->codec;
-	}
-	if (inst->audio_codec_ctx == NULL) {
+	if ((inst->audio_codec_ctx = open_codec_context(&inst->audio_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_AUDIO)) == NULL) {
+		LOG_PRINT_ERROR("Could not open audio codec!");
 		goto decoder_exit;
 	}
 
@@ -1327,7 +1340,7 @@ mb_player_audio_decode(void * arg)
 		}
 
 		/* grab the packet and signal the stream decoder thread */
-		packet = packet1 = inst->audio_packet[inst->audio_packet_read_index];
+		packet = inst->audio_packet[inst->audio_packet_read_index];
 		inst->audio_packet_state[inst->audio_packet_read_index] = 0;
 		pthread_cond_signal(&inst->audio_decoder_signal);
 		inst->audio_packet_read_index =
@@ -1336,64 +1349,61 @@ mb_player_audio_decode(void * arg)
 		pthread_mutex_unlock(&inst->audio_decoder_lock);
 
 		/* decode audio frame */
-		while (LIKELY(packet1.size > 0)) {
-			finished = 0;
-			ret = avcodec_decode_audio4(inst->audio_codec_ctx, audio_frame_nat,
-				&finished, &packet1);
-			if (UNLIKELY(ret < 0)) {
-				LOG_VPRINT_ERROR("Error decoding audio (ret=%i)", ret);
-				continue;
+		if (UNLIKELY(ret = avcodec_send_packet(inst->audio_codec_ctx, &packet) != 0)) {
+			LOG_VPRINT_ERROR("Error decoding audio (ret=%i)", ret);
+			continue;
+		}
+
+		while ((ret = avcodec_receive_frame(inst->audio_codec_ctx, audio_frame_nat)) == 0) {
+			audio_frame_nat->pts =
+				av_frame_get_best_effort_timestamp(audio_frame_nat);
+
+			/* push the audio data from decoded frame into the filtergraph */
+			if (UNLIKELY(av_buffersrc_add_frame_flags(audio_buffersrc_ctx,
+				audio_frame_nat, 0) < 0)) {
+				LOG_PRINT_ERROR("Error while feeding the audio filtergraph");
+				break;
 			}
-			packet1.size -= ret;
-			packet1.data += ret;
 
-			if (LIKELY(finished)) {
-				audio_frame_nat->pts =
-					av_frame_get_best_effort_timestamp(audio_frame_nat);
+			/* pull filtered audio from the filtergraph */
+			while (LIKELY(!inst->audio_decoder_quit)) {
 
-				/* push the audio data from decoded frame into the filtergraph */
-				if (UNLIKELY(av_buffersrc_add_frame_flags(audio_buffersrc_ctx,
-					audio_frame_nat, 0) < 0)) {
-					LOG_PRINT_ERROR("Error while feeding the audio filtergraph");
+				ret = av_buffersink_get_frame(audio_buffersink_ctx, audio_frame);
+				if (UNLIKELY(ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)) {
+					av_frame_unref(audio_frame);
 					break;
 				}
-
-				/* pull filtered audio from the filtergraph */
-				while (LIKELY(!inst->audio_decoder_quit)) {
-
-					ret = av_buffersink_get_frame(audio_buffersink_ctx, audio_frame);
-					if (UNLIKELY(ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)) {
-						av_frame_unref(audio_frame);
-						break;
-					}
-					if (UNLIKELY(ret < 0)) {
-						av_frame_unref(audio_frame);
-						goto decoder_exit;
-					}
-
-					/* if this is the first frame then set the audio stream
-					 * clock to it's pts. This is needed because not all streams
-					 * start at pts 0 */
-					if (UNLIKELY(!inst->audio_time_set)) {
-						int64_t pts;
-						pts = av_rescale_q(audio_frame->pts,
-							inst->fmt_ctx->streams[inst->audio_stream_index]->time_base,
-							AV_TIME_BASE_Q);
-						avbox_audiostream_setclock(inst->audio_stream, pts);
-						DEBUG_VPRINT("player", "First audio pts: %li",
-							pts);
-						inst->audio_time_set = 1;
-					}
-
-					/* write frame to audio stream and free it */
-					avbox_audiostream_write(inst->audio_stream, audio_frame->data[0],
-						audio_frame->nb_samples);
+				if (UNLIKELY(ret < 0)) {
 					av_frame_unref(audio_frame);
+					goto decoder_exit;
 				}
+
+				/* if this is the first frame then set the audio stream
+				 * clock to it's pts. This is needed because not all streams
+				 * start at pts 0 */
+				if (UNLIKELY(!inst->audio_time_set)) {
+					int64_t pts;
+					pts = av_rescale_q(audio_frame->pts,
+						inst->fmt_ctx->streams[inst->audio_stream_index]->time_base,
+						AV_TIME_BASE_Q);
+					avbox_audiostream_setclock(inst->audio_stream, pts);
+					DEBUG_VPRINT("player", "First audio pts: %li",
+						pts);
+					inst->audio_time_set = 1;
+				}
+
+				/* write frame to audio stream and free it */
+				avbox_audiostream_write(inst->audio_stream, audio_frame->data[0],
+					audio_frame->nb_samples);
+				av_frame_unref(audio_frame);
 			}
 		}
+		if (ret != 0 && ret != AVERROR(EAGAIN)) {
+			LOG_VPRINT_ERROR("ERROR!: avcodec_receive_frame() returned %d",
+				AVERROR(EAGAIN));
+		}
 		/* free packet */
-		av_free_packet(&packet);
+		av_packet_unref(&packet);
 	}
 
 decoder_exit:
@@ -1562,7 +1572,7 @@ mb_player_stream_parse(void *arg)
 				/* don't go to sleep after receiving the quit command */
 				if (UNLIKELY(inst->stream_quit)) {
 					pthread_mutex_unlock(&inst->video_decoder_lock);
-					av_free_packet(&packet);
+					av_packet_unref(&packet);
 					goto decoder_exit;
 				}
 				if (LIKELY(inst->video_packet_state[inst->video_packet_write_index] == 1)) {
@@ -1597,7 +1607,7 @@ mb_player_stream_parse(void *arg)
 				/* don't sleep after receiving quit command */
 				if (UNLIKELY(inst->stream_quit)) {
 					pthread_mutex_unlock(&inst->audio_decoder_lock);
-					av_free_packet(&packet);
+					av_packet_unref(&packet);
 					goto decoder_exit;
 				}
 				if (LIKELY(inst->audio_packet_state[inst->audio_packet_write_index] == 1)) {
@@ -1615,7 +1625,7 @@ mb_player_stream_parse(void *arg)
 				(inst->audio_packet_write_index + 1) % MB_AUDIO_BUFFER_PACKETS;
 			ATOMIC_INC(&inst->audio_packets);
 		} else {
-			av_free_packet(&packet);
+			av_packet_unref(&packet);
 		}
 
 		/* handle seek request */
@@ -1644,7 +1654,7 @@ mb_player_stream_parse(void *arg)
 				pthread_mutex_lock(&inst->video_decoder_lock);
 				while (inst->video_packet_state[inst->video_packet_read_index] == 1) {
 					inst->video_packet_state[inst->video_packet_read_index] = 0;
-					av_free_packet(&inst->video_packet[inst->video_packet_read_index]);
+					av_packet_unref(&inst->video_packet[inst->video_packet_read_index]);
 					inst->video_packet_read_index =
 						(inst->video_packet_read_index + 1) % MB_VIDEO_BUFFER_PACKETS;
 					ATOMIC_DEC(&inst->video_packets);
@@ -1655,7 +1665,7 @@ mb_player_stream_parse(void *arg)
 				pthread_mutex_lock(&inst->audio_decoder_lock);
 				while (inst->audio_packet_state[inst->audio_packet_read_index] == 1) {
 					inst->audio_packet_state[inst->audio_packet_read_index] = 0;
-					av_free_packet(&inst->audio_packet[inst->audio_packet_read_index]);
+					av_packet_unref(&inst->audio_packet[inst->audio_packet_read_index]);
 					inst->audio_packet_read_index =
 						(inst->audio_packet_read_index + 1) % MB_AUDIO_BUFFER_PACKETS;
 					ATOMIC_DEC(&inst->audio_packets);
@@ -1733,7 +1743,7 @@ decoder_exit:
 		/* free video packets */
 		for (i = 0; i < MB_VIDEO_BUFFER_PACKETS; i++) {
 			if (inst->video_packet_state[i] == 1) {
-				av_free_packet(&inst->video_packet[i]);
+				av_packet_unref(&inst->video_packet[i]);
 			}
 		}
 
@@ -1761,7 +1771,7 @@ decoder_exit:
 		/* signal the audio decoder thread to exit and join it */
 		for (i = 0; i < MB_AUDIO_BUFFER_PACKETS; i++) {
 			if (inst->audio_packet_state[i] == 1) {
-				av_free_packet(&inst->audio_packet[i]);
+				av_packet_unref(&inst->audio_packet[i]);
 			}
 		}
 	}
