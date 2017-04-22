@@ -985,7 +985,7 @@ mb_player_video_decode(void *arg)
 
 	/* initialize video filter graph */
 	snprintf(video_filters, sizeof(video_filters),
-		"scale='if(gt(a,4/3),%i,-1)':'if(gt(a,4/3),-1,%i)',"
+		"scale='if(lt(in_w,in_h),-1,%i)':'if(lt(in_w,in_h),%i,-1)',"
 		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
 		inst->width, inst->height, inst->width, inst->height);
 
