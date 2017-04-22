@@ -71,6 +71,7 @@ mediabox_SOURCES = \
 	process.c \
 	sysinit.c \
 	log.c \
+	queue.c \
 	proc_util.c
 
 if ENABLE_BLUETOOTH
