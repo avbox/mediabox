@@ -48,6 +48,7 @@
 #include "input.h"
 #include "audio.h"
 #include "compiler.h"
+#include "queue.h"
 
 
 /*
@@ -68,6 +69,13 @@
 
 /* #define MB_DECODER_PRINT_FPS */
 
+struct avbox_video_frame
+{
+	uint8_t *data;
+	int64_t pts;
+	AVRational time_base;
+};
+
 
 /**
  * Player structure.
@@ -75,6 +83,12 @@
 struct avbox_player
 {
 	struct mbv_window *window;
+	struct avbox_queue *video_packets_q;
+	struct avbox_queue *audio_packets_q;
+	struct avbox_queue *video_frames_q;
+	uint8_t *video_buffers[MB_VIDEO_BUFFER_FRAMES + 1];
+	int video_buffer_index;
+
 	const char *media_file;
 	enum avbox_player_status status;
 	int frames_rendered;
@@ -98,19 +112,11 @@ struct avbox_player
 	AVFormatContext *fmt_ctx;
 
 	struct avbox_audiostream *audio_stream;
-	int audio_packets;
 
-	int audio_decoder_quit;
 	AVCodecContext *audio_codec_ctx;
-	AVPacket audio_packet[MB_AUDIO_BUFFER_PACKETS];
-	char audio_packet_state[MB_AUDIO_BUFFER_PACKETS];
-	int audio_packet_read_index;
-	int audio_packet_write_index;
 	int audio_time_set;
 
 	int audio_stream_index;
-	pthread_cond_t audio_decoder_signal;
-	pthread_mutex_t audio_decoder_lock;
 	pthread_t audio_decoder_thread;
 
 	/* FIXME: We shouldn't save a copy of the last frame but
@@ -122,20 +128,6 @@ struct avbox_player
 
 	int video_stream_index;
 	AVCodecContext *video_codec_ctx;
-	AVPacket video_packet[MB_VIDEO_BUFFER_PACKETS];
-	char video_packet_state[MB_VIDEO_BUFFER_PACKETS];
-	uint8_t *frame_data[MB_VIDEO_BUFFER_FRAMES];
-	char frame_state[MB_VIDEO_BUFFER_FRAMES];
-	int64_t frame_pts[MB_VIDEO_BUFFER_FRAMES];
-	AVRational frame_time_base[MB_VIDEO_BUFFER_FRAMES];
-	int video_frames;
-	int video_packets;
-	int video_playback_index;
-	int video_decode_index;
-	int video_quit;
-	int video_decoder_quit;
-	int video_packet_read_index;
-	int video_packet_write_index;
 	int video_paused;
 	int video_playback_running;
 	int video_flush_decoder;
@@ -144,11 +136,7 @@ struct avbox_player
 	int64_t video_decoder_pts;
 	int64_t video_renderer_pts;
 	AVRational video_decoder_timebase;
-	pthread_cond_t video_decoder_signal;
-	pthread_mutex_t video_decoder_lock;
 	pthread_t video_decoder_thread;
-	pthread_cond_t video_output_signal;
-	pthread_mutex_t video_output_lock;
 	pthread_t video_output_thread;
 	pthread_cond_t stream_signal;
 	pthread_mutex_t stream_lock;
@@ -173,6 +161,18 @@ struct avbox_player
 
 /* Pango global context */
 PangoFontDescription *pango_font_desc = NULL;
+static pthread_mutex_t thread_start_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t thread_start_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t thread_start_cond = PTHREAD_COND_INITIALIZER;
+
+
+static uint8_t *
+avbox_player_getnextvideobuffer(struct avbox_player * const inst)
+{
+	inst->video_buffer_index = (inst->video_buffer_index + 1) %
+		(MB_VIDEO_BUFFER_FRAMES + 1);
+	return inst->video_buffers[inst->video_buffer_index];
+}
 
 
 /**
@@ -235,8 +235,12 @@ avbox_player_printstatus(const struct avbox_player * const inst, const int fps)
 		if (inst->have_audio) {
 			audio_frames = avbox_audiostream_getframecount(inst->audio_stream);
 		}
-		fprintf(stdout, "| Fps: %03i | Video Packets: %03i | Video Frames: %03i | Audio Packets: %03i | Audio Frames: %03i |\r",
-			fps, inst->video_packets, inst->video_frames, inst->audio_packets,audio_frames);
+		fprintf(stdout, "| Fps: %03i | Video Packets: %03zd | Video Frames: %03zd | Audio Packets: %03zd | Audio Frames: %03i |\r",
+			fps,
+			avbox_queue_count(inst->video_packets_q),
+			avbox_queue_count(inst->video_frames_q), 
+			avbox_queue_count(inst->audio_packets_q),
+			audio_frames);
 		fflush(stdout);
 	}
 }
@@ -288,30 +292,32 @@ avbox_player_dumpvideo(struct avbox_player * const inst, const int64_t pts, cons
 {
 	int ret = 0, c = 0;
 	int64_t video_time;
+	struct avbox_video_frame *frame;
 
 	DEBUG_VPRINT("player", "Skipping frames until %li", pts);
 
 	video_time = pts - 10000 - 1;
 
-	while (!inst->video_quit && (flush || video_time < (pts - 10000))) {
+	while (flush || video_time < (pts - 10000)) {
 		/* tell decoder to skip frames */
 		inst->video_codec_ctx->skip_frame = AVDISCARD_NONREF;
 
 		/* first drain the decoded frames buffer */
-		if (!inst->video_quit && (inst->frame_state[inst->video_playback_index] != 1)) {
-			if (flush) {
+		if ((frame = avbox_queue_peek(inst->video_frames_q, !flush)) == NULL) {
+			if (errno == EAGAIN) {
+				if (flush) {
+					break;
+				}
+				continue;
+			} else if (errno == ESHUTDOWN) {
 				break;
+			} else {
+				LOG_VPRINT_ERROR("ERROR: avbox_queue_get() returned error: %s",
+					strerror(errno));
+				abort();
 			}
-			pthread_mutex_lock(&inst->video_output_lock);
-			if (!inst->video_quit && (inst->frame_state[inst->video_playback_index] != 1)) {
-				pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
-			}
-			pthread_mutex_unlock(&inst->video_output_lock);
-			continue;
 		}
-
-		video_time = av_rescale_q(inst->frame_pts[inst->video_playback_index],
-			inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
+		video_time = av_rescale_q(frame->pts, frame->time_base, AV_TIME_BASE_Q);
 		if (!flush && pts != -1 && video_time >= (pts - 10000)) {
 			goto end;
 		}
@@ -319,13 +325,11 @@ avbox_player_dumpvideo(struct avbox_player * const inst, const int64_t pts, cons
 		/* DEBUG_VPRINT("player", "video_time=%li, pts=%li",
 			video_time, pts); */
 
-		pthread_mutex_lock(&inst->video_output_lock);
-		inst->frame_state[inst->video_playback_index] = 0;
-		pthread_cond_signal(&inst->video_output_signal);
-		pthread_mutex_unlock(&inst->video_output_lock);
-		inst->video_playback_index =
-			(inst->video_playback_index + 1) % MB_VIDEO_BUFFER_FRAMES;
-		ATOMIC_DEC(&inst->video_frames);
+		/* dequeue the frame */
+		if (avbox_queue_get(inst->video_frames_q) != frame) {
+			LOG_PRINT_ERROR("We peeked one frame but got a different one. WTF?");
+			abort();
+		}
 		c++;
 		ret = 1;
 	}
@@ -343,19 +347,18 @@ end:
  * to fill up
  */
 static void
-avbox_player_wait4buffers(struct avbox_player * const inst, int * const quit)
+avbox_player_wait4buffers(struct avbox_player * const inst)
 {
 	/* wait for the buffers to fill up */
 	do {
-		pthread_cond_broadcast(&inst->video_decoder_signal);
-		pthread_cond_broadcast(&inst->audio_decoder_signal);
-		pthread_cond_broadcast(&inst->video_output_signal);
+		/* TODO: This shouldn't be necessary */
+		avbox_queue_wake(inst->video_frames_q);
 
 		avbox_player_printstatus(inst, 0);
-
 		usleep(100L * 1000L);
 	}
-	while (!*quit && !inst->video_flush_output && inst->video_frames < MB_VIDEO_BUFFER_FRAMES);
+	while (!avbox_queue_isclosed(inst->video_frames_q) && !inst->video_flush_output &&
+		avbox_queue_count(inst->video_frames_q) < MB_VIDEO_BUFFER_FRAMES);
 }
 
 
@@ -431,13 +434,13 @@ avbox_player_postproc(struct avbox_player *inst, void *buf)
 /**
  * Video rendering thread.
  */
-#if (MB_VIDEO_BUFFER_FRAMES > 1)
 static void *
 avbox_player_video(void *arg)
 {
 	uint8_t *buf;
 	int64_t frame_pts, delay, frame_time = 0;
 	struct avbox_player *inst = (struct avbox_player*) arg;
+	struct avbox_video_frame *frame;
 	
 #ifdef MB_DECODER_PRINT_FPS
 	struct timespec new_tp, last_tp, elapsed_tp;
@@ -457,18 +460,18 @@ avbox_player_video(void *arg)
 
 	if (!inst->have_audio) {
 		/* save the reference timestamp */
-		avbox_player_wait4buffers(inst, &inst->video_quit);
+		avbox_player_wait4buffers(inst);
 		avbox_player_resetsystemtime(inst, 0);
 	}
 
 	/* signal control thread that we're ready */
-	pthread_mutex_lock(&inst->video_output_lock);
-	pthread_cond_broadcast(&inst->video_output_signal);
-	pthread_mutex_unlock(&inst->video_output_lock);
+	pthread_mutex_lock(&thread_start_mutex);
+	pthread_cond_broadcast(&thread_start_cond);
+	pthread_mutex_unlock(&thread_start_mutex);
 
 	DEBUG_PRINT("player", "Video renderer ready");
 
-	while (LIKELY(!inst->video_quit)) {
+	while (1) {
 
 		/* if we got a flush command flush all decoded video */
 		if (UNLIKELY(inst->video_flush_output)) {
@@ -478,57 +481,50 @@ avbox_player_video(void *arg)
 			inst->video_flush_output = 0;
 		}
 
-		/* if there's no frame ready we must wait */
-		if (UNLIKELY(inst->frame_state[inst->video_playback_index] != 1)) {
-			pthread_mutex_lock(&inst->video_output_lock);
-			if (inst->video_quit) {
-				pthread_mutex_unlock(&inst->video_output_lock);
+		/* if the queue is empty wait for it to fill up */
+		if (UNLIKELY(avbox_queue_count(inst->video_frames_q) == 0)) {
+			if (inst->have_audio) {
+				avbox_audiostream_pause(inst->audio_stream);
+				avbox_queue_peek(inst->video_frames_q, 1); /* wait for queue */
+				avbox_player_wait4buffers(inst);
+				avbox_audiostream_resume(inst->audio_stream);
+			} else {
+				avbox_queue_peek(inst->video_frames_q, 1);
+				avbox_player_wait4buffers(inst);
+				avbox_player_resetsystemtime(inst, frame_time);
+			}
+		}
+
+		/* get the next decoded frame */
+		if ((frame = avbox_queue_peek(inst->video_frames_q, 1)) == NULL) {
+			if (errno == EAGAIN) {
+				continue;
+			} else if (errno == ESHUTDOWN) {
+				break;
+			} else {
+				LOG_VPRINT_ERROR("Error!: avbox_queue_get() failed: %s",
+					strerror(errno));
 				goto video_exit;
 			}
-			if (LIKELY(inst->frame_state[inst->video_playback_index] != 1)) {
-				if (inst->have_audio) {
-					avbox_audiostream_pause(inst->audio_stream);
-					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
-					pthread_mutex_unlock(&inst->video_output_lock);
-					avbox_player_wait4buffers(inst, &inst->video_quit);
-					avbox_audiostream_resume(inst->audio_stream);
-				} else {
-					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
-					pthread_mutex_unlock(&inst->video_output_lock);
-					avbox_player_wait4buffers(inst, &inst->video_quit);
-					avbox_player_resetsystemtime(inst, frame_time);
-				}
-				continue;
-			}
-			pthread_mutex_unlock(&inst->video_output_lock);
 		}
 
 		/* dereference the frame pointer for later use */
-		buf = inst->frame_data[inst->video_playback_index];
+		buf = frame->data;
 
-		/* copy to the last frame buffer in case we need to
-		 * repaint the screen. This is fast so it makes sense
-		 * to do it for every frame even if it will get skipped
-		 * because that way if the video is paused the latest
-		 * frame can be drawn even if we're skipping frames */
+		/* for now just copy the last frame */
 		memcpy(inst->video_last_frame, buf, inst->bufsz);
 
 		/* perform post processing (overlays, etc) */
 		avbox_player_postproc(inst, buf);
 
 		/* get the frame pts */
-		frame_pts = inst->frame_pts[inst->video_playback_index];
+		frame_pts = frame->pts;
 
 		if  (LIKELY(frame_pts != AV_NOPTS_VALUE)) {
 			int64_t elapsed;
 
-			frame_time = av_rescale_q(frame_pts,
-				inst->frame_time_base[inst->video_playback_index], AV_TIME_BASE_Q);
+			frame_time = av_rescale_q(frame_pts, frame->time_base, AV_TIME_BASE_Q);
 			inst->video_renderer_pts = frame_time;
-
-			if (UNLIKELY(inst->video_quit)) {
-				continue;
-			}
 
 			elapsed = inst->getmastertime(inst);
 			if (UNLIKELY(elapsed > frame_time)) {
@@ -560,7 +556,8 @@ avbox_player_video(void *arg)
 					 * the video fell behing and the audio stream dryed out, but why
 					 * is the audio clock behind the last video frame??
 					 */
-					if (avbox_audiostream_ispaused(inst->audio_stream) && inst->audio_packets == 0 &&
+					if (avbox_audiostream_ispaused(inst->audio_stream) &&
+						avbox_queue_count(inst->audio_packets_q) == 0 &&
 						avbox_audiostream_getframecount(inst->audio_stream) == 0) {
 						avbox_player_dumpvideo(inst, elapsed, 1);
 						LOG_PRINT_ERROR("Deadlock detected, recovered (I hope)");
@@ -605,23 +602,19 @@ avbox_player_video(void *arg)
 
 frame_complete:
 		/* update buffer state and signal decoder */
-		pthread_mutex_lock(&inst->video_output_lock);
-		inst->frame_state[inst->video_playback_index] = 0;
-		ATOMIC_DEC(&inst->video_frames);
-		pthread_cond_signal(&inst->video_output_signal);
-		pthread_cond_broadcast(&inst->video_decoder_signal);
-		pthread_mutex_unlock(&inst->video_output_lock);
-
-		inst->video_playback_index++;
-		inst->video_playback_index %= MB_VIDEO_BUFFER_FRAMES;
+		if (avbox_queue_get(inst->video_frames_q) != frame) {
+			LOG_PRINT_ERROR("We peeked one frame but got another one!");
+			abort();
+		}
+		free(frame);
 	}
 
 video_exit:
 	DEBUG_PRINT("player", "Video renderer exiting");
 
 	/* clear screen */
-	memset(inst->frame_data[0], 0, inst->bufsz);
-	mbv_window_blitbuf(inst->window, inst->frame_data[0], inst->width, inst->height, 0, 0);
+	memset(inst->video_buffers[0], 0, inst->bufsz);
+	mbv_window_blitbuf(inst->window, inst->video_buffers[0], inst->width, inst->height, 0, 0);
 	mbv_window_update(inst->window);
 
 	inst->video_playback_running = 0;
@@ -631,7 +624,6 @@ video_exit:
 	return NULL;
 	
 }
-#endif
 
 
 /**
@@ -960,8 +952,9 @@ avbox_player_video_decode(void *arg)
 {
 	int i, video_time_set = 0;
 	struct avbox_player *inst = (struct avbox_player*) arg;
+	struct avbox_video_frame *frame;
 	char video_filters[512];
-	AVPacket packet;
+	AVPacket *packet;
 	AVFrame *video_frame_nat = NULL, *video_frame_flt = NULL;
 	AVFilterGraph *video_filter_graph = NULL;
 	AVFilterContext *video_buffersink_ctx = NULL;
@@ -975,14 +968,12 @@ avbox_player_video_decode(void *arg)
 	assert(inst->video_stream_index == -1);
 	assert(inst->video_decoder_pts == 0);
 	assert(inst->video_codec_ctx == NULL);
+	assert(inst->video_frames_q == NULL);
 
 	/* initialize all frame data buffers to NULL */
 	inst->video_last_frame = NULL;
-#ifdef ENABLE_DOUBLE_BUFFERING
-	inst->video_buffer = NULL;
-#endif
-	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
-		inst->frame_data[i] = NULL;
+	for (i = 0; i < (MB_VIDEO_BUFFER_FRAMES + 1); i++) {
+		inst->video_buffers[i] = NULL;
 	}
 
 	/* open the video codec */
@@ -1009,22 +1000,16 @@ avbox_player_video_decode(void *arg)
 	/* calculate the size of each frame and allocate buffer for it */
 	inst->bufsz = av_image_get_buffer_size(MB_DECODER_PIX_FMT, inst->width, inst->height,
 		av_image_get_linesize(MB_DECODER_PIX_FMT, inst->width, 0));
-#ifdef ENABLE_DOUBLE_BUFFERING
-	inst->video_buffer = av_malloc(inst->bufsz * sizeof(int8_t));
-	if (inst->video_buffer == NULL) {
-		goto decoder_exit;
-	}
-#endif
 	inst->video_last_frame = av_malloc(inst->bufsz * sizeof(int8_t));
 	if (inst->video_last_frame == NULL) {
 		goto decoder_exit;
 	}
-	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
-		inst->frame_data[i] = av_malloc(inst->bufsz * sizeof(int8_t));
-		if (inst->frame_data[i] == NULL) {
+	for (i = 0; i < (MB_VIDEO_BUFFER_FRAMES + 1); i++) {
+		inst->video_buffers[i] = av_malloc(inst->bufsz * sizeof(int8_t));
+		if (inst->video_buffers[i] == NULL) {
+			LOG_PRINT_ERROR("Could not allocate video buffers!");
 			goto decoder_exit;
 		}
-		inst->frame_state[i] = 0;
 	}
 
 	DEBUG_VPRINT("player", "video_codec_ctx: width=%i height=%i pix_fmt=%i",
@@ -1038,29 +1023,34 @@ avbox_player_video_decode(void *arg)
 		goto decoder_exit;
 	}
 
+	/* create a decoded frames queue */
+	if ((inst->video_frames_q = avbox_queue_new(MB_VIDEO_BUFFER_FRAMES)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create frames queue: %s!",
+			strerror(errno));
+		goto decoder_exit;
+	}
+
 	DEBUG_PRINT("player", "Video decoder ready");
 
 	/* signal control trhead that we're ready */
-	pthread_mutex_lock(&inst->video_decoder_lock);
-	pthread_cond_signal(&inst->video_decoder_signal);
-	pthread_mutex_unlock(&inst->video_decoder_lock);
+	pthread_mutex_lock(&thread_start_mutex);
+	pthread_cond_signal(&thread_start_cond);
+	pthread_mutex_unlock(&thread_start_mutex);
 
 
-	while (LIKELY(!inst->video_decoder_quit)) {
+	while (1) {
 
 		/* if we got a flush command forward it to the output
 		 * thread and wait for it to be done */
 		if (UNLIKELY(inst->video_flush_decoder)) {
 			DEBUG_PRINT("player", "Flushing video decoder");
-			assert(inst->video_packets == 0);
+			assert(avbox_queue_count(inst->video_packets_q) == 0);
 			inst->video_flush_output = 1;
 
 			avcodec_flush_buffers(inst->video_codec_ctx);
 
 			while (inst->video_flush_output) {
-				pthread_mutex_lock(&inst->video_output_lock);
-				pthread_cond_signal(&inst->video_output_signal);
-				pthread_mutex_unlock(&inst->video_output_lock);
+				avbox_queue_wake(inst->video_frames_q);
 				usleep(100L * 1000L);
 			}
 			video_time_set = 0;
@@ -1070,38 +1060,28 @@ avbox_player_video_decode(void *arg)
 			inst->video_flush_decoder = 0;
 		}
 
-		pthread_mutex_lock(&inst->video_decoder_lock);
-
-		/* if there's no frame to decode wait */
-		if (UNLIKELY(inst->video_packet_state[inst->video_packet_read_index] != 1)) {
-			if (UNLIKELY(inst->video_decoder_quit)) {
-				pthread_mutex_unlock(&inst->video_decoder_lock);
-				goto decoder_exit;
+		/* get next packet from queue */
+		if ((packet = avbox_queue_get(inst->video_packets_q)) == NULL) {
+			if (errno == EAGAIN) {
+				continue;
+			} else if (errno == ESHUTDOWN) {
+				break;
 			}
-			pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
-			pthread_mutex_unlock(&inst->video_decoder_lock);
-			continue;
+			LOG_VPRINT_ERROR("ERROR!: avbox_queue_get() returned error: %s",
+				strerror(errno));
+			break;
 		}
 
-		/* copy the packet */
-		packet = inst->video_packet[inst->video_packet_read_index];
-		inst->video_packet_state[inst->video_packet_read_index] = 0;
-		inst->video_packet_read_index =
-			(inst->video_packet_read_index + 1) % MB_VIDEO_BUFFER_PACKETS;
-		pthread_cond_signal(&inst->video_decoder_signal);
-		ATOMIC_DEC(&inst->video_packets); /* this only needs to be in the
-						   * critical section because of an assertion
-						   * on avbox_player_stream_decode() */
-		pthread_mutex_unlock(&inst->video_decoder_lock);
-
-		/* decode packet */
-		if (UNLIKELY((i = avcodec_send_packet(inst->video_codec_ctx, &packet)) < 0)) {
+		/* send packet to codec for decoding */
+		if (UNLIKELY((i = avcodec_send_packet(inst->video_codec_ctx, packet)) < 0)) {
 			LOG_VPRINT_ERROR("Error decoding video packet (ret=%i)", i);
 		}
+
+		/* read decoded frames from codec */
 		while (LIKELY((i = avcodec_receive_frame(inst->video_codec_ctx, video_frame_nat))) == 0) {
 			int64_t frame_pts;
 
-			if (packet.dts != AV_NOPTS_VALUE) {
+			if (packet->dts != AV_NOPTS_VALUE) {
 				frame_pts = video_frame_nat->pts =
 					av_frame_get_best_effort_timestamp(video_frame_nat);
 			} else {
@@ -1116,7 +1096,7 @@ avbox_player_video_decode(void *arg)
 			}
 
 			/* pull filtered frames from the filtergraph */
-			while (!inst->video_decoder_quit) {
+			while (1) {
 				i = av_buffersink_get_frame(video_buffersink_ctx, video_frame_flt);
 				if (UNLIKELY(i == AVERROR(EAGAIN) || i == AVERROR_EOF)) {
 					break;
@@ -1127,25 +1107,13 @@ avbox_player_video_decode(void *arg)
 					goto decoder_exit;
 				}
 
-				/* if the renderer has not finished we must wait */
-				while (UNLIKELY(inst->frame_state[inst->video_decode_index] != 0)) {
-					pthread_mutex_lock(&inst->video_output_lock);
-					if (UNLIKELY(inst->video_decoder_quit)) {
-						pthread_mutex_unlock(&inst->video_output_lock);
-						goto decoder_exit;
-					}
-					if (LIKELY(inst->frame_state[inst->video_decode_index] != 0)) {
-						pthread_cond_wait(&inst->video_output_signal,
-							&inst->video_output_lock);
-					}
-					pthread_mutex_unlock(&inst->video_output_lock);
-					if (UNLIKELY(inst->video_decoder_quit)) {
-						goto decoder_exit;
-					}
-					if (UNLIKELY(inst->video_flush_decoder)) {
-						goto frame_done;
-					}
+
+				if ((frame = malloc(sizeof(struct avbox_video_frame))) == NULL) {
+					LOG_PRINT_ERROR("Could not allocate video frame!");
+					goto decoder_exit;
 				}
+				frame->data = avbox_player_getnextvideobuffer(inst);
+				assert(frame->data != NULL);
 
 				if (video_frame_flt->repeat_pict) {
 					DEBUG_VPRINT("player", "repeat_pict = %i",
@@ -1153,25 +1121,30 @@ avbox_player_video_decode(void *arg)
 				}
 
 				/* copy picture to buffer */
-				av_image_copy_to_buffer(inst->frame_data[inst->video_decode_index],
+				av_image_copy_to_buffer(frame->data,
 					inst->bufsz, (const uint8_t **) video_frame_flt->data, video_frame_flt->linesize,
 					MB_DECODER_PIX_FMT, inst->width, inst->height,
 					av_image_get_linesize(MB_DECODER_PIX_FMT, inst->width, 0));
 
-				inst->frame_pts[inst->video_decode_index] = frame_pts;
-				inst->frame_time_base[inst->video_decode_index] = 
-					video_buffersink_ctx->inputs[0]->time_base;
+				frame->pts = frame_pts;
+				frame->time_base = video_buffersink_ctx->inputs[0]->time_base;
 
-				/* update the buffer index and signal renderer thread */
-				pthread_mutex_lock(&inst->video_output_lock);
+				/* add frame to decoded frames queue */
+				while (avbox_queue_put(inst->video_frames_q, frame) == -1) {
+					if (errno == EAGAIN) {
+						continue;
+					} else if (errno == ESHUTDOWN) {
+						LOG_PRINT_ERROR("Queue closed unexpectedly!");
+					} else {
+						LOG_VPRINT_ERROR("Error: avbox_queue_put() failed: %s",
+							strerror(errno));
+					}
+					goto decoder_exit;
+				}
+
+				/* update the video decoder pts */
 				inst->video_decoder_pts = frame_pts;
 				inst->video_decoder_timebase = video_buffersink_ctx->inputs[0]->time_base;
-				inst->frame_state[inst->video_decode_index] = 1;
-				inst->video_decode_index =
-					(inst->video_decode_index + 1) % MB_VIDEO_BUFFER_FRAMES;
-				ATOMIC_INC(&inst->video_frames);
-				pthread_cond_signal(&inst->video_output_signal);
-				pthread_mutex_unlock(&inst->video_output_lock);
 
 				/* if this is the first frame then set the audio stream
 				 * clock to it's pts. This is needed because not all streams
@@ -1186,7 +1159,6 @@ avbox_player_video_decode(void *arg)
 						pts, frame_pts);
 					video_time_set = 1;
 				}
-frame_done:
 
 				av_frame_unref(video_frame_flt);
 			}
@@ -1196,24 +1168,36 @@ frame_done:
 			if (i == AVERROR(EAGAIN)) {
 				continue;
 			} else {
-				LOG_VPRINT_ERROR("ERROR: avcodec_receive_frame() returned %d",
+				LOG_VPRINT_ERROR("ERROR: avcodec_receive_frame() returned %d (video)",
 					i);
 			}
 		}
 
 		/* free packet */
-		av_packet_unref(&packet);
+		av_packet_unref(packet);
+		free(packet);
 	}
 decoder_exit:
 	DEBUG_PRINT("player", "Video decoder exiting");
 
 	/* signal the video thread to exit and join it */
-	if (inst->video_playback_running) {
-		inst->video_quit = 1;
-		pthread_cond_signal(&inst->video_output_signal);
-		pthread_cond_signal(&inst->video_output_signal);
-		pthread_join(inst->video_output_thread, NULL);
-		DEBUG_PRINT("player", "Video playback thread exited");
+	if (inst->video_frames_q != NULL) {
+		avbox_queue_close(inst->video_frames_q);
+		if (inst->video_playback_running) {
+			pthread_join(inst->video_output_thread, NULL);
+			DEBUG_PRINT("player", "Video playback thread exited");
+		}
+
+		while (avbox_queue_count(inst->video_frames_q) > 0) {
+			if ((frame = avbox_queue_get(inst->video_frames_q)) == NULL) {
+				LOG_VPRINT_ERROR("avbox_queue_get() returned error: %s",
+					strerror(errno));
+			}
+			free(frame);
+		}
+
+		avbox_queue_destroy(inst->video_frames_q);
+		inst->video_frames_q = NULL;
 	}
 
 	if (inst->video_last_frame != NULL) {
@@ -1225,17 +1209,12 @@ decoder_exit:
 		pthread_mutex_unlock(&inst->update_lock);
 	}
 
-#ifdef ENABLE_DOUBLE_BUFFERING
-	if (inst->video_buffer != NULL) {
-		free(inst->video_buffer);
-		inst->video_buffer = NULL;
-	}
-#endif
-
-	for (i = 0; i < MB_VIDEO_BUFFER_FRAMES; i++) {
-		if (inst->frame_data[i] != NULL) {
-			free(inst->frame_data[i]);
-			inst->frame_data[i] = NULL;
+	/* clear the video frames queue */
+	/* clear the video buffers */
+	for (i = 0; i < (MB_VIDEO_BUFFER_FRAMES + 1); i++) {
+		if (inst->video_buffers[i] != NULL) {
+			free(inst->video_buffers[i]);
+			inst->video_buffers[i] = NULL;
 		}
 	}
 	if (video_frame_nat != NULL) {
@@ -1280,16 +1259,16 @@ avbox_player_audio_decode(void * arg)
 	AVFilterGraph *audio_filter_graph = NULL;
 	AVFilterContext *audio_buffersink_ctx = NULL;
 	AVFilterContext *audio_buffersrc_ctx = NULL;
-	AVPacket packet;
+	AVPacket *packet;
 
 	MB_DEBUG_SET_THREAD_NAME("audio_decoder");
 
 	assert(inst != NULL);
-	assert(inst->audio_decoder_quit == 0);
 	assert(inst->fmt_ctx != NULL);
 	assert(inst->audio_codec_ctx == NULL);
 	assert(inst->audio_stream_index == -1);
 	assert(inst->audio_time_set == 0);
+	assert(inst->audio_packets_q != NULL);
 
 	DEBUG_PRINT("player", "Audio decoder starting");
 
@@ -1319,41 +1298,31 @@ avbox_player_audio_decode(void * arg)
 	DEBUG_PRINT("player", "Audio decoder ready");
 
 	/* signl control thread that we're ready */
-	pthread_mutex_lock(&inst->audio_decoder_lock);
-	pthread_cond_signal(&inst->audio_decoder_signal);
-	pthread_mutex_unlock(&inst->audio_decoder_lock);
+	pthread_mutex_lock(&thread_start_mutex);
+	pthread_cond_signal(&thread_start_cond);
+	pthread_mutex_unlock(&thread_start_mutex);
 
 
-	while (LIKELY(!inst->audio_decoder_quit)) {
+	while (1) {
 		/* wait for the stream decoder to give us some packets */
-		pthread_mutex_lock(&inst->audio_decoder_lock);
-		if (UNLIKELY(inst->audio_packet_state[inst->audio_packet_read_index] != 1)) {
-			if (UNLIKELY(inst->audio_decoder_quit)) {
-				pthread_mutex_unlock(&inst->audio_decoder_lock);
+		if ((packet = avbox_queue_get(inst->audio_packets_q)) == NULL) {
+			if (errno == EAGAIN) {
 				continue;
+			} else if (errno == ESHUTDOWN) {
+				break;
 			}
-			if  (LIKELY(inst->audio_packet_state[inst->audio_packet_read_index] != 1)) {
-				pthread_cond_wait(&inst->audio_decoder_signal, &inst->audio_decoder_lock);
-				pthread_mutex_unlock(&inst->audio_decoder_lock);
-				continue;
-			}
+			LOG_VPRINT_ERROR("ERROR!: avbox_queue_get() returned error: %s",
+				strerror(errno));
+			goto decoder_exit;
 		}
 
-		/* grab the packet and signal the stream decoder thread */
-		packet = inst->audio_packet[inst->audio_packet_read_index];
-		inst->audio_packet_state[inst->audio_packet_read_index] = 0;
-		pthread_cond_signal(&inst->audio_decoder_signal);
-		inst->audio_packet_read_index =
-			(inst->audio_packet_read_index + 1) % MB_AUDIO_BUFFER_PACKETS;
-		ATOMIC_DEC(&inst->audio_packets);
-		pthread_mutex_unlock(&inst->audio_decoder_lock);
-
-		/* decode audio frame */
-		if (UNLIKELY(ret = avcodec_send_packet(inst->audio_codec_ctx, &packet) != 0)) {
+		/* send packets to codec for decoding */
+		if (UNLIKELY(ret = avcodec_send_packet(inst->audio_codec_ctx, packet) != 0)) {
 			LOG_VPRINT_ERROR("Error decoding audio (ret=%i)", ret);
 			continue;
 		}
 
+		/* read decoded frames from codec */
 		while ((ret = avcodec_receive_frame(inst->audio_codec_ctx, audio_frame_nat)) == 0) {
 			audio_frame_nat->pts =
 				av_frame_get_best_effort_timestamp(audio_frame_nat);
@@ -1366,7 +1335,7 @@ avbox_player_audio_decode(void * arg)
 			}
 
 			/* pull filtered audio from the filtergraph */
-			while (LIKELY(!inst->audio_decoder_quit)) {
+			while (1) {
 
 				ret = av_buffersink_get_frame(audio_buffersink_ctx, audio_frame);
 				if (UNLIKELY(ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)) {
@@ -1399,11 +1368,12 @@ avbox_player_audio_decode(void * arg)
 			}
 		}
 		if (ret != 0 && ret != AVERROR(EAGAIN)) {
-			LOG_VPRINT_ERROR("ERROR!: avcodec_receive_frame() returned %d",
+			LOG_VPRINT_ERROR("ERROR!: avcodec_receive_frame() returned %d (audio)",
 				AVERROR(EAGAIN));
 		}
 		/* free packet */
-		av_packet_unref(&packet);
+		av_packet_unref(packet);
+		free(packet);
 	}
 
 decoder_exit:
@@ -1443,7 +1413,7 @@ static void*
 avbox_player_stream_parse(void *arg)
 {
 	int i;
-	AVPacket packet;
+	AVPacket packet, *ppacket;
 	AVDictionary *stream_opts = NULL;
 	struct avbox_player *inst = (struct avbox_player*) arg;
 
@@ -1461,15 +1431,14 @@ avbox_player_stream_parse(void *arg)
 	assert(inst->audio_time_set == 0);
 	assert(inst->video_flush_decoder == 0);
 	assert(inst->video_flush_output == 0);
+	assert(inst->video_packets_q == NULL);
+	assert(inst->audio_packets_q == NULL);
 
 	inst->have_audio = 0;
 	inst->have_video = 0;
 	inst->video_paused = 0;
 	inst->audio_stream_index = -1;
 	inst->video_stream_index = -1;
-	inst->audio_packets = 0;
-	inst->video_frames = 0;
-	inst->video_packets = 0;
 	inst->lasttime = 0;
 	inst->seek_to = -1;
 
@@ -1494,29 +1463,28 @@ avbox_player_stream_parse(void *arg)
 
 	/* if the file contains a video stream fire the video decoder */
 	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0) >= 0) {
-
-		inst->video_quit = 0;
-		inst->video_decoder_quit = 0;
-		inst->video_playback_index = 0;
-		inst->video_decode_index = 0;
-		inst->video_packet_read_index = 0;
-		inst->video_packet_write_index = 0;
 		inst->video_skipframes = 0;
 		inst->video_decoder_pts = 0;
 		inst->getmastertime = avbox_player_getsystemtime;
 		inst->have_video = 1;
 
-		/* initialize all packet states */
-		for (i = 0; i < MB_VIDEO_BUFFER_PACKETS; i++) {
-			inst->video_packet_state[i] = 0;
+		/* create a video packets queue */
+		if ((inst->video_packets_q = avbox_queue_new(MB_VIDEO_BUFFER_PACKETS)) == NULL) {
+			LOG_VPRINT_ERROR("Could not create video packets queue: %s!",
+				strerror(errno));
+			goto decoder_exit;
 		}
+
 		/* fire the video decoder thread */
-		pthread_mutex_lock(&inst->video_decoder_lock);
+		pthread_mutex_lock(&thread_start_lock);
+		pthread_mutex_lock(&thread_start_mutex);
 		if (pthread_create(&inst->video_decoder_thread, NULL, avbox_player_video_decode, inst) != 0) {
+			LOG_PRINT_ERROR("Could not create video decoder thread!");
 			abort();
 		}
-		pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
-		pthread_mutex_unlock(&inst->video_decoder_lock);
+		pthread_cond_wait(&thread_start_cond, &thread_start_mutex);
+		pthread_mutex_unlock(&thread_start_mutex);
+		pthread_mutex_unlock(&thread_start_lock);
 
 		DEBUG_VPRINT("player", "Video stream %i selected",
 			inst->video_stream_index);
@@ -1528,10 +1496,7 @@ avbox_player_stream_parse(void *arg)
 		DEBUG_PRINT("player", "Audio stream found");
 
 		/* allocate filtered audio frames */
-		inst->audio_decoder_quit = 0;
 		inst->audio_stream_index = -1;
-		inst->audio_packet_write_index = 0;
-		inst->audio_packet_read_index = 0;
 		inst->getmastertime = avbox_player_getaudiotime; /* video is slave to audio */
 		inst->have_audio = 1;
 
@@ -1540,13 +1505,21 @@ avbox_player_stream_parse(void *arg)
 			goto decoder_exit;
 		}
 
+		if ((inst->audio_packets_q = avbox_queue_new(MB_AUDIO_BUFFER_PACKETS)) == NULL) {
+			LOG_VPRINT_ERROR("Could not create audio packets queue: %s!",
+				strerror(errno));
+			goto decoder_exit;
+		}
+
 		/* start the audio decoder thread and wait until it's ready to decode */
-		pthread_mutex_lock(&inst->audio_decoder_lock);
+		pthread_mutex_lock(&thread_start_lock);
+		pthread_mutex_lock(&thread_start_mutex);
 		if (pthread_create(&inst->audio_decoder_thread, NULL, avbox_player_audio_decode, inst) != 0) {
 			abort();
 		}
-		pthread_cond_wait(&inst->audio_decoder_signal, &inst->audio_decoder_lock);
-		pthread_mutex_unlock(&inst->audio_decoder_lock);
+		pthread_cond_wait(&thread_start_cond, &thread_start_mutex);
+		pthread_mutex_unlock(&thread_start_mutex);
+		pthread_mutex_unlock(&thread_start_lock);
 	}
 
 	DEBUG_PRINT("player", "Stream decoder ready");
@@ -1561,69 +1534,52 @@ avbox_player_stream_parse(void *arg)
 		goto decoder_exit;
 	}
 
+	/* make sure that all queues are empty */
+	assert(avbox_queue_count(inst->audio_packets_q) == 0);
+	assert(avbox_queue_count(inst->video_packets_q) == 0);
+	assert(avbox_queue_count(inst->video_frames_q) == 0);
+
 	/* start decoding */
 	while (LIKELY(!inst->stream_quit && av_read_frame(inst->fmt_ctx, &packet) >= 0)) {
 		if (packet.stream_index == inst->video_stream_index) {
-
-			pthread_mutex_lock(&inst->video_decoder_lock);
-
-			/* if the buffer is full wait for the output thread to make room */
-			do {
-				/* don't go to sleep after receiving the quit command */
-				if (UNLIKELY(inst->stream_quit)) {
-					pthread_mutex_unlock(&inst->video_decoder_lock);
-					av_packet_unref(&packet);
+			if ((ppacket = malloc(sizeof(AVPacket))) == NULL) {
+				LOG_PRINT_ERROR("Could not allocate memory for packet!");
+				goto decoder_exit;
+			}
+			memcpy(ppacket, &packet, sizeof(AVPacket));
+			while (1) {
+				if (avbox_queue_put(inst->video_packets_q, ppacket) == -1) {
+					if (errno == EAGAIN) {
+						continue;
+					} else if (errno == ESHUTDOWN) {
+						break;
+					}
+					LOG_VPRINT_ERROR("Could not add packet to queue: %s",
+						strerror(errno));
 					goto decoder_exit;
 				}
-				if (LIKELY(inst->video_packet_state[inst->video_packet_write_index] == 1)) {
-					pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
-				}
-			} while (UNLIKELY(inst->video_packet_state[inst->video_packet_write_index] == 1));
-			
-			/* save the packet and signal decoder thread */
-			inst->video_packet[inst->video_packet_write_index] = packet;
-			inst->video_packet_state[inst->video_packet_write_index] = 1;
-
-			/* we must signal both conditions because the video decoder
-			 * may wait on both the packets queue and the frames queue. But
-			 * two threads should never be waiting on the same condition */
-			pthread_cond_signal(&inst->video_decoder_signal);
-			pthread_mutex_unlock(&inst->video_decoder_lock);
-			pthread_mutex_lock(&inst->video_output_lock);
-			pthread_cond_signal(&inst->video_output_signal);
-			pthread_mutex_unlock(&inst->video_output_lock);
-
-			/* increment the buffer pointer */
-			inst->video_packet_write_index =
-				(inst->video_packet_write_index + 1) % MB_VIDEO_BUFFER_PACKETS;
-			ATOMIC_INC(&inst->video_packets);
+				break;
+			}
 
 		} else if (packet.stream_index == inst->audio_stream_index) {
-			
-			pthread_mutex_lock(&inst->audio_decoder_lock);
-			
-			/* if the buffer is full we must wait */
-			do {
-				/* don't sleep after receiving quit command */
-				if (UNLIKELY(inst->stream_quit)) {
-					pthread_mutex_unlock(&inst->audio_decoder_lock);
-					av_packet_unref(&packet);
+			if ((ppacket = malloc(sizeof(AVPacket))) == NULL) {
+				LOG_PRINT_ERROR("Could not allocate memory for packet!");
+				goto decoder_exit;
+			}
+			memcpy(ppacket, &packet, sizeof(AVPacket));
+			while (1) {
+				if (avbox_queue_put(inst->audio_packets_q, ppacket) == -1) {
+					if (errno == EAGAIN) {
+						continue;
+					} else if (errno == ESHUTDOWN) {
+						break;
+					}
+					LOG_VPRINT_ERROR("Could not enqueue packet: %s",
+						strerror(errno));
 					goto decoder_exit;
 				}
-				if (LIKELY(inst->audio_packet_state[inst->audio_packet_write_index] == 1)) {
-					pthread_cond_wait(&inst->audio_decoder_signal, &inst->audio_decoder_lock);
-				}
-			} while (LIKELY(inst->audio_packet_state[inst->audio_packet_write_index] == 1));
-
-			/* save the packet and signal decoder */
-			inst->audio_packet[inst->audio_packet_write_index] = packet;
-			inst->audio_packet_state[inst->audio_packet_write_index] = 1;
-			pthread_cond_signal(&inst->audio_decoder_signal);
-			pthread_mutex_unlock(&inst->audio_decoder_lock);
-
-			inst->audio_packet_write_index =
-				(inst->audio_packet_write_index + 1) % MB_AUDIO_BUFFER_PACKETS;
-			ATOMIC_INC(&inst->audio_packets);
+				break;
+			}
 		} else {
 			av_packet_unref(&packet);
 		}
@@ -1651,37 +1607,29 @@ avbox_player_stream_parse(void *arg)
 				inst->seek_result = -1;
 			} else {
 				/* drop all video packets */
-				pthread_mutex_lock(&inst->video_decoder_lock);
-				while (inst->video_packet_state[inst->video_packet_read_index] == 1) {
-					inst->video_packet_state[inst->video_packet_read_index] = 0;
-					av_packet_unref(&inst->video_packet[inst->video_packet_read_index]);
-					inst->video_packet_read_index =
-						(inst->video_packet_read_index + 1) % MB_VIDEO_BUFFER_PACKETS;
-					ATOMIC_DEC(&inst->video_packets);
+				avbox_queue_lock(inst->video_packets_q);
+				while (avbox_queue_count(inst->video_packets_q) > 0) {
+					ppacket = avbox_queue_get(inst->video_packets_q);
+					av_packet_unref(ppacket);
+					free(ppacket);
 				}
-				pthread_mutex_unlock(&inst->video_decoder_lock);
+				avbox_queue_unlock(inst->video_packets_q);
 
 				/* drop all audio packets */
-				pthread_mutex_lock(&inst->audio_decoder_lock);
-				while (inst->audio_packet_state[inst->audio_packet_read_index] == 1) {
-					inst->audio_packet_state[inst->audio_packet_read_index] = 0;
-					av_packet_unref(&inst->audio_packet[inst->audio_packet_read_index]);
-					inst->audio_packet_read_index =
-						(inst->audio_packet_read_index + 1) % MB_AUDIO_BUFFER_PACKETS;
-					ATOMIC_DEC(&inst->audio_packets);
+				avbox_queue_lock(inst->audio_packets_q);
+				while (avbox_queue_count(inst->audio_packets_q) > 0) {
+					ppacket = avbox_queue_get(inst->audio_packets_q);
+					av_packet_unref(ppacket);
+					free(ppacket);
 				}
-				pthread_mutex_unlock(&inst->audio_decoder_lock);
+				avbox_queue_unlock(inst->audio_packets_q);
 
 				/* drop all decoded video frames */
 				if (inst->have_video) {
 					inst->video_flush_decoder = 1;
 					while (inst->video_flush_decoder) {
-						pthread_mutex_lock(&inst->video_decoder_lock);
-						pthread_cond_signal(&inst->video_decoder_signal);
-						pthread_mutex_unlock(&inst->video_decoder_lock);
-						pthread_mutex_lock(&inst->video_output_lock);
-						pthread_cond_signal(&inst->video_output_signal);
-						pthread_mutex_unlock(&inst->video_output_lock);
+						/* TODO: This is probably not necessary */
+						avbox_queue_wake(inst->video_frames_q);
 						usleep(100L * 1000L);
 					}
 
@@ -1702,13 +1650,13 @@ avbox_player_stream_parse(void *arg)
 				}
 
 				DEBUG_VPRINT("player", "Frames dropped. (time=%li,v_packets=%i,a_packets=%i,v_frames=%i)",
-					inst->getmastertime(inst), inst->video_packets,
-					inst->audio_packets, inst->video_frames);
+					inst->getmastertime(inst), avbox_queue_count(inst->video_packets_q),
+					avbox_queue_count(inst->audio_packets_q), avbox_queue_count(inst->video_frames_q));
 
 				/* make sure everything is ok */
-				assert(inst->video_packets == 0);
-				assert(inst->audio_packets == 0);
-				assert(inst->video_frames == 0);
+				assert(avbox_queue_count(inst->video_packets_q) == 0);
+				assert(avbox_queue_count(inst->audio_packets_q) == 0);
+				assert(avbox_queue_count(inst->video_frames_q) == 0);
 				assert(avbox_audiostream_getframecount(inst->audio_stream) == 0);
 				assert(inst->getmastertime(inst) == inst->seek_to);
 
@@ -1733,18 +1681,20 @@ decoder_exit:
 	if (inst->have_video) {
 		/* signal the video decoder thread to exit and join it */
 		/* NOTE: Since this thread it's a midleman it waits on both locks */
-		inst->video_decoder_quit = 1;
-		pthread_cond_broadcast(&inst->video_decoder_signal);
-		pthread_cond_broadcast(&inst->video_decoder_signal);
-		pthread_cond_broadcast(&inst->video_output_signal);
-		pthread_cond_broadcast(&inst->video_output_signal);
-		pthread_join(inst->video_decoder_thread, NULL);
+		if (inst->video_packets_q != NULL) {
+			avbox_queue_close(inst->video_packets_q);
+			pthread_join(inst->video_decoder_thread, NULL);
 
-		/* free video packets */
-		for (i = 0; i < MB_VIDEO_BUFFER_PACKETS; i++) {
-			if (inst->video_packet_state[i] == 1) {
-				av_packet_unref(&inst->video_packet[i]);
+			/* free video packets */
+			while (avbox_queue_count(inst->video_packets_q) > 0) {
+				ppacket = avbox_queue_get(inst->video_packets_q);
+				assert(ppacket != NULL);
+				av_packet_unref(ppacket);
+				free(ppacket);
 			}
+
+			avbox_queue_destroy(inst->video_packets_q);
+			inst->video_packets_q = NULL;
 		}
 
 		DEBUG_PRINT("player", "Video decoder thread exited");
@@ -1755,25 +1705,33 @@ decoder_exit:
 		/* clear the have_audio flag and set the timer to system */
 		inst->have_audio = 0;
 		inst->audio_stream_index = -1;
-		inst->audio_decoder_quit = 1;
 		inst->getmastertime = avbox_player_getsystemtime;
-		pthread_cond_broadcast(&inst->audio_decoder_signal);
-		pthread_cond_broadcast(&inst->audio_decoder_signal);
-		pthread_join(inst->audio_decoder_thread, NULL);
+
+		if (inst->audio_packets_q != NULL) {
+			avbox_queue_close(inst->audio_packets_q);
+			pthread_join(inst->audio_decoder_thread, NULL);
+
+			/* free any remaining audio packets */
+			while (avbox_queue_count(inst->audio_packets_q) > 0) {
+				ppacket = avbox_queue_get(inst->audio_packets_q);
+				assert(ppacket != NULL);
+				av_packet_unref(ppacket);
+				free(ppacket);
+			}
+
+			avbox_queue_destroy(inst->audio_packets_q);
+			inst->audio_packets_q = NULL;
+		}
 
 		DEBUG_PRINT("player", "Audio decoder exiting");
 
 		/* destroy the audio stream */
-		avbox_audiostream_destroy(inst->audio_stream);
-		inst->audio_stream = NULL;
+		if (inst->audio_stream != NULL) {
+			avbox_audiostream_destroy(inst->audio_stream);
+			inst->audio_stream = NULL;
+		}
 		inst->audio_time_set = 0;
 
-		/* signal the audio decoder thread to exit and join it */
-		for (i = 0; i < MB_AUDIO_BUFFER_PACKETS; i++) {
-			if (inst->audio_packet_state[i] == 1) {
-				av_packet_unref(&inst->audio_packet[i]);
-			}
-		}
 	}
 
 	/* clean other stuff */
@@ -2138,10 +2096,10 @@ avbox_player_play(struct avbox_player *inst, const char * const path)
 	}
 
 	/* wait for the buffers to fill up */
-	while (	inst->video_frames < MB_VIDEO_BUFFER_FRAMES) {
+	while (avbox_queue_count(inst->video_frames_q) < MB_VIDEO_BUFFER_FRAMES) {
 
 		/* update progressbar */
-		int avail = inst->video_frames;
+		int avail = avbox_queue_count(inst->video_frames_q);
 		const int wanted = MB_VIDEO_BUFFER_FRAMES;
 		inst->stream_percent = (((avail * 100) / wanted) * 100) / 100;
 
@@ -2168,15 +2126,18 @@ avbox_player_play(struct avbox_player *inst, const char * const path)
 	DEBUG_PRINT("player", "Firing rendering threads");
 
 	/* fire the video threads */
-	pthread_mutex_lock(&inst->video_output_lock);
+	pthread_mutex_lock(&thread_start_lock);
+	pthread_mutex_lock(&thread_start_mutex);
 	if (pthread_create(&inst->video_output_thread, NULL, avbox_player_video, inst) != 0) {
 		LOG_PRINT_ERROR("Could not start renderer thread!");
-		pthread_mutex_unlock(&inst->video_output_lock);
+		pthread_mutex_unlock(&thread_start_mutex);
+		pthread_mutex_unlock(&thread_start_lock);
 		avbox_player_stop(inst);
 		return -1;
 	}
-	pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
-	pthread_mutex_unlock(&inst->video_output_lock);
+	pthread_cond_wait(&thread_start_cond, &thread_start_mutex);
+	pthread_mutex_unlock(&thread_start_mutex);
+	pthread_mutex_unlock(&thread_start_lock);
 
 	/* fire the audio output thread */
 	if (inst->have_audio) {
@@ -2279,8 +2240,12 @@ avbox_player_stop(struct avbox_player* inst)
 	if (inst->status != MB_PLAYER_STATUS_READY) {
 		inst->stopping = 1;
 		inst->stream_quit = 1;
-		pthread_cond_broadcast(&inst->audio_decoder_signal);
-		pthread_cond_broadcast(&inst->video_decoder_signal);
+		if (inst->video_packets_q != NULL) {
+			avbox_queue_close(inst->video_packets_q);
+		}
+		if (inst->audio_packets_q != NULL) {
+			avbox_queue_close(inst->audio_packets_q);
+		}
 
 		if (inst->have_audio) {
 			if (avbox_audiostream_ispaused(inst->audio_stream)) {
@@ -2340,6 +2305,9 @@ avbox_player_new(struct mbv_window *window)
 	}
 
 	inst->window = window;
+	inst->audio_packets_q = NULL;
+	inst->video_packets_q = NULL;
+	inst->video_frames_q = NULL;
 	inst->video_stream_index = -1;
 	inst->status = MB_PLAYER_STATUS_READY;
 	inst->status_notification_fd = -1;
@@ -2350,18 +2318,13 @@ avbox_player_new(struct mbv_window *window)
 
 	/* initialize pthreads primitives */
 	if (pthread_mutex_init(&inst->stream_lock, NULL) != 0 ||
-		pthread_mutex_init(&inst->video_output_lock, NULL) != 0 ||
-		pthread_mutex_init(&inst->audio_decoder_lock, NULL) != 0 ||
-		pthread_mutex_init(&inst->video_decoder_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->decoder_start_lock, NULL) != 0 ||
 		pthread_cond_init(&inst->decoder_start_signal, NULL) != 0 ||
-		pthread_cond_init(&inst->video_decoder_signal, NULL) != 0 ||
-		pthread_cond_init(&inst->audio_decoder_signal, NULL) != 0 ||
-		pthread_cond_init(&inst->video_output_signal, NULL) != 0 ||
 		pthread_cond_init(&inst->stream_signal, NULL) != 0 ||
 		pthread_mutex_init(&inst->top_overlay_lock, NULL) != 0 ||
 		pthread_mutex_init(&inst->update_lock, NULL) != 0) {
 		LOG_PRINT_ERROR("Cannot create player instance. Pthreads error");
+		avbox_queue_destroy(inst->video_packets_q);
 		free(inst);
 		return NULL;
 	}
