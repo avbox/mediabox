@@ -32,7 +32,7 @@ static int pw = 0, ph = 0;
 static struct mbv_window *main_window = NULL;
 static struct mbv_window *progress = NULL;
 static struct mb_ui_progressbar *progressbar = NULL;
-static struct mbp *player = NULL;
+static struct avbox_player *player = NULL;
 static struct mbv_window *volumebar_window = NULL;
 static struct mb_ui_progressbar *volumebar = NULL;
 static int volumebar_timer_id = -1;
@@ -45,7 +45,7 @@ static char date_string[256] = "";
 /**
  * mbs_get_active_player() -- Gets the currently active player instance.
  */
-struct mbp *
+struct avbox_player *
 avbox_shell_getactiveplayer(void)
 {
 	return player;
@@ -284,8 +284,8 @@ avbox_shell_volumechanged(int volume)
  * mbs_playerstatuschanged() -- Handle player state change events
  */
 static void
-avbox_shell_playerstatuschanged(struct mbp *inst,
-	enum mb_player_status status, enum mb_player_status last_status)
+avbox_shell_playerstatuschanged(struct avbox_player *inst,
+	enum avbox_player_status status, enum avbox_player_status last_status)
 {
 	if (inst == player) {
 		if (last_status == MB_PLAYER_STATUS_BUFFERING &&
@@ -307,7 +307,7 @@ avbox_shell_playerstatuschanged(struct mbp *inst,
 
 		} else if (last_status == MB_PLAYER_STATUS_PAUSED &&
 			status != MB_PLAYER_STATUS_PAUSED) {
-			mb_player_showoverlaytext(player, "", 1,
+			avbox_player_showoverlaytext(player, "", 1,
 				MBV_ALIGN_LEFT);
 		}
 
@@ -389,7 +389,7 @@ avbox_shell_playerstatuschanged(struct mbp *inst,
 				assert(progressbar != NULL);
 
 				/* update the progress bar */
-				mb_ui_progressbar_setvalue(progressbar, mb_player_bufferstate(inst));
+				mb_ui_progressbar_setvalue(progressbar, avbox_player_bufferstate(inst));
 				mb_ui_progressbar_update(progressbar);
 				mbv_window_update(progress);
 			}
@@ -404,9 +404,9 @@ avbox_shell_playerstatuschanged(struct mbp *inst,
 			assert(progress == NULL);
 			DEBUG_PRINT("shell", "Player state changed to PAUSED");
 
-			mb_player_showoverlaytext(player, "  PAUSED", 1000,
+			avbox_player_showoverlaytext(player, "  PAUSED", 1000,
 				MBV_ALIGN_LEFT);
-			mb_player_update(inst);
+			avbox_player_update(inst);
 			break;
 		}
 	}
@@ -439,7 +439,7 @@ avbox_shell_init(void)
 	mbv_window_setcolor(main_window, 0x8080ffff);
 
 	/* initialize main media player */
-	player = mb_player_new(NULL);
+	player = avbox_player_new(NULL);
 	if (player == NULL) {
 		fprintf(stderr, "Could not initialize main media player\n");
 		return -1;
@@ -472,7 +472,7 @@ avbox_shell_run(void)
 	}
 
 	/* register our queue as the player's notification queue */
-	if (mb_player_registernotificationqueue(avbox_shell_getactiveplayer(), input_fd) == -1) {
+	if (avbox_player_registernotificationqueue(avbox_shell_getactiveplayer(), input_fd) == -1) {
 		LOG_PRINT_ERROR("Could not reqister notification queue");
 		return -1;
 	}
@@ -506,34 +506,34 @@ avbox_shell_run(void)
 		case MBI_EVENT_KBD_P:
 		case MBI_EVENT_PLAY:
 		{
-			switch (mb_player_getstatus(player)) {
+			switch (avbox_player_getstatus(player)) {
 			case MB_PLAYER_STATUS_READY:
 			{
-				const char *media_file = mb_player_getmediafile(player);
+				const char *media_file = avbox_player_getmediafile(player);
 				if (media_file == NULL) {
 					media_file = MEDIA_FILE;
 				} else {
 					DEBUG_VPRINT("shell", "Playing '%s' from memory",
 						media_file);
 				}
-				mb_player_play(player, media_file);
+				avbox_player_play(player, media_file);
 				break;
 			}
 			case MB_PLAYER_STATUS_BUFFERING:
 			{
 				/* this should never happen since this state is
-				 * a temporary state in mb_player_player(). */
+				 * a temporary state in avbox_player_player(). */
 				abort();
 				break;
 			}
 			case MB_PLAYER_STATUS_PLAYING:
 			{
-				mb_player_pause(player);
+				avbox_player_pause(player);
 				break;
 			}
 			case MB_PLAYER_STATUS_PAUSED:
 			{
-				mb_player_play(player, NULL);
+				avbox_player_play(player, NULL);
 				break;
 			}
 			default:
@@ -544,35 +544,35 @@ avbox_shell_run(void)
 		case MBI_EVENT_KBD_S:
 		case MBI_EVENT_STOP:
 		{
-			if (mb_player_getstatus(player) != MB_PLAYER_STATUS_READY) {
-				(void) mb_player_stop(player);
+			if (avbox_player_getstatus(player) != MB_PLAYER_STATUS_READY) {
+				(void) avbox_player_stop(player);
 			}
 			break;
 		}
 		case MBI_EVENT_PREV:
 		{
-			enum mb_player_status status;
-			status = mb_player_getstatus(player);
+			enum avbox_player_status status;
+			status = avbox_player_getstatus(player);
 			if (status == MB_PLAYER_STATUS_PLAYING || status == MB_PLAYER_STATUS_PAUSED) {
-				mb_player_seek_chapter(player, -1);
+				avbox_player_seek_chapter(player, -1);
 			}
 			break;
 		}
 		case MBI_EVENT_NEXT:
 		{
-			enum mb_player_status status;
-			status = mb_player_getstatus(player);
+			enum avbox_player_status status;
+			status = avbox_player_getstatus(player);
 			if (status == MB_PLAYER_STATUS_PLAYING || status == MB_PLAYER_STATUS_PAUSED) {
-				mb_player_seek_chapter(player, 1);
+				avbox_player_seek_chapter(player, 1);
 			}
 			break;
 		}
 		case MBI_EVENT_KBD_I:
 		case MBI_EVENT_INFO:
 		{
-			char *title = mb_player_gettitle(player);
+			char *title = avbox_player_gettitle(player);
 			if (title != NULL) {
-				mb_player_showoverlaytext(player, title, 15,
+				avbox_player_showoverlaytext(player, title, 15,
 					MBV_ALIGN_CENTER);
 				free(title);
 			}
@@ -624,8 +624,8 @@ avbox_shell_run(void)
 		}
 		case MBI_EVENT_PLAYER_NOTIFICATION:
 		{
-			struct mb_player_status_data *status_data;
-			status_data = (struct mb_player_status_data*) message->payload;
+			struct avbox_player_status_data *status_data;
+			status_data = (struct avbox_player_status_data*) message->payload;
 			avbox_shell_playerstatuschanged(status_data->sender,
 				status_data->status, status_data->last_status);
 			break;
@@ -668,7 +668,7 @@ void
 avbox_shell_shutdown(void)
 {
 	if (player != NULL) {
-		mb_player_destroy(player);
+		avbox_player_destroy(player);
 	}
 
 	/* destroy the main window */

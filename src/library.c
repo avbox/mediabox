@@ -31,7 +31,7 @@ struct mb_library_playlist_item
 	union
 	{
 		const char *filepath;
-		struct mb_playlist_item *playlist_item;
+		struct avbox_playlist_item *playlist_item;
 	} data;
 };
 
@@ -45,10 +45,10 @@ static char *dotdot = NULL;
 #define LIBRARY_ROOT "/media/UPnP"
 
 
-static struct mb_playlist_item *
+static struct avbox_playlist_item *
 mb_library_addtoplaylist(const char *file)
 {
-	struct mb_playlist_item *item;
+	struct avbox_playlist_item *item;
 
 	/* check that the file is valid */
 	if (file == NULL || strlen(file) == 0) {
@@ -59,7 +59,7 @@ mb_library_addtoplaylist(const char *file)
 	}
 
 	/* allocate memory */
-	if ((item = malloc(sizeof(struct mb_playlist_item))) == NULL) {
+	if ((item = malloc(sizeof(struct avbox_playlist_item))) == NULL) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "library", "Could not add to playlist. Out of memory");
 		return NULL;
 	}
@@ -79,7 +79,7 @@ mb_library_addtoplaylist(const char *file)
 
 
 static void
-mb_library_freeplaylistitem(struct mb_playlist_item *item)
+mb_library_freeplaylistitem(struct avbox_playlist_item *item)
 {
 	assert(item != NULL);
 
@@ -94,9 +94,9 @@ mb_library_freeplaylistitem(struct mb_playlist_item *item)
 static void
 mb_library_freeplaylist(void)
 {
-	struct mb_playlist_item *item;
+	struct avbox_playlist_item *item;
 
-	LIST_FOREACH_SAFE(struct mb_playlist_item*, item, &playlist, {
+	LIST_FOREACH_SAFE(struct avbox_playlist_item*, item, &playlist, {
 		LIST_REMOVE(item);
 		mb_library_freeplaylistitem(item);
 	});
@@ -410,8 +410,8 @@ mb_library_showdialog(void)
 				free(selected_copy);
 
 			} else {
-				struct mbp* player;
-				struct mb_playlist_item *playlist_item;
+				struct avbox_player *player;
+				struct avbox_playlist_item *playlist_item;
 
 				playlist_item = selected->data.playlist_item;
 				assert(selected->data.playlist_item != NULL);
@@ -430,7 +430,7 @@ mb_library_showdialog(void)
 
 				mbv_window_hide(window);
 
-				if (mb_player_playlist(player, &playlist, playlist_item) == 0) {
+				if (avbox_player_playlist(player, &playlist, playlist_item) == 0) {
 					ret = 0;
 					quit = 1;
 					break;

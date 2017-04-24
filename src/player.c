@@ -72,11 +72,11 @@
 /**
  * Player structure.
  */
-struct mbp
+struct avbox_player
 {
 	struct mbv_window *window;
 	const char *media_file;
-	enum mb_player_status status;
+	enum avbox_player_status status;
 	int frames_rendered;
 	int width;
 	int height;
@@ -92,7 +92,7 @@ struct mbp
 	struct timespec systemreftime;
 	int64_t lasttime;
 	int64_t systemtimeoffset;
-	int64_t (*getmastertime)(struct mbp *inst);
+	int64_t (*getmastertime)(struct avbox_player *inst);
 	int status_notification_fd;
 
 	AVFormatContext *fmt_ctx;
@@ -116,7 +116,7 @@ struct mbp
 	/* FIXME: We shouldn't save a copy of the last frame but
 	 * instead keep a reference to it. Hopefully we can come
 	 * up with a solution that does not require a lock to
-	 * handle mb_player_update() */
+	 * handle avbox_player_update() */
 	void *video_last_frame;
 	pthread_mutex_t update_lock;
 
@@ -167,7 +167,7 @@ struct mbp
 
 	/* playlist stuff */
 	LIST_DECLARE(playlist);
-	struct mb_playlist_item *playlist_item;
+	struct avbox_playlist_item *playlist_item;
 };
 
 
@@ -176,18 +176,18 @@ PangoFontDescription *pango_font_desc = NULL;
 
 
 /**
- * mb_player_freeplaylist() -- Free the internal playlist
+ * Free the internal playlist
  */
 static void
-mb_player_freeplaylist(struct mbp* inst)
+avbox_player_freeplaylist(struct avbox_player* inst)
 {
-	struct mb_playlist_item *item;
+	struct avbox_playlist_item *item;
 
 	assert(inst != NULL);
 
 	inst->playlist_item = NULL;
 
-	LIST_FOREACH_SAFE(struct mb_playlist_item*, item, &inst->playlist, {
+	LIST_FOREACH_SAFE(struct avbox_playlist_item*, item, &inst->playlist, {
 
 		LIST_REMOVE(item);
 
@@ -201,13 +201,13 @@ mb_player_freeplaylist(struct mbp* inst)
 
 
 /**
- * mb_player_updatestatus() -- Updates the player status and
+ * Updates the player status and
  * calls any registered callbacks
  */
 static void
-mb_player_updatestatus(struct mbp *inst, enum mb_player_status status)
+avbox_player_updatestatus(struct avbox_player *inst, enum avbox_player_status status)
 {
-	enum mb_player_status last_status;
+	enum avbox_player_status last_status;
 
 	assert(inst != NULL);
 
@@ -216,19 +216,19 @@ mb_player_updatestatus(struct mbp *inst, enum mb_player_status status)
 
 	/* send status notification */
 	if (inst->status_notification_fd != -1) {
-		struct mb_player_status_data status_data;
+		struct avbox_player_status_data status_data;
 		status_data.sender = inst;
 		status_data.last_status = last_status;
 		status_data.status = status;
 
 		avbox_input_sendmessage(inst->status_notification_fd, MBI_EVENT_PLAYER_NOTIFICATION,
-			&status_data, sizeof(struct mb_player_status_data));
+			&status_data, sizeof(struct avbox_player_status_data));
 	}
 }
 
 
 static inline void
-mb_player_printstatus(const struct mbp * const inst, const int fps)
+avbox_player_printstatus(const struct avbox_player * const inst, const int fps)
 {
 	static int i = 0, audio_frames = 0;;
 	if ((i++ % 10) == 0) {
@@ -247,7 +247,7 @@ mb_player_printstatus(const struct mbp * const inst, const int fps)
  * the video image
  */
 static int
-mb_player_rendertext(struct mbp *inst, cairo_t *context, char *text, PangoRectangle *rect)
+avbox_player_rendertext(struct avbox_player *inst, cairo_t *context, char *text, PangoRectangle *rect)
 {
 	PangoLayout *layout;
 
@@ -284,7 +284,7 @@ mb_player_rendertext(struct mbp *inst, cairo_t *context, char *text, PangoRectan
  * video output thread.
  */
 static inline int
-mb_player_dumpvideo(struct mbp * const inst, const int64_t pts, const int flush)
+avbox_player_dumpvideo(struct avbox_player * const inst, const int64_t pts, const int flush)
 {
 	int ret = 0, c = 0;
 	int64_t video_time;
@@ -339,11 +339,11 @@ end:
 
 
 /**
- * mb_player_wait4buffers() -- Waits for the decoded stream buffers
+ * Waits for the decoded stream buffers
  * to fill up
  */
 static void
-mb_player_wait4buffers(struct mbp * const inst, int * const quit)
+avbox_player_wait4buffers(struct avbox_player * const inst, int * const quit)
 {
 	/* wait for the buffers to fill up */
 	do {
@@ -351,7 +351,7 @@ mb_player_wait4buffers(struct mbp * const inst, int * const quit)
 		pthread_cond_broadcast(&inst->audio_decoder_signal);
 		pthread_cond_broadcast(&inst->video_output_signal);
 
-		mb_player_printstatus(inst, 0);
+		avbox_player_printstatus(inst, 0);
 
 		usleep(100L * 1000L);
 	}
@@ -360,12 +360,12 @@ mb_player_wait4buffers(struct mbp * const inst, int * const quit)
 
 
 /**
- * mb_player_getaudiotime() -- Gets the time elapsed (in uSecs) since the
+ * Gets the time elapsed (in uSecs) since the
  * stream started playing. This clock stops when the audio stream is paused
  * or underruns.
  */
 static int64_t
-mb_player_getaudiotime(struct mbp * const inst)
+avbox_player_getaudiotime(struct avbox_player * const inst)
 {
 	assert(inst->audio_stream != NULL);
 	return inst->lasttime = avbox_audiostream_gettime(inst->audio_stream);
@@ -373,7 +373,7 @@ mb_player_getaudiotime(struct mbp * const inst)
 
 
 static void
-mb_player_resetsystemtime(struct mbp *inst, int64_t upts)
+avbox_player_resetsystemtime(struct avbox_player *inst, int64_t upts)
 {
 	(void) clock_gettime(CLOCK_MONOTONIC, &inst->systemreftime);
 	inst->systemtimeoffset = upts;
@@ -381,7 +381,7 @@ mb_player_resetsystemtime(struct mbp *inst, int64_t upts)
 
 
 static int64_t
-mb_player_getsystemtime(struct mbp *inst)
+avbox_player_getsystemtime(struct avbox_player *inst)
 {
 	struct timespec tv;
 	if (UNLIKELY(inst->video_paused)) {
@@ -393,7 +393,7 @@ mb_player_getsystemtime(struct mbp *inst)
 
 
 static inline void
-mb_player_postproc(struct mbp *inst, void *buf)
+avbox_player_postproc(struct avbox_player *inst, void *buf)
 {
 	/* if there is something to display in the top overlay
 	 * then do it */
@@ -417,7 +417,7 @@ mb_player_postproc(struct mbp *inst, void *buf)
 					rect.y = 50;
 					rect.height = 400;
 
-					mb_player_rendertext(inst, context,
+					avbox_player_rendertext(inst, context,
 						inst->top_overlay_text, &rect);
 
 					cairo_destroy(context);
@@ -429,15 +429,15 @@ mb_player_postproc(struct mbp *inst, void *buf)
 }
 
 /**
- * mb_player_vrend_thread() -- Video rendering thread.
+ * Video rendering thread.
  */
 #if (MB_VIDEO_BUFFER_FRAMES > 1)
 static void *
-mb_player_video(void *arg)
+avbox_player_video(void *arg)
 {
 	uint8_t *buf;
 	int64_t frame_pts, delay, frame_time = 0;
-	struct mbp *inst = (struct mbp*) arg;
+	struct avbox_player *inst = (struct avbox_player*) arg;
 	
 #ifdef MB_DECODER_PRINT_FPS
 	struct timespec new_tp, last_tp, elapsed_tp;
@@ -457,8 +457,8 @@ mb_player_video(void *arg)
 
 	if (!inst->have_audio) {
 		/* save the reference timestamp */
-		mb_player_wait4buffers(inst, &inst->video_quit);
-		mb_player_resetsystemtime(inst, 0);
+		avbox_player_wait4buffers(inst, &inst->video_quit);
+		avbox_player_resetsystemtime(inst, 0);
 	}
 
 	/* signal control thread that we're ready */
@@ -473,7 +473,7 @@ mb_player_video(void *arg)
 		/* if we got a flush command flush all decoded video */
 		if (UNLIKELY(inst->video_flush_output)) {
 			DEBUG_PRINT("player", "Flushing video output");
-			mb_player_dumpvideo(inst, INT64_MAX, 1);
+			avbox_player_dumpvideo(inst, INT64_MAX, 1);
 			DEBUG_PRINT("player", "Video output flushed");
 			inst->video_flush_output = 0;
 		}
@@ -490,13 +490,13 @@ mb_player_video(void *arg)
 					avbox_audiostream_pause(inst->audio_stream);
 					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
 					pthread_mutex_unlock(&inst->video_output_lock);
-					mb_player_wait4buffers(inst, &inst->video_quit);
+					avbox_player_wait4buffers(inst, &inst->video_quit);
 					avbox_audiostream_resume(inst->audio_stream);
 				} else {
 					pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
 					pthread_mutex_unlock(&inst->video_output_lock);
-					mb_player_wait4buffers(inst, &inst->video_quit);
-					mb_player_resetsystemtime(inst, frame_time);
+					avbox_player_wait4buffers(inst, &inst->video_quit);
+					avbox_player_resetsystemtime(inst, frame_time);
 				}
 				continue;
 			}
@@ -514,7 +514,7 @@ mb_player_video(void *arg)
 		memcpy(inst->video_last_frame, buf, inst->bufsz);
 
 		/* perform post processing (overlays, etc) */
-		mb_player_postproc(inst, buf);
+		avbox_player_postproc(inst, buf);
 
 		/* get the frame pts */
 		frame_pts = inst->frame_pts[inst->video_playback_index];
@@ -536,7 +536,7 @@ mb_player_video(void *arg)
 				if (elapsed - frame_time > 100000) {
 					/* if the decoder is lagging behind tell it to
 					 * skip a few frames */
-					if (UNLIKELY(mb_player_dumpvideo(inst, elapsed, 0))) {
+					if (UNLIKELY(avbox_player_dumpvideo(inst, elapsed, 0))) {
 						continue;
 					}
 
@@ -562,7 +562,7 @@ mb_player_video(void *arg)
 					 */
 					if (avbox_audiostream_ispaused(inst->audio_stream) && inst->audio_packets == 0 &&
 						avbox_audiostream_getframecount(inst->audio_stream) == 0) {
-						mb_player_dumpvideo(inst, elapsed, 1);
+						avbox_player_dumpvideo(inst, elapsed, 1);
 						LOG_PRINT_ERROR("Deadlock detected, recovered (I hope)");
 					}
 				} else {
@@ -600,7 +600,7 @@ mb_player_video(void *arg)
 			fps = frames;
 			frames = 0;
 		}
-		mb_player_printstatus(inst, fps);
+		avbox_player_printstatus(inst, fps);
 #endif
 
 frame_complete:
@@ -635,10 +635,10 @@ video_exit:
 
 
 /**
- * mb_player_update() -- Update the player window
+ * Update the player window
  */
 void
-mb_player_update(struct mbp *inst)
+avbox_player_update(struct avbox_player *inst)
 {
 	void *frame_data;
 
@@ -663,7 +663,7 @@ mb_player_update(struct mbp *inst)
 
 	pthread_mutex_unlock(&inst->update_lock);
 
-	mb_player_postproc(inst, frame_data);
+	avbox_player_postproc(inst, frame_data);
 	mbv_window_blitbuf(inst->window, frame_data, inst->width, inst->height, 0, 0);
 	mbv_window_update(inst->window);
 	free(frame_data);
@@ -671,10 +671,10 @@ mb_player_update(struct mbp *inst)
 
 
 /**
- * mb_player_initfilters() -- Initialize ffmpeg's filter graph
+ * Initialize ffmpeg's filter graph
  */
 static int
-mb_player_initvideofilters(
+avbox_player_initvideofilters(
 	AVFormatContext *fmt_ctx,
 	AVCodecContext *dec_ctx,
 	AVFilterContext **buffersink_ctx,
@@ -775,7 +775,7 @@ end:
 
 
 static int
-mb_player_initaudiofilters(
+avbox_player_initaudiofilters(
 	AVFormatContext *fmt_ctx,
 	AVCodecContext *dec_ctx,
 	AVFilterContext **buffersink_ctx,
@@ -956,10 +956,10 @@ open_codec_context(int *stream_idx,
  * Decodes video frames in the background.
  */
 static void *
-mb_player_video_decode(void *arg)
+avbox_player_video_decode(void *arg)
 {
 	int i, video_time_set = 0;
-	struct mbp *inst = (struct mbp*) arg;
+	struct avbox_player *inst = (struct avbox_player*) arg;
 	char video_filters[512];
 	AVPacket packet;
 	AVFrame *video_frame_nat = NULL, *video_frame_flt = NULL;
@@ -999,7 +999,7 @@ mb_player_video_decode(void *arg)
 
 	DEBUG_VPRINT("player", "Video filters: %s", video_filters);
 
-	if (mb_player_initvideofilters(inst->fmt_ctx, inst->video_codec_ctx,
+	if (avbox_player_initvideofilters(inst->fmt_ctx, inst->video_codec_ctx,
 		&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
 		video_filters, inst->video_stream_index) < 0) {
 		LOG_PRINT_ERROR("Could not initialize filtergraph!");
@@ -1091,7 +1091,7 @@ mb_player_video_decode(void *arg)
 		pthread_cond_signal(&inst->video_decoder_signal);
 		ATOMIC_DEC(&inst->video_packets); /* this only needs to be in the
 						   * critical section because of an assertion
-						   * on mb_player_stream_decode() */
+						   * on avbox_player_stream_decode() */
 		pthread_mutex_unlock(&inst->video_decoder_lock);
 
 		/* decode packet */
@@ -1181,7 +1181,7 @@ mb_player_video_decode(void *arg)
 					pts = av_rescale_q(frame_pts,
 						video_buffersink_ctx->inputs[0]->time_base,
 						AV_TIME_BASE_Q);
-					mb_player_resetsystemtime(inst, pts);
+					avbox_player_resetsystemtime(inst, pts);
 					DEBUG_VPRINT("player", "First video pts: %li (unscaled=%li)",
 						pts, frame_pts);
 					video_time_set = 1;
@@ -1267,13 +1267,13 @@ decoder_exit:
 
 
 /**
- * mb_player_audio_decode() -- Decodes the audio stream.
+ * Decodes the audio stream.
  */
 static void *
-mb_player_audio_decode(void * arg)
+avbox_player_audio_decode(void * arg)
 {
 	int ret;
-	struct mbp * const inst = (struct mbp * const) arg;
+	struct avbox_player * const inst = (struct avbox_player * const) arg;
 	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
 	AVFrame *audio_frame_nat = NULL;
 	AVFrame *audio_frame = NULL;
@@ -1309,7 +1309,7 @@ mb_player_audio_decode(void * arg)
 
 	/* initialize audio filter graph */
 	DEBUG_VPRINT("player", "Audio filters: %s", audio_filters);
-	if (mb_player_initaudiofilters(inst->fmt_ctx, inst->audio_codec_ctx,
+	if (avbox_player_initaudiofilters(inst->fmt_ctx, inst->audio_codec_ctx,
 		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
 		audio_filters, inst->audio_stream_index) < 0) {
 		LOG_PRINT_ERROR("Could not init filter graph!");
@@ -1440,12 +1440,12 @@ decoder_exit:
  * encoded frames to the decoder threads.
  */
 static void*
-mb_player_stream_parse(void *arg)
+avbox_player_stream_parse(void *arg)
 {
 	int i;
 	AVPacket packet;
 	AVDictionary *stream_opts = NULL;
-	struct mbp *inst = (struct mbp*) arg;
+	struct avbox_player *inst = (struct avbox_player*) arg;
 
 	MB_DEBUG_SET_THREAD_NAME("stream_parser");
 
@@ -1503,7 +1503,7 @@ mb_player_stream_parse(void *arg)
 		inst->video_packet_write_index = 0;
 		inst->video_skipframes = 0;
 		inst->video_decoder_pts = 0;
-		inst->getmastertime = mb_player_getsystemtime;
+		inst->getmastertime = avbox_player_getsystemtime;
 		inst->have_video = 1;
 
 		/* initialize all packet states */
@@ -1512,7 +1512,7 @@ mb_player_stream_parse(void *arg)
 		}
 		/* fire the video decoder thread */
 		pthread_mutex_lock(&inst->video_decoder_lock);
-		if (pthread_create(&inst->video_decoder_thread, NULL, mb_player_video_decode, inst) != 0) {
+		if (pthread_create(&inst->video_decoder_thread, NULL, avbox_player_video_decode, inst) != 0) {
 			abort();
 		}
 		pthread_cond_wait(&inst->video_decoder_signal, &inst->video_decoder_lock);
@@ -1532,7 +1532,7 @@ mb_player_stream_parse(void *arg)
 		inst->audio_stream_index = -1;
 		inst->audio_packet_write_index = 0;
 		inst->audio_packet_read_index = 0;
-		inst->getmastertime = mb_player_getaudiotime; /* video is slave to audio */
+		inst->getmastertime = avbox_player_getaudiotime; /* video is slave to audio */
 		inst->have_audio = 1;
 
 		/* create audio stream */
@@ -1542,7 +1542,7 @@ mb_player_stream_parse(void *arg)
 
 		/* start the audio decoder thread and wait until it's ready to decode */
 		pthread_mutex_lock(&inst->audio_decoder_lock);
-		if (pthread_create(&inst->audio_decoder_thread, NULL, mb_player_audio_decode, inst) != 0) {
+		if (pthread_create(&inst->audio_decoder_thread, NULL, avbox_player_audio_decode, inst) != 0) {
 			abort();
 		}
 		pthread_cond_wait(&inst->audio_decoder_signal, &inst->audio_decoder_lock);
@@ -1685,7 +1685,7 @@ mb_player_stream_parse(void *arg)
 						usleep(100L * 1000L);
 					}
 
-					mb_player_resetsystemtime(inst, inst->seek_to);
+					avbox_player_resetsystemtime(inst, inst->seek_to);
 				}
 
 				/* drop all decoded audio frames */
@@ -1756,7 +1756,7 @@ decoder_exit:
 		inst->have_audio = 0;
 		inst->audio_stream_index = -1;
 		inst->audio_decoder_quit = 1;
-		inst->getmastertime = mb_player_getsystemtime;
+		inst->getmastertime = avbox_player_getsystemtime;
 		pthread_cond_broadcast(&inst->audio_decoder_signal);
 		pthread_cond_broadcast(&inst->audio_decoder_signal);
 		pthread_join(inst->audio_decoder_thread, NULL);
@@ -1790,7 +1790,7 @@ decoder_exit:
 	inst->audio_stream_index = -1;
 	inst->stream_quit = 1;
 
-	mb_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
+	avbox_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 
 	/* I don't think there's any benefit in doing this always
 	 * but it helps in debugging as all freed memory is returned to
@@ -1802,10 +1802,10 @@ decoder_exit:
 	/* if we're playing a playlist try to play the next
 	 * item unless stop() has been called */
 	if (!inst->stopping && inst->playlist_item != NULL) {
-		inst->playlist_item = LIST_NEXT(struct mb_playlist_item*,
+		inst->playlist_item = LIST_NEXT(struct avbox_playlist_item*,
 			inst->playlist_item);
 		if (!LIST_ISNULL(&inst->playlist, inst->playlist_item)) {
-			mb_player_play(inst, inst->playlist_item->filepath);
+			avbox_player_play(inst, inst->playlist_item->filepath);
 		}
 	}
 
@@ -1823,10 +1823,10 @@ decoder_exit:
 
 
 /**
- * mb_player_getstatus() -- Get the player status
+ * Get the player status
  */
-enum mb_player_status
-mb_player_getstatus(struct mbp *inst)
+enum avbox_player_status
+avbox_player_getstatus(struct avbox_player *inst)
 {
 	return inst->status;
 }
@@ -1836,7 +1836,7 @@ mb_player_getstatus(struct mbp *inst)
  * Register a queue for status notifications.
  */
 int
-mb_player_registernotificationqueue(struct mbp *inst, int queuefd)
+avbox_player_registernotificationqueue(struct avbox_player *inst, int queuefd)
 {
 	if (inst->status_notification_fd != -1) {
 		abort();
@@ -1847,10 +1847,10 @@ mb_player_registernotificationqueue(struct mbp *inst, int queuefd)
 
 
 /**
- * mb_player_seek_chapter() -- Seek to a chapter.
+ * Seek to a chapter.
  */
 int
-mb_player_seek_chapter(struct mbp *inst, int incr)
+avbox_player_seek_chapter(struct avbox_player *inst, int incr)
 {
 	int i;
 	int64_t pos;
@@ -1883,12 +1883,12 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 	if (inst->playlist_item != NULL) {
 		if (incr > 0 && (inst->fmt_ctx->nb_chapters == 0 || i == (inst->fmt_ctx->nb_chapters - 1))) {
 			/* seek to next playlist item */
-			struct mb_playlist_item *next_item =
+			struct avbox_playlist_item *next_item =
 				inst->playlist_item;
 
 			while (incr--) {
-				struct mb_playlist_item *next =
-					LIST_NEXT(struct mb_playlist_item*,
+				struct avbox_playlist_item *next =
+					LIST_NEXT(struct avbox_playlist_item*,
 					inst->playlist_item);
 				if (LIST_ISNULL(&inst->playlist, next)) {
 					break;
@@ -1898,18 +1898,18 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 
 			if (next_item != inst->playlist_item) {
 				inst->playlist_item = next_item;
-				return mb_player_play(inst, inst->playlist_item->filepath);
+				return avbox_player_play(inst, inst->playlist_item->filepath);
 			} else {
 				return -1;
 			}
 		} else if (incr < 0 && i == 0) {
 			/* seek to previous playlist item */
-			struct mb_playlist_item *next_item =
+			struct avbox_playlist_item *next_item =
 				inst->playlist_item;
 
 			while (incr++) {
-				struct mb_playlist_item *next =
-					LIST_PREV(struct mb_playlist_item*,
+				struct avbox_playlist_item *next =
+					LIST_PREV(struct avbox_playlist_item*,
 					inst->playlist_item);
 				if (LIST_ISNULL(&inst->playlist, next)) {
 					break;
@@ -1919,7 +1919,7 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 
 			if (next_item != inst->playlist_item) {
 				inst->playlist_item = next_item;
-				return mb_player_play(inst, inst->playlist_item->filepath);
+				return avbox_player_play(inst, inst->playlist_item->filepath);
 			} else {
 				return -1;
 			}
@@ -1940,7 +1940,7 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 	inst->seek_to = seek_to;
 
 	if (inst->status == MB_PLAYER_STATUS_PAUSED) {
-		mb_player_play(inst, NULL);
+		avbox_player_play(inst, NULL);
 	}
 
 	/* signal and wait for seek to happen */
@@ -1953,7 +1953,7 @@ mb_player_seek_chapter(struct mbp *inst, int incr)
 
 
 unsigned int
-mb_player_bufferstate(struct mbp *inst)
+avbox_player_bufferstate(struct avbox_player *inst)
 {
 	assert(inst != NULL);
 	return inst->stream_percent;
@@ -1961,7 +1961,7 @@ mb_player_bufferstate(struct mbp *inst)
 
 
 const char *
-mb_player_getmediafile(struct mbp *inst)
+avbox_player_getmediafile(struct avbox_player *inst)
 {
 	assert(inst != NULL);
 	return inst->media_file;
@@ -1969,13 +1969,13 @@ mb_player_getmediafile(struct mbp *inst)
 
 
 /**
- * mb_player_dismiss_top_overlay() -- Callback function to dismiss
+ * Callback function to dismiss
  * overlay text
  */
 static enum avbox_timer_result
-mb_player_dismiss_top_overlay(int timer_id, void *data)
+avbox_player_dismiss_top_overlay(int timer_id, void *data)
 {
-	struct mbp *inst = (struct mbp*) data;
+	struct avbox_player *inst = (struct avbox_player*) data;
 
 	assert(inst != NULL);
 
@@ -2000,11 +2000,11 @@ mb_player_dismiss_top_overlay(int timer_id, void *data)
 
 
 /**
- * mb_player_showoverlaytext() -- Shows overlay text on the top of the
+ * Shows overlay text on the top of the
  * screen.
  */
 void
-mb_player_showoverlaytext(struct mbp *inst,
+avbox_player_showoverlaytext(struct avbox_player *inst,
 	const char *text, int duration, enum mbv_alignment alignment)
 {
 	struct timespec tv;
@@ -2028,19 +2028,19 @@ mb_player_showoverlaytext(struct mbp *inst,
 	inst->top_overlay_alignment = alignment;
 	inst->top_overlay_text = strdup(text);
 	inst->top_overlay_timer_id = avbox_timer_register(&tv, AVBOX_TIMER_TYPE_ONESHOT,
-		-1, &mb_player_dismiss_top_overlay, inst);
+		-1, &avbox_player_dismiss_top_overlay, inst);
 
 	pthread_mutex_unlock(&inst->top_overlay_lock);
 }
 
 
 /**
- * mb_player_gettitle() -- Gets the title of the currently playing
+ * Gets the title of the currently playing
  * media file or NULL if nothing is playing. The result needs to be
  * freed with free().
  */
 char *
-mb_player_gettitle(struct mbp *inst)
+avbox_player_gettitle(struct avbox_player *inst)
 {
 	AVDictionaryEntry *title_entry;
 
@@ -2059,13 +2059,13 @@ mb_player_gettitle(struct mbp *inst)
 
 
 /**
- * mb_player_play() -- If path is not NULL it opens the file
+ * If path is not NULL it opens the file
  * specified by path and starts playing it. If path is NULL
  * it resumes playback if we're on the PAUSED state and return
  * failure code (-1) if we're on any other state.
  */
 int 
-mb_player_play(struct mbp *inst, const char * const path)
+avbox_player_play(struct avbox_player *inst, const char * const path)
 {
 	int last_percent;
 
@@ -2076,13 +2076,13 @@ mb_player_play(struct mbp *inst, const char * const path)
 	 * playback */
 	if (path == NULL) {
 		if (inst->status == MB_PLAYER_STATUS_PAUSED) {
-			mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
+			avbox_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
 			if (inst->have_audio) {
 				if (avbox_audiostream_ispaused(inst->audio_stream)) {
 					avbox_audiostream_resume(inst->audio_stream);
 				}
 			} else {
-				mb_player_resetsystemtime(inst, inst->video_decoder_pts);
+				avbox_player_resetsystemtime(inst, inst->video_decoder_pts);
 				inst->video_paused = 0;
 			}
 			return 0;
@@ -2098,7 +2098,7 @@ mb_player_play(struct mbp *inst, const char * const path)
 
 	/* if we're already playing a file stop it first */
 	if (inst->status != MB_PLAYER_STATUS_READY) {
-		mb_player_stop(inst);
+		avbox_player_stop(inst);
 	}
 
 	/* initialize player object */
@@ -2110,14 +2110,14 @@ mb_player_play(struct mbp *inst, const char * const path)
 
 	/* update status */
 	inst->stream_percent = last_percent = 0;
-	mb_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
+	avbox_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
 
 	/* start the main decoder thread */
 	pthread_mutex_lock(&inst->decoder_start_lock);
 	inst->stream_quit = 0;
-	if (pthread_create(&inst->stream_thread, NULL, mb_player_stream_parse, inst) != 0) {
+	if (pthread_create(&inst->stream_thread, NULL, avbox_player_stream_parse, inst) != 0) {
 		LOG_PRINT_ERROR("Could not fire decoder thread");
-		mb_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
+		avbox_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 		return -1;
 	}
 	pthread_cond_wait(&inst->decoder_start_signal, &inst->decoder_start_lock);
@@ -2126,14 +2126,14 @@ mb_player_play(struct mbp *inst, const char * const path)
 	/* check if decoder initialization failed */
 	if (inst->stream_quit) {
 		LOG_VPRINT_ERROR("Playback of '%s' failed", path);
-		mb_player_stop(inst);
+		avbox_player_stop(inst);
 		return -1;
 	}
 
 	/* if there's no audio or video to decode then return error and exit.
 	 * The decoder thread will shut itself down so no cleanup is necessary */
 	if (!inst->have_audio && !inst->have_video) {
-		mb_player_stop(inst);
+		avbox_player_stop(inst);
 		return -1;
 	}
 
@@ -2146,21 +2146,21 @@ mb_player_play(struct mbp *inst, const char * const path)
 		inst->stream_percent = (((avail * 100) / wanted) * 100) / 100;
 
 		if (inst->stream_percent != last_percent) {
-			mb_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
+			avbox_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
 			last_percent = inst->stream_percent;
 		}
 
-		mb_player_printstatus(inst, 0);
+		avbox_player_printstatus(inst, 0);
 		usleep(5000);
 	}
 
 	/* we're done buffering, set state to PLAYING */
-	mb_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
+	avbox_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
 
 	/* show title on top overlay */
-	char *title = mb_player_gettitle(inst);
+	char *title = avbox_player_gettitle(inst);
 	if (title != NULL) {
-		mb_player_showoverlaytext(inst, title, 15,
+		avbox_player_showoverlaytext(inst, title, 15,
 			MBV_ALIGN_CENTER);
 		free(title);
 	}
@@ -2169,10 +2169,10 @@ mb_player_play(struct mbp *inst, const char * const path)
 
 	/* fire the video threads */
 	pthread_mutex_lock(&inst->video_output_lock);
-	if (pthread_create(&inst->video_output_thread, NULL, mb_player_video, inst) != 0) {
+	if (pthread_create(&inst->video_output_thread, NULL, avbox_player_video, inst) != 0) {
 		LOG_PRINT_ERROR("Could not start renderer thread!");
 		pthread_mutex_unlock(&inst->video_output_lock);
-		mb_player_stop(inst);
+		avbox_player_stop(inst);
 		return -1;
 	}
 	pthread_cond_wait(&inst->video_output_signal, &inst->video_output_lock);
@@ -2184,7 +2184,7 @@ mb_player_play(struct mbp *inst, const char * const path)
 			LOG_PRINT_ERROR("Could not start audio stream");
 			inst->have_audio = 0;
 			if (!inst->have_video) {
-				mb_player_stop(inst);
+				avbox_player_stop(inst);
 				return -1;
 			}
 		}
@@ -2195,27 +2195,27 @@ mb_player_play(struct mbp *inst, const char * const path)
 
 
 /**
- * mb_player_playlist() -- Plays a playlist.
+ * Plays a playlist.
  */
 int
-mb_player_playlist(struct mbp* inst, LIST *playlist, struct mb_playlist_item* selected_item)
+avbox_player_playlist(struct avbox_player* inst, LIST *playlist, struct avbox_playlist_item* selected_item)
 {
-	struct mb_playlist_item *item, *item_copy;
+	struct avbox_playlist_item *item, *item_copy;
 
 	/* if our local list is not empty then free it first */
 	if (!LIST_EMPTY(&inst->playlist)) {
-		mb_player_freeplaylist(inst);
+		avbox_player_freeplaylist(inst);
 	}
 
 	/* copy the playlist */
-	LIST_FOREACH(struct mb_playlist_item*, item, playlist) {
-		if ((item_copy = malloc(sizeof(struct mb_playlist_item))) == NULL) {
-			mb_player_freeplaylist(inst);
+	LIST_FOREACH(struct avbox_playlist_item*, item, playlist) {
+		if ((item_copy = malloc(sizeof(struct avbox_playlist_item))) == NULL) {
+			avbox_player_freeplaylist(inst);
 			errno = ENOMEM;
 			return -1;
 		}
 		if ((item_copy->filepath = strdup(item->filepath)) == NULL) {
-			mb_player_freeplaylist(inst);
+			avbox_player_freeplaylist(inst);
 			errno = ENOMEM;
 			return -1;
 		}
@@ -2228,17 +2228,17 @@ mb_player_playlist(struct mbp* inst, LIST *playlist, struct mb_playlist_item* se
 	}
 
 	/* play the selected item */
-	mb_player_play(inst, inst->playlist_item->filepath);
+	avbox_player_play(inst, inst->playlist_item->filepath);
 
 	return 0;
 }
 
 
 /**
- * mb_player_pause() -- Pause the stream.
+ * Pause the stream.
  */
 int
-mb_player_pause(struct mbp* inst)
+avbox_player_pause(struct avbox_player* inst)
 {
 	assert(inst != NULL);
 
@@ -2249,7 +2249,7 @@ mb_player_pause(struct mbp* inst)
 	}
 
 	/* update status */
-	mb_player_updatestatus(inst, MB_PLAYER_STATUS_PAUSED);
+	avbox_player_updatestatus(inst, MB_PLAYER_STATUS_PAUSED);
 
 	/* wait for player to pause */
 	if (inst->have_audio) {
@@ -2263,17 +2263,17 @@ mb_player_pause(struct mbp* inst)
 
 
 /**
- * mb_player_stop() -- Stop playback.
+ * Stop playback.
  */
 int
-mb_player_stop(struct mbp* inst)
+avbox_player_stop(struct avbox_player* inst)
 {
 	assert(inst != NULL);
 
 	/* if the video is paused then unpause it first. */
 	if (inst->status == MB_PLAYER_STATUS_PAUSED) {
 		DEBUG_PRINT("player", "Unpausing stream");
-		mb_player_play(inst, NULL);
+		avbox_player_play(inst, NULL);
 	}
 
 	if (inst->status != MB_PLAYER_STATUS_READY) {
@@ -2302,12 +2302,12 @@ mb_player_stop(struct mbp* inst)
 
 
 /**
- * mb_player_init() -- Create a new player object.
+ * Create a new player object.
  */
-struct mbp*
-mb_player_new(struct mbv_window *window)
+struct avbox_player*
+avbox_player_new(struct mbv_window *window)
 {
-	struct mbp* inst;
+	struct avbox_player* inst;
 	static int initialized = 0;
 
 	/* initialize libav */
@@ -2321,13 +2321,13 @@ mb_player_new(struct mbv_window *window)
 	}
 
 	/* allocate memory for the player object */
-	inst = malloc(sizeof(struct mbp));
+	inst = malloc(sizeof(struct avbox_player));
 	if (inst == NULL) {
 		LOG_PRINT_ERROR("Cannot create new player instance. Out of memory");
 		return NULL;
 	}
 
-	memset(inst, 0, sizeof(struct mbp));
+	memset(inst, 0, sizeof(struct avbox_player));
 
 	/* if no window argument was provided then use the root window */
 	if (window == NULL) {
@@ -2371,19 +2371,19 @@ mb_player_new(struct mbv_window *window)
 
 
 /**
- * mb_player_destroy() -- Destroy this player instance
+ * Destroy this player instance
  */
 void
-mb_player_destroy(struct mbp *inst)
+avbox_player_destroy(struct avbox_player *inst)
 {
 	assert(inst != NULL);
 
 	DEBUG_PRINT("player", "Destroying object");
 
 	/* this just fails if we're not playing */
-	(void) mb_player_stop(inst);
+	(void) avbox_player_stop(inst);
 
-	mb_player_freeplaylist(inst);
+	avbox_player_freeplaylist(inst);
 
 	if (inst->media_file != NULL) {
 		free((void*) inst->media_file);
@@ -2392,7 +2392,7 @@ mb_player_destroy(struct mbp *inst)
 }
 
 void
-mb_player_shutdown()
+avbox_player_shutdown()
 {
 	if (LIKELY(pango_font_desc != NULL)) {
 		pango_font_description_free(pango_font_desc);

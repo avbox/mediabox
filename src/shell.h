@@ -10,7 +10,7 @@
 /**
  * mbs_get_active_player() -- Gets the currently active player instance.
  */
-struct mbp *
+struct avbox_player *
 avbox_shell_getactiveplayer(void);
 
 

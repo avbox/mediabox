@@ -11,10 +11,10 @@
 #include "linkedlist.h"
 
 
-struct mbp;
+struct avbox_player;
 
 
-LISTABLE_STRUCT(mb_playlist_item,
+LISTABLE_STRUCT(avbox_playlist_item,
 	const char *filepath;
 );
 
@@ -22,7 +22,7 @@ LISTABLE_STRUCT(mb_playlist_item,
 /**
  * Media player status enum.
  */
-enum mb_player_status
+enum avbox_player_status
 {
 	MB_PLAYER_STATUS_READY,
 	MB_PLAYER_STATUS_BUFFERING,
@@ -34,39 +34,39 @@ enum mb_player_status
 /**
  * Status notification structure.
  */
-struct mb_player_status_data
+struct avbox_player_status_data
 {
-	struct mbp *sender;
-	enum mb_player_status last_status;
-	enum mb_player_status status;
+	struct avbox_player *sender;
+	enum avbox_player_status last_status;
+	enum avbox_player_status status;
 };
 
 
 /* status changed callback function */
-typedef void (*mb_player_status_callback)(struct mbp *inst,
-	enum mb_player_status status, enum mb_player_status last_status);
+typedef void (*avbox_player_status_callback)(struct avbox_player *inst,
+	enum avbox_player_status status, enum avbox_player_status last_status);
 
 
 /**
- * mb_player_playlist() -- Plays a list of items
+ * Plays a list of items
  */
 int
-mb_player_playlist(struct mbp* inst, LIST *playlist, struct mb_playlist_item* item);
+avbox_player_playlist(struct avbox_player* inst, LIST *playlist, struct avbox_playlist_item* item);
 
 
 /**
  * Get the current status of a media player instance.
  */
-enum mb_player_status
-mb_player_getstatus(struct mbp* inst);
+enum avbox_player_status
+avbox_player_getstatus(struct avbox_player* inst);
 
 
 /**
- * mb_player_showoverlaytext() -- Shows overlay text on the top of the
+ * Shows overlay text on the top of the
  * screen.
  */
 void
-mb_player_showoverlaytext(struct mbp *inst,
+avbox_player_showoverlaytext(struct avbox_player *inst,
 	const char *text, int duration, enum mbv_alignment alignment);
 
 
@@ -74,67 +74,67 @@ mb_player_showoverlaytext(struct mbp *inst,
  * Get the last played file
  */
 const char *
-mb_player_getmediafile(struct mbp *inst);
+avbox_player_getmediafile(struct avbox_player *inst);
 
 
 /**
- * mb_player_gettitle() -- Gets the title of the currently playing
+ * Gets the title of the currently playing
  * media file or NULL if nothing is playing. The result needs to be
  * freed with free().
  */
 char *
-mb_player_gettitle(struct mbp *inst);
+avbox_player_gettitle(struct avbox_player *inst);
 
 
 /**
  * Get the state of the stream buffer
  */
 unsigned int
-mb_player_bufferstate(struct mbp *inst);
+avbox_player_bufferstate(struct avbox_player *inst);
 
 
 /**
  * Register a queue for status notifications.
  */
 int
-mb_player_registernotificationqueue(struct mbp *inst, int queuefd);
+avbox_player_registernotificationqueue(struct avbox_player *inst, int queuefd);
 
 
 /**
- * mb_player_seek_chapter() -- Seek to a chapter.
+ * Seek to a chapter.
  */
 int
-mb_player_seek_chapter(struct mbp *inst, int incr);
+avbox_player_seek_chapter(struct avbox_player *inst, int incr);
 
 
 void
-mb_player_update(struct mbp* inst);
+avbox_player_update(struct avbox_player* inst);
 
 
 int 
-mb_player_play(struct mbp* inst, const char * const path);
+avbox_player_play(struct avbox_player* inst, const char * const path);
 
 
 int
-mb_player_pause(struct mbp* inst);
+avbox_player_pause(struct avbox_player* inst);
 
 
 int
-mb_player_stop(struct mbp* inst);
+avbox_player_stop(struct avbox_player* inst);
 
 
 /**
  * Create a new media player instance.
  */
-struct mbp*
-mb_player_new(struct mbv_window *window);
+struct avbox_player*
+avbox_player_new(struct mbv_window *window);
 
 
 /**
  * Destroy media player instance.
  */
 void
-mb_player_destroy(struct mbp *inst);
+avbox_player_destroy(struct avbox_player *inst);
 
 #endif
 
