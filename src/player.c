@@ -294,13 +294,15 @@ avbox_player_dumpvideo(struct avbox_player * const inst, const int64_t pts, cons
 	int64_t video_time;
 	struct avbox_video_frame *frame;
 
-	DEBUG_VPRINT("player", "Skipping frames until %li", pts);
+	DEBUG_VPRINT("player", "Skipping frames until %li (flush=%i)",
+		pts, flush);
 
 	video_time = pts - 10000 - 1;
 
+	/* tell decoder to skip frames */
+	inst->video_codec_ctx->skip_frame = AVDISCARD_NONREF;
+
 	while (flush || video_time < (pts - 10000)) {
-		/* tell decoder to skip frames */
-		inst->video_codec_ctx->skip_frame = AVDISCARD_NONREF;
 
 		/* first drain the decoded frames buffer */
 		if ((frame = avbox_queue_peek(inst->video_frames_q, !flush)) == NULL) {
@@ -330,6 +332,7 @@ avbox_player_dumpvideo(struct avbox_player * const inst, const int64_t pts, cons
 			LOG_PRINT_ERROR("We peeked one frame but got a different one. WTF?");
 			abort();
 		}
+		free(frame);
 		c++;
 		ret = 1;
 	}
