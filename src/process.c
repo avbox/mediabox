@@ -372,16 +372,27 @@ avbox_process_io_thread(void *arg)
 		/* build a file descriptor set to select() */
 		pthread_mutex_lock(&process_list_lock);
 		LIST_FOREACH(struct avbox_process*, proc, &process_list) {
-			if (proc->stdout != -1) {
-				FD_SET(proc->stdout, &fds);
-				fd_max = MAX(fd_max, proc->stdout);
+			if (proc->flags & AVBOX_PROCESS_STDOUT_LOG) {
+				if (proc->stdout != -1) {
+					FD_SET(proc->stdout, &fds);
+					fd_max = MAX(fd_max, proc->stdout);
+				}
 			}
-			if (proc->stderr != -1) {
-				FD_SET(proc->stderr, &fds);
-				fd_max = MAX(fd_max, proc->stderr);
+			if (proc->flags & AVBOX_PROCESS_STDERR_LOG) {
+				if (proc->stderr != -1) {
+					FD_SET(proc->stderr, &fds);
+					fd_max = MAX(fd_max, proc->stderr);
+				}
 			}
 		}
 		pthread_mutex_unlock(&process_list_lock);
+
+		/* if no file descriptors to monitor sleep
+		 * for 1/2 second */
+		if (fd_max == 0) {
+			usleep(500L * 1000L);
+			continue;
+		}
 
 		/* select the output file descriptors of all processes */
 		tv.tv_sec = 0;
@@ -392,20 +403,21 @@ avbox_process_io_thread(void *arg)
 			if (errno == EINTR) {
 				continue;
 			}
-			LOG_VPRINT(MB_LOGLEVEL_ERROR, "process", "select() returned -1 (errno=%i)",
-				errno);
-			usleep(500 * 1000L * 1000L);
+			LOG_VPRINT_ERROR("select() failed: %s (errno=%i)",
+				strerror(errno), errno);
+			usleep(500 * 1000L);
 			continue;
 		}
 
 		/* process all pending output */
 		pthread_mutex_lock(&process_list_lock);
 		LIST_FOREACH(struct avbox_process*, proc, &process_list) {
-			if (proc->stdout != -1 && FD_ISSET(proc->stdout, &fds)) {
-				if (!(proc->flags & AVBOX_PROCESS_STDOUT_PIPE)) {
+			if (proc->flags & AVBOX_PROCESS_STDOUT_LOG) {
+				if (proc->stdout != -1 && FD_ISSET(proc->stdout, &fds)) {
 					if ((res = read(proc->stdout, buf, sizeof(buf))) == -1) {
 						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 							"read() returned -1 (errno=%i)", errno);
+						continue;
 					}
 					if (proc->flags & AVBOX_PROCESS_STDOUT_LOG) {
 						/* TODO: We need to break the output in lines */
@@ -414,11 +426,12 @@ avbox_process_io_thread(void *arg)
 					}
 				}
 			}
-			if (proc->stderr != -1 && FD_ISSET(proc->stderr, &fds)) {
-				if (!(proc->flags & AVBOX_PROCESS_STDERR_PIPE)) {
+			if (proc->flags & AVBOX_PROCESS_STDERR_LOG) {
+				if (proc->stderr != -1 && FD_ISSET(proc->stderr, &fds)) {
 					if ((res = read(proc->stderr, buf, sizeof(buf))) == -1) {
 						LOG_VPRINT(MB_LOGLEVEL_ERROR, "process",
 							"read() returned -1 (errno=%i)", errno);
+						continue;
 					}
 					if (proc->flags & AVBOX_PROCESS_STDERR_LOG) {
 						/* TODO: We need to break the output in lines */
