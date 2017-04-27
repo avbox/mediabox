@@ -1464,35 +1464,6 @@ avbox_player_stream_parse(void *arg)
 		goto decoder_exit;
 	}
 
-	/* if the file contains a video stream fire the video decoder */
-	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0) >= 0) {
-		inst->video_skipframes = 0;
-		inst->video_decoder_pts = 0;
-		inst->getmastertime = avbox_player_getsystemtime;
-		inst->have_video = 1;
-
-		/* create a video packets queue */
-		if ((inst->video_packets_q = avbox_queue_new(MB_VIDEO_BUFFER_PACKETS)) == NULL) {
-			LOG_VPRINT_ERROR("Could not create video packets queue: %s!",
-				strerror(errno));
-			goto decoder_exit;
-		}
-
-		/* fire the video decoder thread */
-		pthread_mutex_lock(&thread_start_lock);
-		pthread_mutex_lock(&thread_start_mutex);
-		if (pthread_create(&inst->video_decoder_thread, NULL, avbox_player_video_decode, inst) != 0) {
-			LOG_PRINT_ERROR("Could not create video decoder thread!");
-			abort();
-		}
-		pthread_cond_wait(&thread_start_cond, &thread_start_mutex);
-		pthread_mutex_unlock(&thread_start_mutex);
-		pthread_mutex_unlock(&thread_start_lock);
-
-		DEBUG_VPRINT("player", "Video stream %i selected",
-			inst->video_stream_index);
-	}
-
 	/* if there's an audio stream start the audio decoder */
 	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0) >= 0) {
 
@@ -1523,6 +1494,38 @@ avbox_player_stream_parse(void *arg)
 		pthread_cond_wait(&thread_start_cond, &thread_start_mutex);
 		pthread_mutex_unlock(&thread_start_mutex);
 		pthread_mutex_unlock(&thread_start_lock);
+	}
+
+
+	/* if the file contains a video stream fire the video decoder */
+	if (av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0) >= 0) {
+		inst->video_skipframes = 0;
+		inst->video_decoder_pts = 0;
+		if (!inst->have_audio) {
+			inst->getmastertime = avbox_player_getsystemtime;
+		}
+		inst->have_video = 1;
+
+		/* create a video packets queue */
+		if ((inst->video_packets_q = avbox_queue_new(MB_VIDEO_BUFFER_PACKETS)) == NULL) {
+			LOG_VPRINT_ERROR("Could not create video packets queue: %s!",
+				strerror(errno));
+			goto decoder_exit;
+		}
+
+		/* fire the video decoder thread */
+		pthread_mutex_lock(&thread_start_lock);
+		pthread_mutex_lock(&thread_start_mutex);
+		if (pthread_create(&inst->video_decoder_thread, NULL, avbox_player_video_decode, inst) != 0) {
+			LOG_PRINT_ERROR("Could not create video decoder thread!");
+			abort();
+		}
+		pthread_cond_wait(&thread_start_cond, &thread_start_mutex);
+		pthread_mutex_unlock(&thread_start_mutex);
+		pthread_mutex_unlock(&thread_start_lock);
+
+		DEBUG_VPRINT("player", "Video stream %i selected",
+			inst->video_stream_index);
 	}
 
 	DEBUG_PRINT("player", "Stream decoder ready");
