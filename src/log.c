@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <assert.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 
 static FILE *logfile = NULL;
@@ -27,8 +28,13 @@ log_printf(const char * const fmt, ...)
 {
 	size_t ret;
 	va_list args;
+	struct timespec tv;
+
+	(void) clock_gettime(CLOCK_MONOTONIC, &tv);
+
 	va_start(args, fmt);
 	pthread_mutex_lock(&iolock);
+	fprintf(logfile, "[%08li.%09li] ", tv.tv_sec, tv.tv_nsec);
 	ret = vfprintf(logfile, fmt, args);
 	fflush(logfile);
 	pthread_mutex_unlock(&iolock);
