@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <unistd.h>
 
+#define LOG_MODULE "library"
 
 #include "video.h"
 #include "input.h"
@@ -70,16 +71,15 @@ mb_mainmenu_init(void)
 		(yres / 2) - (window_height / 2),
 		window_width, window_height, NULL);
 	if (window == NULL) {
-		LOG_PRINT(MB_LOGLEVEL_ERROR, "mainmenu",
-			"Could not create new window!");
+		LOG_PRINT_ERROR("Could not create new window!");
 		return -1;
 	}
 
 	/* create a new menu widget inside main window */
-	menu = mb_ui_menu_new(window);
-	if (menu == NULL) {
-		LOG_VPRINT(MB_LOGLEVEL_ERROR, "mainmenu",
-			"Could not create menu widget (errno=%i)", errno);
+	if ((menu = mb_ui_menu_new(window)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create menu widget (errno=%i)",
+			errno);
+		mbv_window_destroy(window);
 		return -1;
 	}
 
@@ -121,16 +121,18 @@ mb_mainmenu_showdialog(void)
 			assert(selected != NULL);
 
 			if (!memcmp("LIB", selected, 4)) {
-				mb_library_init();
-				mbv_window_hide(window);
-				if (mb_library_showdialog() == 0) {
-					quit = 1;
-					mb_library_destroy();
-					break;
+				if (avbox_library_init() == -1) {
+					LOG_PRINT_ERROR("Could not initialize library!");
 				} else {
-					mb_library_destroy();
+					mbv_window_hide(window);
+					if (avbox_library_showdialog() == 0) {
+						quit = 1;
+						avbox_library_shutdown();
+						break;
+					} else {
+						avbox_library_shutdown();
+					}
 				}
-
 			} else if (!memcmp("REBOOT", selected, 6)) {
 				mbv_window_hide(window);
 				avbox_shell_reboot();
@@ -176,4 +178,3 @@ mb_mainmenu_destroy(void)
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);
 }
-

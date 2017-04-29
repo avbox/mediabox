@@ -648,7 +648,7 @@ avbox_shell_run(void)
 void
 avbox_shell_reboot(void)
 {
-	if (mb_su_gainroot() == 0) {
+	if (avbox_gainroot() == 0) {
 		close(input_fd);
 		if (system("systemctl stop avmount") != 0) {
 			fprintf(stderr, "shell: systemctl stop avmount failed\n");
@@ -657,6 +657,7 @@ avbox_shell_reboot(void)
 		if (system("systemctl reboot") != 0) {
 			fprintf(stderr, "shell: systemctl reboot failed\n");
 		}
+		avbox_droproot();
 	}
 }
 

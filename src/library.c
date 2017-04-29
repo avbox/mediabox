@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 
+#define LOG_MODULE "library"
 
 #include "video.h"
 #include "input.h"
@@ -46,28 +47,26 @@ static char *dotdot = NULL;
 
 
 static struct avbox_playlist_item *
-mb_library_addtoplaylist(const char *file)
+avbox_library_addtoplaylist(const char *file)
 {
 	struct avbox_playlist_item *item;
 
 	/* check that the file is valid */
 	if (file == NULL || strlen(file) == 0) {
-		LOG_PRINT(MB_LOGLEVEL_ERROR, "library",
-			"Could not add to playlist. Invalid arguments");
+		LOG_PRINT_ERROR("Could not add to playlist. Invalid arguments");
 		errno = ENOENT;
 		return NULL;
 	}
 
 	/* allocate memory */
 	if ((item = malloc(sizeof(struct avbox_playlist_item))) == NULL) {
-		LOG_PRINT(MB_LOGLEVEL_ERROR, "library", "Could not add to playlist. Out of memory");
+		LOG_PRINT_ERROR("Could not add to playlist. Out of memory");
 		return NULL;
 	}
 
 	/* copy filepath */
 	if ((item->filepath = strdup(file)) == NULL) {
-		LOG_PRINT(MB_LOGLEVEL_ERROR, "library",
-			"Could not add to playlist. Out of memory (2)");
+		LOG_PRINT_ERROR("Could not add to playlist. Out of memory (2)");
 		free(item);
 		return NULL;
 	}
@@ -79,7 +78,7 @@ mb_library_addtoplaylist(const char *file)
 
 
 static void
-mb_library_freeplaylistitem(struct avbox_playlist_item *item)
+avbox_library_freeplaylistitem(struct avbox_playlist_item *item)
 {
 	assert(item != NULL);
 
@@ -92,13 +91,13 @@ mb_library_freeplaylistitem(struct avbox_playlist_item *item)
 
 
 static void
-mb_library_freeplaylist(void)
+avbox_library_freeplaylist(void)
 {
 	struct avbox_playlist_item *item;
 
 	LIST_FOREACH_SAFE(struct avbox_playlist_item*, item, &playlist, {
 		LIST_REMOVE(item);
-		mb_library_freeplaylistitem(item);
+		avbox_library_freeplaylistitem(item);
 	});
 }
 
@@ -108,7 +107,7 @@ mb_library_freeplaylist(void)
  * and return a pointer to the extension.
  */
 static char *
-mb_library_stripext(char *filename)
+avbox_library_stripext(char *filename)
 {
 	char *p;
 
@@ -134,7 +133,7 @@ mb_library_stripext(char *filename)
 
 
 static int
-mb_library_loadlist(const char *path)
+avbox_library_loadlist(const char *path)
 {
 	DIR *dir;
 	int isroot;
@@ -147,12 +146,13 @@ mb_library_loadlist(const char *path)
 	assert(path != NULL);
 
 	/* first free the playlist */
-	mb_library_freeplaylist();
+	avbox_library_freeplaylist();
 
 	/* allocate memory for item path */
 	rpath = malloc(sizeof(LIBRARY_ROOT) + path_len + 2);
 	if (rpath == NULL) {
-		fprintf(stderr, "mb_library: Out of memory\n");
+		LOG_VPRINT_ERROR("Could not load list: %s",
+			strerror(errno));
 		return -1;
 	}
 
@@ -176,7 +176,8 @@ mb_library_loadlist(const char *path)
 	free(rpath);
 
 	if ((dir = opendir(resolved_path)) == NULL) {
-		fprintf(stderr, "mb_library: opendir() failed\n");
+		LOG_VPRINT_ERROR("Cannot open directory '%s': %s",
+			resolved_path, strerror(errno));
 		return -1;
 	}
 
@@ -204,13 +205,14 @@ mb_library_loadlist(const char *path)
 		/* get a copy of the filename (this will be the title) */
 		title = strdup(ent->d_name);
 		if (title == NULL) {
-			fprintf(stderr, "mb_library: Out of memory\n");
+			LOG_VPRINT_ERROR("Could not load list: %s",
+				strerror(errno));
 			closedir(dir);
 			return -1;
 		}
 
 		/* strip the filename extension from the title */
-		ext = mb_library_stripext(title);
+		ext = avbox_library_stripext(title);
 
 		/* do not show subtitles */
 		if (ext != NULL) {
@@ -223,7 +225,8 @@ mb_library_loadlist(const char *path)
 		/* allocate mem for a copy of the filepath */
 		filepath = malloc(resolved_path_len + strlen(ent->d_name) + 3);
 		if (filepath == NULL) {
-			fprintf(stderr, "mb_library: Out of memory\n");
+			LOG_VPRINT_ERROR("Could not load list: %s",
+				strerror(errno));
 			free(title);
 			closedir(dir);
 			return -1;
@@ -234,7 +237,8 @@ mb_library_loadlist(const char *path)
 		strcat(filepath, ent->d_name);
 
 		if (stat(filepath, &st) == -1) {
-			fprintf(stderr, "mb_library: stat() failed errno=%i\n", errno);
+			LOG_VPRINT_ERROR("Could not stat '%s': %s",
+				strerror(errno));
 			free(filepath);
 			free(title);
 			continue;
@@ -247,7 +251,8 @@ mb_library_loadlist(const char *path)
 			filepathrel = strdup(filepath);
 		}
 		if (filepathrel == NULL) {
-			fprintf(stderr, "mb_library: Out of memory\n");
+			LOG_VPRINT_ERROR("Could not load list: %s",
+				strerror(errno));
 			free(filepath);
 			free(title);
 			closedir(dir);
@@ -260,7 +265,7 @@ mb_library_loadlist(const char *path)
 			struct mb_library_playlist_item *library_item;
 
 			if ((library_item = malloc(sizeof(struct mb_library_playlist_item))) == NULL) {
-				LOG_PRINT(MB_LOGLEVEL_ERR, "library", "Add to playlist failed");
+				LOG_PRINT_ERROR("Add to playlist failed");
 				free(filepathrel);
 				free(filepath);
 				free(title);
@@ -275,8 +280,8 @@ mb_library_loadlist(const char *path)
 				library_item->isdir = 0;
 
 				/* add item to playlist */
-				if ((library_item->data.playlist_item = mb_library_addtoplaylist(filepathrel)) == NULL) {
-					LOG_PRINT(MB_LOGLEVEL_ERR, "library", "Add to playlist failed");
+				if ((library_item->data.playlist_item = avbox_library_addtoplaylist(filepathrel)) == NULL) {
+					LOG_PRINT_ERROR("Add to playlist failed");
 					free(library_item);
 					free(filepathrel);
 					free(filepath);
@@ -307,7 +312,7 @@ mb_library_loadlist(const char *path)
  * item list entries
  */
 static int
-mb_library_freeitems(void *item, void *data)
+avbox_library_freeitems(void *item, void *data)
 {
 	struct mb_library_playlist_item *playlist_item =
 		(struct mb_library_playlist_item*) item;
@@ -337,7 +342,7 @@ mb_library_freeitems(void *item, void *data)
  * mbm_init() -- Initialize the MediaBox menu
  */
 int
-mb_library_init(void)
+avbox_library_init(void)
 {
 	int resx, resy, width;
 	const int height = 450;
@@ -361,26 +366,26 @@ mb_library_init(void)
 		(resy / 2) - (height / 2),
 		width, height, NULL);
 	if (window == NULL) {
-		fprintf(stderr, "mb_mainmenu: Could not create new window!\n");
+		LOG_PRINT_ERROR("Could not create library window!");
 		return -1;
 	}
 
 	/* create a new menu widget inside main window */
 	menu = mb_ui_menu_new(window);
 	if (menu == NULL) {
-		fprintf(stderr, "mb_mainmenu: Could not create menu\n");
+		LOG_PRINT_ERROR("Could not create menu widget!");
 		return -1;
 	}
 
 	/* populate the menu */
-	mb_library_loadlist("/");
+	avbox_library_loadlist("/");
 
 	return 0;
 }
 
 
 int
-mb_library_showdialog(void)
+avbox_library_showdialog(void)
 {
 	int ret = -1, quit = 0;
 
@@ -403,9 +408,9 @@ mb_library_showdialog(void)
 				}
 
 				/* clear the list and load the next page */
-				mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
+				mb_ui_menu_enumitems(menu, avbox_library_freeitems, NULL);
 				mb_ui_menu_clearitems(menu);
-				mb_library_loadlist(selected_copy);
+				avbox_library_loadlist(selected_copy);
 				mbv_window_update(window);
 				free(selected_copy);
 
@@ -424,7 +429,7 @@ mb_library_showdialog(void)
 				/* get the active player instance */
 				player = avbox_shell_getactiveplayer();
 				if (player == NULL) {
-					fprintf(stderr, "mb_library: Could not get active player\n");
+					LOG_PRINT_ERROR("Could not get active player!");
 					break;
 				}
 
@@ -437,16 +442,16 @@ mb_library_showdialog(void)
 				} else {
 					mbv_window_show(window);
 
-					fprintf(stderr, "library: play() failed\n");
+					LOG_PRINT_ERROR("Could not play item!");
 					/* TODO: Display an error message */
 				}
 			}
 		}
 		if (!quit && dotdot != NULL) {
 			/* clear the list and load the parent directory */
-			mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
+			mb_ui_menu_enumitems(menu, avbox_library_freeitems, NULL);
 			mb_ui_menu_clearitems(menu);
-			mb_library_loadlist(dotdot);
+			avbox_library_loadlist(dotdot);
 			mbv_window_update(window);
 		} else {
 			break;
@@ -461,17 +466,16 @@ mb_library_showdialog(void)
 
 
 void
-mb_library_destroy(void)
+avbox_library_shutdown(void)
 {
-	/* fprintf(stderr, "library: Destroying instance\n"); */
+	DEBUG_PRINT("library", "Shutdown library");
 	if (dotdot != NULL) {
 		free(dotdot);
 		dotdot = NULL;
 	}
 
-	mb_library_freeplaylist();
-	mb_ui_menu_enumitems(menu, mb_library_freeitems, NULL);
+	avbox_library_freeplaylist();
+	mb_ui_menu_enumitems(menu, avbox_library_freeitems, NULL);
 	mb_ui_menu_destroy(menu);
 	mbv_window_destroy(window);
 }
-

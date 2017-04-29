@@ -11,14 +11,14 @@
 
 
 int
-mb_su_canroot(void);
+avbox_canroot(void);
 
 
 int
-mb_su_gainroot(void);
+avbox_gainroot(void);
 
 
 void
-mb_su_droproot(void);
+avbox_droproot(void);
 
 #endif

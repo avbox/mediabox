@@ -6,8 +6,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
+#include <string.h>
 #include <unistd.h>
 #include <pwd.h>
+
+#define LOG_MODULE "su"
+
+#include "log.h"
+
 
 static uid_t mb_uid = 0;
 static gid_t mb_gid = 0;
@@ -20,8 +26,7 @@ get_mediabox_user(uid_t *uid, gid_t *gid)
 	errno = 0;
 	pw = getpwnam("mediabox");
 	if (pw == NULL) {
-		fprintf(stderr, "mb: mediabox user not found. errno=%i\n",
-			errno);
+		LOG_PRINT_WARN("User mediabox not found!");
 		*uid = *gid = 0;
 		return;
 	}
@@ -31,34 +36,39 @@ get_mediabox_user(uid_t *uid, gid_t *gid)
 
 
 int
-mb_su_canroot(void)
+avbox_canroot(void)
 {
 	return (getuid() == 0);
 }
 
 
 int
-mb_su_gainroot(void)
+avbox_gainroot(void)
 {
 	if (geteuid() == 0) {
-		return 0; /* already root */
+		/* we're already root */
+		return 0;
 
 	} else 	if (getuid() != 0) {
-		return -1; /* never root */
-
-	} else if (seteuid(0) == -1) {
+		/* the program was not started as root so we can't get root */
+		LOG_PRINT_ERROR("Cannot gain root access: Not started as root!");
 		return -1;
 
+	} else if (seteuid(0) == -1) {
+		LOG_VPRINT_ERROR("Could not set effective user id: %s",
+			strerror(errno));
+		return -1;
 	}
 	if (setegid(0) != 0) {
-		fprintf(stderr, "su: setegid() failed\n");
+		LOG_VPRINT_ERROR("Could not set effective group id: %s",
+			strerror(errno));
 	}
 	return 0;
 }
 
 
 void
-mb_su_droproot(void)
+avbox_droproot(void)
 {
 	get_mediabox_user(&mb_uid, &mb_gid);
 

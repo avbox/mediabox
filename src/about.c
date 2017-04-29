@@ -83,16 +83,11 @@ mb_about_init(void)
 {
 	int xres, yres;
 	int font_height;
-	int n_entries = 6;
-
-	if (mb_su_canroot()) {
-		n_entries++;
-	}
 
 	/* set height according to font size */
 	mbv_window_getcanvassize(mbv_getrootwindow(), &xres, &yres);
 	font_height = mbv_getdefaultfontheight();
-	window_height = 30 + font_height + ((font_height + 10) * n_entries);
+	window_height = 30 + font_height + ((font_height + 10) * 6);
 	dirty = 0;
 
 	/* set width according to screen size */

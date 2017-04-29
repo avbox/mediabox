@@ -11,15 +11,15 @@
  * mbm_init() -- Initialize the MediaBox menu
  */
 int
-mb_library_init(void);
+avbox_library_init(void);
 
 
 int
-mb_library_showdialog(void);
+avbox_library_showdialog(void);
 
 
 void
-mb_library_destroy(void);
+avbox_library_shutdown(void);
 
 
 #endif

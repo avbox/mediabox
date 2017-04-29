@@ -84,7 +84,6 @@ surface_new(struct mbv_surface *parent,
 	const int x, const int y, const int w, const int h)
 {
 	struct mbv_surface *inst;
-	pthread_mutexattr_t lockattr;
 
 	DEBUG_PRINT("video-drm", "Entering surface_new()");
 
@@ -135,8 +134,6 @@ surface_new(struct mbv_surface *parent,
 		inst->buffers[0].map = NULL;
 	}
 
-	//pthread_mutexattr_init(&lockattr);
-	//pthread_mutexattr_settype(&lockattr, PTHREAD_MUTEX_RECURSIVE);
 	if (pthread_mutex_init(&inst->lock, NULL) != 0) {
 		LOG_PRINT_ERROR("Could not initialize surface mutex!");
 		if (inst->buffers[0].map != NULL) {

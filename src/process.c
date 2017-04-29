@@ -176,25 +176,30 @@ avbox_process_fork(struct avbox_process *proc)
 #ifdef ENABLE_IONICE
 	/* set the process IO priority */
 	if (proc->flags & AVBOX_PROCESS_IONICE_IDLE) {
-		(void) mb_su_gainroot();
-		if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)) == -1) {
-			LOG_VPRINT_ERROR("Could not set process IO priority to IDLE: %s",
-				strerror(errno));
+		if (avbox_gainroot() == 0) {
+			if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)) == -1) {
+				LOG_VPRINT_ERROR("Could not set process IO priority to IDLE: %s",
+					strerror(errno));
+			}
+			avbox_droproot();
 		}
-		(void) mb_su_droproot();
 	} else if (proc->flags & AVBOX_PROCESS_IONICE_BE) {
-		(void) mb_su_gainroot();
-		if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 0)) == -1) {
-			LOG_VPRINT_ERROR("Could not set process IO priority to BE: %s",
-				strerror(errno));
+		if (avbox_gainroot() == 0) {
+			if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 0)) == -1) {
+				LOG_VPRINT_ERROR("Could not set process IO priority to BE: %s",
+					strerror(errno));
+			}
+			avbox_droproot();
 		}
-		(void) mb_su_droproot();
 	}
 #endif
 
 	/* if the process requires root then elevate privilege */
 	if (proc->flags & AVBOX_PROCESS_SUPERUSER) {
-		mb_su_gainroot();
+		if (avbox_gainroot() == -1) {
+			LOG_VPRINT_ERROR("Could not gain root for process '%s' (id=%i)",
+				proc->name, proc->id);
+		}
 	}
 
 	/* execute the process */

@@ -329,7 +329,7 @@ main (int argc, char **cargv)
 #endif
 
 	/* drop root prividges after initializing framebuffer */
-	mb_su_droproot();
+	avbox_droproot();
 
 	/* initialize the shell */
 	if (avbox_shell_init() != 0) {
