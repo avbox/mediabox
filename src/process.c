@@ -34,6 +34,16 @@
 #endif
 
 
+struct avbox_process;
+
+
+struct callback_state {
+	int result;
+	int returned;
+	int timer;
+	struct avbox_process *process;
+};
+
 /**
  * Represents a process managed by avbox.
  */
@@ -54,6 +64,7 @@ LISTABLE_STRUCT(avbox_process,
 	avbox_process_exit exit_callback;
 	void *exit_callback_data;
 	int stopping;
+	struct callback_state *cbstate;
 	pthread_cond_t cond;
 );
 
@@ -292,6 +303,9 @@ avbox_process_free(struct avbox_process *proc)
 	if (proc->args != NULL) {
 		avbox_process_free_args(proc->args);
 	}
+	if (proc->cbstate != NULL) {
+		free(proc->cbstate);
+	}
 	free(proc);
 }
 
@@ -352,7 +366,16 @@ static enum avbox_timer_result
 avbox_process_autorestart(int id, void *data)
 {
 	struct avbox_process * const proc = (struct avbox_process * const) data;
-	proc->pid = avbox_process_fork(proc);
+
+	DEBUG_VPRINT("process", "Restarting process %s (id=%i pid=%i)",
+		proc->name, proc->id, proc->pid);
+	if ((proc->pid = avbox_process_fork(proc)) == -1) {
+		LOG_VPRINT_ERROR("Could not restart process '%s' (id=%i)",
+			proc->name, proc->id);
+	} else {
+		DEBUG_VPRINT("process", "Process %s restarted. New pid=%i",
+			proc->name, proc->pid);
+	}
 	return AVBOX_TIMER_CALLBACK_RESULT_STOP;
 }
 
@@ -459,6 +482,21 @@ avbox_process_io_thread(void *arg)
 
 
 /**
+ * Invokes the callback function from another thread.
+ */
+static enum avbox_timer_result
+avbox_process_callback_helper(int id, void *data)
+{
+	struct avbox_process * const proc =
+		(struct avbox_process*) data;
+	proc->cbstate->result = proc->exit_callback(proc->id,
+		proc->exit_status, proc->exit_callback_data);
+	proc->cbstate->returned = 1;
+	return AVBOX_TIMER_CALLBACK_RESULT_STOP;
+}
+
+
+/**
  * This function runs on it's own thread and
  * waits for processes to exit and then handles
  * the event appropriately.
@@ -467,55 +505,103 @@ static void *
 avbox_process_monitor_thread(void *arg)
 {
 	pid_t pid;
-	int status, found = 0;
+	int status, found = 0, cbresult;
 	struct avbox_process *proc;
 
 	MB_DEBUG_SET_THREAD_NAME("proc-mon");
 	DEBUG_PRINT("process", "Starting process monitor thread");
 
 	while (!quit || LIST_SIZE(&process_list) > 0) {
-		if ((pid = wait(&status)) == -1) {
+		if ((pid = waitpid(-1, &status, WNOHANG)) <= 0) {
 			if (errno == EINTR) {
-				continue;
+				usleep(500 * 1000L);
 			} else if (errno == ECHILD) {
 				usleep(500 * 1000L);
-				continue;
+			} else {
+				LOG_VPRINT_ERROR("Could not wait() for process: %s",
+					strerror(errno));
+				break;
 			}
-			LOG_VPRINT_ERROR("Could not wait() for process: %s",
-				strerror(errno));
-			break;
+
+			/* since processes may have pid set to -1
+			 * we need to change to something else to avoid
+			 * a false match bellow */
+			pid = -2;
 		}
 
 
 		pthread_mutex_lock(&process_list_lock);
 
 		LIST_FOREACH_SAFE(struct avbox_process*, proc, &process_list, {
-			if (proc->pid == pid) {
-				DEBUG_VPRINT("process", "Process %i exitted with status %i",
-					proc->id, WEXITSTATUS(status));
+			if (proc->pid == pid || proc->cbstate != NULL) {
+				if (proc->pid == pid) {
 
-				/* close file descriptors */
-				if (proc->stdin != -1) close(proc->stdin);
-				if (proc->stdout != -1) close(proc->stdout);
-				if (proc->stderr != -1) close(proc->stderr);
+					assert(proc->cbstate == NULL);
 
-				/* clear file descriptors and PID */
-				proc->pid = -1;
-				proc->stdin = -1;
-				proc->stdout = -1;
-				proc->stderr = -1;
+					/* close file descriptors */
+					if (proc->stdin != -1) close(proc->stdin);
+					if (proc->stdout != -1) close(proc->stdout);
+					if (proc->stderr != -1) close(proc->stderr);
 
-				/* if the process terminated abnormally then log
-				 * an error message */
-				if (WEXITSTATUS(status)) {
-					LOG_VPRINT_WARN("Process '%s' exitted with status %i (id=%i,pid=%i)",
-						proc->name, WEXITSTATUS(status), proc->id, pid);
+					/* clear file descriptors and PID */
+					proc->pid = -1;
+					proc->stdin = -1;
+					proc->stdout = -1;
+					proc->stderr = -1;
+
+					/* save exit status */
+					proc->exit_status = WEXITSTATUS(status);
+
+					/* if the process terminated abnormally then log
+					 * an error message */
+					if (proc->exit_status) {
+						LOG_VPRINT_WARN("Process '%s' exitted with status %i (id=%i,pid=%i)",
+							proc->name, proc->exit_status, proc->id, pid);
+					} else {
+						DEBUG_VPRINT("process", "Process '%s' exitted with status %i (id=%i,pid=%i)",
+							proc->name, proc->exit_status, proc->id, pid);
+					}
+
+					/* if we have a callback function invoke it from another
+					 * thread and continue */
+					if (proc->exit_callback != NULL) {
+						if ((proc->cbstate = malloc(sizeof(struct callback_state))) == NULL) {
+							LOG_PRINT_ERROR("Could not allocate callback state. Aborting");
+							abort();
+						}
+						proc->cbstate->result = 0;
+						proc->cbstate->returned = 0;
+
+						/* for now we use a 0 interval oneshot timer to invoke the
+						 * callback from another thread */
+						struct timespec tv;
+						tv.tv_sec = 0;
+						tv.tv_nsec = 0;
+						if ((proc->cbstate->timer = avbox_timer_register(&tv,
+							AVBOX_TIMER_TYPE_ONESHOT, -1, avbox_process_callback_helper, proc)) == -1) {
+							LOG_PRINT_ERROR("Could not fire callback!");
+							abort();
+						}
+						continue;
+					} else {
+						cbresult = 0;
+					}
+				} else if (proc->cbstate != NULL) {
+					if (!proc->cbstate->returned) {
+						continue;
+					}
+
+					/* at this point we're back from the callback
+					 * so we can continue */
+					cbresult = proc->cbstate->result;
+					free(proc->cbstate);
+					proc->cbstate = NULL;
 				}
 
 				/* if the process terminated abormally and the AUTORESTART flag is
 				 * set then restart the process */
-				if ((proc->flags & AVBOX_PROCESS_AUTORESTART_ALWAYS) ||
-					(WEXITSTATUS(status) != 0 && (proc->flags & AVBOX_PROCESS_AUTORESTART))) {
+				if (cbresult == 0 && ((proc->flags & AVBOX_PROCESS_AUTORESTART_ALWAYS) != 0 ||
+					(proc->exit_status != 0 && (proc->flags & AVBOX_PROCESS_AUTORESTART) != 0))) {
 					if (!proc->stopping) {
 						LOG_VPRINT_INFO("Auto restarting process '%s' (id=%i,pid=%i)",
 							proc->name, proc->id, pid);
@@ -539,17 +625,10 @@ avbox_process_monitor_thread(void *arg)
 					}
 				}
 
-				/* invoke the process exit callback */
-				if (proc->exit_callback != NULL) {
-					proc->exit_callback(proc->id,
-						WEXITSTATUS(status), proc->exit_callback_data);
-				}
-
 				if (proc->flags & AVBOX_PROCESS_WAIT) {
 					/* save exit status and wake any threads waiting
 					 * on this process */
 					proc->exitted = 1;
-					proc->exit_status = WEXITSTATUS(status);
 					pthread_cond_broadcast(&proc->cond);
 				} else {
 					DEBUG_VPRINT("process", "Freeing process %i", proc->id);
@@ -560,7 +639,7 @@ avbox_process_monitor_thread(void *arg)
 				}
 
 				found = 1;
-				break;
+				continue;
 			}
 		});
 
@@ -715,6 +794,7 @@ avbox_process_start(const char *binary, const char * const argv[],
 	proc->binary = strdup(binary);
 	proc->exit_callback = exit_callback;
 	proc->exit_callback_data = callback_data;
+	proc->cbstate = NULL;
 
 	/* initialize pthread primitives */
 	if (pthread_cond_init(&proc->cond, NULL) != 0) {
@@ -801,6 +881,8 @@ avbox_process_wait(int id, int *exit_status)
 	*exit_status = proc->exit_status;
 
 	/* free the process */
+	DEBUG_VPRINT("process", "Freeing process %i",
+		proc->id);
 	LIST_REMOVE(proc);
 	avbox_process_free(proc);
 	ret = 0;

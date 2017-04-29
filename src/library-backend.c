@@ -34,6 +34,7 @@
 #define AVMOUNT_BIN "/usr/bin/avmount"
 #define AVMOUNT_MOUNTPOINT "/media/UPnP"
 #define DEFAULT_LOGFILE "/var/log/avmount-mediabox.log"
+#define FUSERMOUNT_BIN "/usr/bin/fusermount"
 
 
 LISTABLE_STRUCT(mb_mediatomb_inst,
@@ -355,6 +356,25 @@ end:
 
 
 /**
+ * Makes sure to unmount the /media/UPnP mountpoint before
+ * restarting avmount if it crashes.
+ */
+static int
+avbox_avmount_exit(int id, int exit_status, void *data)
+{
+	DEBUG_PRINT("library-backend", "Running fusermount");
+	(void) data;
+	(void) exit_status;
+	if (avbox_execargs(FUSERMOUNT_BIN, "-u", "/media/UPnP", NULL) != 0) {
+		LOG_VPRINT_ERROR("Could not unmount /media/UPnP: '%s' failed!",
+			FUSERMOUNT_BIN);
+	}
+	/* we can return non-zero here to stop autorestart */
+	return 0;
+}
+
+
+/**
  * Initialize the library backend.
  */
 int
@@ -494,9 +514,9 @@ mb_library_backend_init(const int launch_avmount,
 			"-p 49152 -o allow_other " AVMOUNT_MOUNTPOINT, avmount_logfile);
 
 		if ((avmount_process_id = avbox_process_start(AVMOUNT_BIN, (const char **) avargs,
-			AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
-			AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_STDOUT_LOG | AVBOX_PROCESS_STDERR_LOG,
-			"avmount", NULL, NULL)) == -1) {
+			AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_AUTORESTART_ALWAYS |
+			AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE | AVBOX_PROCESS_SUPERUSER,
+			"avmount", avbox_avmount_exit, NULL)) == -1) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "library-backend", "Could not start avmount daemon");
 			return -1;
 		}
