@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <string.h>
 #include <sys/time.h>
 #include <assert.h>
 #include <unistd.h>
@@ -116,13 +117,15 @@ avbox_discovery_init(void)
 
 	/* create socket */
 	if ((sockfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-		LOG_ERROR();
+		LOG_VPRINT_ERROR("Could not create socket: %s",
+			strerror(errno));
 		return -1;
 	}
 
 	/* enable broadcast */
 	if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) == -1) {
-		LOG_ERROR();
+		LOG_VPRINT_ERROR("Could not set socket's SO_BROADCAST: %s",
+			strerror(errno));
 		close(sockfd);
 		return sockfd = -1;
 	}
@@ -133,7 +136,8 @@ avbox_discovery_init(void)
 	addr.sin_addr.s_addr = htonl(-1);
 	memset(addr.sin_zero, 0, sizeof(addr.sin_zero));
 	if (bind(sockfd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
-		LOG_ERROR();
+		LOG_VPRINT_ERROR("Could not bind socket: %s",
+			strerror(errno));
 		close(sockfd);
 		return sockfd = -1;
 	}
