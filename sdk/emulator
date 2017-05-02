@@ -86,6 +86,7 @@ KARGS="${KARGS} console=ttyS0"
 if [ ${BUSYBOX_INIT} -eq 0 ]; then
 	KARGS="${KARGS} init=/bin/mediabox"
 	KARGS="${KARGS} mediabox.video:driver=${VIDEO}"
+	KARGS="${KARGS} coredump_filter=255"
 fi
 
 # start qemu

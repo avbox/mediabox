@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 #include <fcntl.h>
 
 #define LOG_MODULE "sysinit"
@@ -25,6 +27,7 @@
 
 #define UDEVD_BIN	"/sbin/udevd"
 #define UDEVADM_BIN	"/sbin/udevadm"
+#define COREDUMP_PATH	"/var/lib/coredump"
 
 
 static int proc_dropbear = -1;
@@ -68,6 +71,59 @@ sysinit_mount()
 	ret = avbox_execargs("/bin/mount", "-a", NULL);
 	if (ret != 0) {
 		LOG_PRINT_ERROR("Could not mount all volumens (mount -a failed)!");
+	}
+}
+
+
+/**
+ * Configure the coredump directory.
+ */
+static void
+sysinit_coredump()
+{
+	int fd;
+	struct rlimit limit;
+	const char pattern[] = COREDUMP_PATH "/%e-%p-%t.core";
+
+	DEBUG_VPRINT("sysinit", "Setting coredump pattern to '%s'",
+		pattern);
+
+	/* create coredump directory */
+	if (mkdir_p(COREDUMP_PATH, S_IRWXU | S_IRWXG) == -1) {
+		LOG_VPRINT_ERROR("Could create %s: %s",
+			COREDUMP_PATH, strerror(errno));
+	}
+
+	/* set coredump pattern */
+	if ((fd = open("/proc/sys/kernel/core_pattern", O_RDWR)) == -1) {
+		LOG_VPRINT_ERROR("Could not open /proc/sys/kernel/core_pattern: %s",
+			strerror(errno));
+	} else {
+		if (write(fd, pattern, sizeof(pattern)) == -1) {
+			LOG_VPRINT_ERROR("Could not write to /proc/sys/kernel/core_pattern: %s",
+				strerror(errno));
+		}
+		close(fd);
+	}
+
+	/* set the coredump limit to infinity */
+	limit.rlim_cur = RLIM_INFINITY;
+	limit.rlim_max = RLIM_INFINITY;
+	if (setrlimit(RLIMIT_CORE, &limit) == -1) {
+		LOG_VPRINT_ERROR("Could not set coredump limit: %s",
+			strerror(errno));
+	}
+
+	/* set /proc/<pid>/coredump_filter */
+	if ((fd = open("/proc/1/coredump_filter", O_RDWR)) == -1) {
+		LOG_VPRINT_ERROR("Could not open /proc/1/coredump_filter: %s",
+			strerror(errno));
+	} else {
+		if (write(fd, "255", 4) == -1) {
+			LOG_VPRINT_ERROR("Could not write to /proc/1/coredump_filter: %s",
+				strerror(errno));
+		}
+		close(fd);
 	}
 }
 
@@ -385,6 +441,7 @@ int
 sysinit_init(const char * const logfile)
 {
 	sysinit_mount();
+	sysinit_coredump();
 	sysinit_logger(logfile);
 	sysinit_random();
 	sysinit_udevd();
