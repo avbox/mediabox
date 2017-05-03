@@ -58,7 +58,7 @@ avbox_audiostream_ispaused(const struct avbox_audiostream * const stream);
  * Get the number of frames buffered.
  */
 unsigned int
-avbox_audiostream_getframecount(struct avbox_audiostream * const stream);
+avbox_audiostream_count(struct avbox_audiostream * const stream);
 
 
 /**

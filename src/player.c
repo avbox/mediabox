@@ -233,7 +233,7 @@ avbox_player_printstatus(const struct avbox_player * const inst, const int fps)
 	static int i = 0, audio_frames = 0;;
 	if ((i++ % 10) == 0) {
 		if (inst->have_audio) {
-			audio_frames = avbox_audiostream_getframecount(inst->audio_stream);
+			audio_frames = avbox_audiostream_count(inst->audio_stream);
 		}
 		fprintf(stdout, "| Fps: %03i | Video Packets: %03zd | Video Frames: %03zd | Audio Packets: %03zd | Audio Frames: %03i |\r",
 			fps,
@@ -561,7 +561,7 @@ avbox_player_video(void *arg)
 					 */
 					if (avbox_audiostream_ispaused(inst->audio_stream) &&
 						avbox_queue_count(inst->audio_packets_q) == 0 &&
-						avbox_audiostream_getframecount(inst->audio_stream) == 0) {
+						avbox_audiostream_count(inst->audio_stream) == 0) {
 						avbox_player_dumpvideo(inst, elapsed, 1);
 						LOG_PRINT_ERROR("Deadlock detected, recovered (I hope)");
 					}
@@ -1663,7 +1663,7 @@ avbox_player_stream_parse(void *arg)
 				assert(avbox_queue_count(inst->video_packets_q) == 0);
 				assert(avbox_queue_count(inst->audio_packets_q) == 0);
 				assert(avbox_queue_count(inst->video_frames_q) == 0);
-				assert(avbox_audiostream_getframecount(inst->audio_stream) == 0);
+				assert(avbox_audiostream_count(inst->audio_stream) == 0);
 				assert(inst->getmastertime(inst) == inst->seek_to);
 
 				DEBUG_VPRINT("player", "Seeking (newpos=%li)",
