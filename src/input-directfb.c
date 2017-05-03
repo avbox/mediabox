@@ -168,11 +168,13 @@ mbi_directfb_destroy(void)
 {
 	DEBUG_PRINT("input-directfb", "Shutting down DirectFB input driver");
 
-	quit = 1;
-	events->WakeUp(events);
-	pthread_join(event_loop_thread, NULL);
-	events->Release(events);
-	if (keyboard_device != NULL) {
-		keyboard_device->Release(keyboard_device);
+	if (dfb != NULL) {
+		quit = 1;
+		events->WakeUp(events);
+		pthread_join(event_loop_thread, NULL);
+		events->Release(events);
+		if (keyboard_device != NULL) {
+			keyboard_device->Release(keyboard_device);
+		}
 	}
 }
