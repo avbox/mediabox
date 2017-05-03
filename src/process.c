@@ -686,7 +686,7 @@ avbox_process_monitor_thread(void *arg)
 		pthread_mutex_unlock(&process_list_lock);
 
 		/* if the process was not found log an error */
-		if (!found) {
+		if (!found && pid > 0) {
 			LOG_VPRINT_ERROR("Unmanaged process with pid %i exitted", pid);
 		}
 	}
