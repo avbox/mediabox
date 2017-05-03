@@ -42,7 +42,12 @@ closefrom(int fd_max)
 		if (strisdigit(ent->d_name)) {
 			fd = atoi(ent->d_name);
 			if (fd >= fd_max) {
-				close(fd);
+				/* valgrind opens file descriptors above 1024.
+				 * TODO: Find out how to check that they're actually
+				 * valgrind files */
+				if (fd < 1024) {
+					close(fd);
+				}
 			}
 		}
 	}
@@ -100,7 +105,7 @@ mkdir_p(const char * const path, mode_t mode)
 			LOG_PRINT_ERROR("mkdir_p cannot handle paths greater than 254 chars.");
 			return -1;
 		}
-		if (path_tmp_ptr[-1] != '/') {
+		if (path_tmp_ptr == path_tmp || path_tmp_ptr[-1] != '/') {
 			*path_tmp_ptr++ = '/';
 		}
 		while (*path_ptr != '\0') {

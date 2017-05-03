@@ -494,11 +494,11 @@ avbox_shell_run(void)
 			DEBUG_PRINT("shell", "MENU key pressed");
 
 			if (mb_mainmenu_init() == -1) {
-				fprintf(stderr, "Could not initialize main menu\n");
+				LOG_PRINT_ERROR("Could not initialize main menu!");
 				break;
 			}
 			if (mb_mainmenu_showdialog() == -1) {
-				fprintf(stderr, "mbs: Main Menu dismissed\n");
+				DEBUG_PRINT("shell", "Main Menu dismissed");
 			}
 			mb_mainmenu_destroy();
 			break;

@@ -12,6 +12,9 @@
 #include <errno.h>
 #include <assert.h>
 
+#define LOG_MODULE "proc_util"
+
+#include "log.h"
 #include "debug.h"
 #include "process.h"
 
@@ -59,6 +62,8 @@ avbox_execargs(const char * const filepath, ...)
 
 /**
  * Gets the path of the current process' executable image.
+ * If the path does not fit in the buffer it will be truncated
+ * but still null-terminated.
  */
 ssize_t
 mb_getexepath(char *buf, size_t bufsize)
@@ -71,7 +76,8 @@ mb_getexepath(char *buf, size_t bufsize)
 
 	exe_symlink = malloc(sizeof(char) * (exe_path_length + 1));
 	if (exe_symlink == NULL) {
-		errno = ENOMEM;
+		LOG_PRINT_ERROR("Could not get executable path: Out of memory");
+		/* errno = ENOMEM; */
 		return -1;
 	}
 
@@ -79,7 +85,13 @@ mb_getexepath(char *buf, size_t bufsize)
 
 	DEBUG_VPRINT("proc_util", "Reading symlink: %s", exe_symlink);
 
-	ret = readlink(exe_symlink, buf, bufsize);
+	if ((ret = readlink(exe_symlink, buf, bufsize)) > 0) {
+		if (ret == bufsize) {
+			buf[--ret] = '\0';
+		} else {
+			buf[ret] = '\0';
+		}
+	}
 	free(exe_symlink);
 	return ret;
 }

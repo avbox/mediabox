@@ -369,7 +369,7 @@ avbox_audiostream_output(void *arg)
 	struct avbox_audio_packet * packet;
 	const char *device = "sysdefault";
 	unsigned int period_usecs = 10;
-	int dir;
+	int dir = 0;
 	snd_pcm_hw_params_t *params;
 	snd_pcm_sw_params_t *swparams;
 	snd_pcm_sframes_t frames;
@@ -780,7 +780,7 @@ avbox_audiostream_destroy(struct avbox_audiostream * const stream)
 	pthread_mutex_lock(&stream->lock);
 	if (stream->running) {
 		stream->quit = 1;
-		avbox_queue_wake(stream->packets);
+		avbox_queue_close(stream->packets);
 		pthread_cond_signal(&stream->wake);
 		pthread_mutex_unlock(&stream->lock);
 		pthread_join(stream->thread, 0);
@@ -791,6 +791,7 @@ avbox_audiostream_destroy(struct avbox_audiostream * const stream)
 
 	/* free any remaining packets */
 	avbox_audiostream_dropqueue(stream);
+	avbox_queue_destroy(stream->packets);
 
 	/* free stream object */
 	free(stream);

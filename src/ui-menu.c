@@ -474,6 +474,8 @@ mb_ui_menu_new(struct mbv_window *window)
 	}
 
 	/* preallocate a window for each visible item */
+	DEBUG_VPRINT("ui-menu", "Creating %i child windows",
+		inst->visible_items);
 	for (i = 0; i < inst->visible_items; i++) {
 		inst->item_windows[i] = mbv_window_getchildwindow(inst->window,
 			"menuitem", 0,
@@ -520,10 +522,14 @@ mb_ui_menu_destroy(struct mb_ui_menu *inst)
 {
 	int i;
 
+	DEBUG_VPRINT("ui-menu", "Destroying menu %p", inst);
+
 	assert(inst != NULL);
 
 	mb_ui_menu_clearitems(inst);
 
+	DEBUG_VPRINT("ui-menu", "Destroying %i visible windows",
+		inst->visible_items);
 	for (i = 0; i < inst->visible_items; i++) {
 		mbv_window_destroy(inst->item_windows[i]);
 	}

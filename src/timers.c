@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <assert.h>
+#include <string.h>
 
 #include "timers.h"
 #include "time_util.h"
@@ -24,7 +25,7 @@
 /**
  * Timer structure
  */
-LISTABLE_TYPE(avbox_timer_state,
+LISTABLE_STRUCT(avbox_timer_state,
 	struct avbox_timer_data public;
 	struct timespec interval;
 	struct timespec value;
@@ -50,7 +51,7 @@ void *
 avbox_timers_thread(void *arg)
 {
 	struct timespec last_sleep, elapsed, now, sleeptime;
-	avbox_timer_state *tmr;
+	struct avbox_timer_state *tmr;
 	enum avbox_timer_result ret;
 
 	(void) arg;
@@ -73,7 +74,7 @@ avbox_timers_thread(void *arg)
 		elapsed = timediff(&last_sleep, &now);
 
 		/* iterate through all timers */
-		LIST_FOREACH_SAFE(avbox_timer_state*, tmr, &timers, {
+		LIST_FOREACH_SAFE(struct avbox_timer_state*, tmr, &timers, {
 			if (timelte(&tmr->value, &elapsed)) {
 				/* the timer has elapsed so invoke the callback */
 				if (tmr->callback != NULL) {
@@ -138,14 +139,14 @@ avbox_timers_getnextid(void)
 int
 avbox_timer_cancel(int timer_id)
 {
-	avbox_timer_state *tmr;
+	struct avbox_timer_state *tmr;
 	int ret = -1;
 
 	DEBUG_VPRINT("timers", "Cancelling timer id %i", timer_id);
 
 	pthread_mutex_lock(&timers_lock);
 
-	LIST_FOREACH_SAFE(avbox_timer_state*, tmr, &timers, {
+	LIST_FOREACH_SAFE(struct avbox_timer_state*, tmr, &timers, {
 		if (tmr->public.id == timer_id) {
 			LIST_REMOVE(tmr);
 			free(tmr);
@@ -167,17 +168,18 @@ int
 avbox_timer_register(struct timespec *interval,
 	enum avbox_timer_flags flags, int message_fd, avbox_timer_callback func, void *data)
 {
-	avbox_timer_state *timer;
+	struct avbox_timer_state *timer;
 
 	DEBUG_PRINT("timers", "Registering timer");
 
 	assert(message_fd == -1 || message_fd > 2);
 
 	/* allocate and initialize timer entry */
-	if ((timer = malloc(sizeof(avbox_timer_state))) == NULL) {
+	if ((timer = malloc(sizeof(struct avbox_timer_state))) == NULL) {
 		fprintf(stderr, "timers: Could not allocate timer. Out of memory\n");
 		return -1;
 	}
+	memset(timer, 0, sizeof(struct avbox_timer_state));
 	timer->interval = *interval;
 	timer->value = *interval;
 	timer->message_fd = message_fd;
@@ -226,7 +228,7 @@ avbox_timers_init(void)
 void
 avbox_timers_shutdown(void)
 {
-	avbox_timer_state *tmr;
+	struct avbox_timer_state *tmr;
 
 	DEBUG_PRINT("timers", "Shutting down timers system");
 
@@ -234,7 +236,7 @@ avbox_timers_shutdown(void)
 	pthread_cond_signal(&timers_signal);
 	pthread_join(timers_thread, NULL);
 
-	LIST_FOREACH_SAFE(avbox_timer_state*, tmr, &timers, {
+	LIST_FOREACH_SAFE(struct avbox_timer_state*, tmr, &timers, {
 		LIST_REMOVE(tmr);
 		free(tmr);
 	});

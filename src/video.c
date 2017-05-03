@@ -48,6 +48,7 @@ struct mbv_window
 	struct mbv_surface *surface;
 	struct mbv_window *content_window;
 	struct mbv_window *parent;
+	struct mbv_childwindow *node;
 	mbv_paint_func paint;
 	cairo_t *cairo_context;
 	const char *title;
@@ -454,6 +455,7 @@ mbv_window_new(
 	}
 
 	window->content_window = window;
+	window->node = window_node;
 	window->title = NULL;
 	window->rect.x = x;
 	window->rect.y = y;
@@ -498,11 +500,13 @@ mbv_window_new(
 			paint, NULL);
 		if (window->content_window == NULL) {
 			driver.surface_destroy(window->surface);
+			free(cidentifier);
 			free(window);
 			return NULL;
 		}
 
 		mbv_window_settitle(window, title);
+		free(cidentifier);
 	} else {
 		window->paint = paint;
 	}
@@ -565,10 +569,12 @@ mbv_window_getchildwindow(struct mbv_window * const window,
 	if (new_window->surface == NULL) {
 		LOG_PRINT_ERROR("Could not create subsurface!!");
 		free(new_window);
+		free(window_node);
 		return NULL;
 	}
 
 	new_window->content_window = new_window;
+	new_window->node = window_node;
 	new_window->paint = paint;
 	new_window->user_context = user_context;
 	new_window->cairo_context = NULL;
@@ -844,8 +850,8 @@ mbv_window_hide(struct mbv_window *window)
 void
 mbv_window_destroy(struct mbv_window * const window)
 {
-	/* DEBUG_VPRINT("video", "mbv_window_destroy(\"%s\")",
-		window->identifier); */
+	DEBUG_VPRINT("video", "mbv_window_destroy(\"%s\")",
+		window->identifier);
 
 	assert(window != NULL);
 	assert(window->surface != NULL);
@@ -859,16 +865,8 @@ mbv_window_destroy(struct mbv_window * const window)
 	}
 
 	/* remove the window from the parent's children list */
-	if (window->parent != NULL) {
-		struct mbv_childwindow *child;
-		LIST_FOREACH(struct mbv_childwindow *, child, &window->parent->children) {
-			if (child->window == window) {
-				LIST_REMOVE(child);
-				free(child);
-				break;
-			}
-		}
-	}
+	LIST_REMOVE(window->node);
+	free(window->node);
 
 	if (window->title != NULL) {
 		free((void*)window->title);
@@ -939,6 +937,7 @@ mbv_init(int argc, char **argv)
 	}
 
 	root_window.content_window = &root_window;
+	root_window.node = NULL;
 	root_window.title = NULL;
 	root_window.rect.x = 0;
 	root_window.rect.y = 0;

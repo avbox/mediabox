@@ -83,9 +83,10 @@ avbox_discovery_broadcast(const char * const iface_name, void *arg)
 	free(ip);
 
 	/* broadcast announcement 3 times */
-	if (sendto(sockfd, &ann, sizeof(ann), 0, &addr, sizeof(addr)) == -1 ||
-		sendto(sockfd, &ann, sizeof(ann), 0, &addr, sizeof(addr)) == -1 ||
-		sendto(sockfd, &ann, sizeof(ann), 0, &addr, sizeof(addr)) == -1) {
+	const size_t len = strlen(ann);
+	if (sendto(sockfd, &ann, len, 0, &addr, sizeof(addr)) == -1 ||
+		sendto(sockfd, &ann, len, 0, &addr, sizeof(addr)) == -1 ||
+		sendto(sockfd, &ann, len, 0, &addr, sizeof(addr)) == -1) {
 		LOG_VPRINT_ERROR("Could not broadcast announcement: %s",
 			strerror(errno));
 	}
@@ -131,6 +132,7 @@ avbox_discovery_init(void)
 	}
 
 	/* bind socket to broadcast address */
+	memset(&addr, 0, sizeof(struct sockaddr_in));
 	addr.sin_family = PF_INET;
 	addr.sin_port = htons(MB_ANNOUNCE_PORT);
 	addr.sin_addr.s_addr = htonl(-1);

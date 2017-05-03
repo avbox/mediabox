@@ -961,7 +961,9 @@ avbox_process_stop(int id)
 			struct timespec tv;
 			int *id_copy;
 
-			/* allocate heap memory for a copy of the id */
+			/* allocate heap memory for a copy of the id.
+			 * FIXME: If the timers system gets shutdown before
+			 * the timer fires this memory leaks */
 			if ((id_copy = malloc(sizeof(int))) == NULL) {
 				LOG_PRINT_ERROR("Cannot kill service: Out of memory");
 				return -1;

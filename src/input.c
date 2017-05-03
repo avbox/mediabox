@@ -169,6 +169,7 @@ avbox_input_getmessage(int fd)
 	if (msg->size > 0) {
 		msg = realloc_safe(msg, sizeof(struct avbox_message) + msg->size);
 		read_or_die(fd, ((uint8_t*) msg) + sizeof(struct avbox_message), msg->size);
+		msg->payload = (uint8_t*) (msg + 1);
 	}
 	return msg;
 }
@@ -308,6 +309,9 @@ avbox_input_sendmessage(int recipient, enum avbox_input_event e, void *data, siz
 	msg.msg = e;
 	msg.recipient = recipient;
 	msg.size = sz;
+	msg.payload = NULL;
+
+	assert(sz == 0 || data != NULL);
 
 	pthread_mutex_lock(&lock);
 	write_or_die(writefd, &msg, sizeof(struct avbox_message));
@@ -397,6 +401,7 @@ avbox_input_shutdown(void)
 #ifdef ENABLE_BLUETOOTH
 	mbi_bluetooth_destroy();
 #endif
+	mbi_libinput_destroy();
 	avbox_input_sendevent(MBI_EVENT_EXIT);
 	pthread_join(input_loop_thread, NULL);
 	close(writefd);

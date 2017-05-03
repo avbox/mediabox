@@ -200,6 +200,7 @@ avbox_queue_put(struct avbox_queue *inst, void *item)
 	if (inst->sz > 0 && inst->cnt >= inst->sz) {
 		if (inst->closed) {
 			errno = ESHUTDOWN;
+			free(node);
 			goto end;
 		}
 		pthread_cond_wait(&inst->cond, &inst->lock);	

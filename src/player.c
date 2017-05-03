@@ -1064,7 +1064,7 @@ avbox_player_video_decode(void *arg)
 		}
 
 		/* get next packet from queue */
-		if ((packet = avbox_queue_get(inst->video_packets_q)) == NULL) {
+		if ((packet = avbox_queue_peek(inst->video_packets_q, 1)) == NULL) {
 			if (errno == EAGAIN) {
 				continue;
 			} else if (errno == ESHUTDOWN) {
@@ -1077,19 +1077,29 @@ avbox_player_video_decode(void *arg)
 
 		/* send packet to codec for decoding */
 		if (UNLIKELY((i = avcodec_send_packet(inst->video_codec_ctx, packet)) < 0)) {
-			LOG_VPRINT_ERROR("Error decoding video packet (ret=%i)", i);
+			if (i == AVERROR(EAGAIN)) {
+				/* fall through */
+			} else {
+				LOG_VPRINT_ERROR("Error decoding video packet (ret=%i)", i);
+				goto decoder_exit;
+			}
+		} else {
+			if (avbox_queue_get(inst->video_packets_q) != packet) {
+				LOG_VPRINT_ERROR("BUG: avbox_queue_get() returned an unexpected result: %s",
+					strerror(errno));
+				goto decoder_exit;
+			}
+			/* free packet */
+			av_packet_unref(packet);
+			free(packet);
 		}
 
 		/* read decoded frames from codec */
 		while (LIKELY((i = avcodec_receive_frame(inst->video_codec_ctx, video_frame_nat))) == 0) {
 			int64_t frame_pts;
 
-			if (packet->dts != AV_NOPTS_VALUE) {
-				frame_pts = video_frame_nat->pts =
-					av_frame_get_best_effort_timestamp(video_frame_nat);
-			} else {
-				frame_pts = video_frame_nat->pts = 0;
-			}
+			frame_pts = video_frame_nat->pts =
+				av_frame_get_best_effort_timestamp(video_frame_nat);
 
 			/* push the decoded frame into the filtergraph */
 			if (UNLIKELY(av_buffersrc_add_frame_flags(video_buffersrc_ctx,
@@ -1167,18 +1177,10 @@ avbox_player_video_decode(void *arg)
 			}
 			av_frame_unref(video_frame_nat);
 		}
-		if (i != 0) {
-			if (i == AVERROR(EAGAIN)) {
-				continue;
-			} else {
-				LOG_VPRINT_ERROR("ERROR: avcodec_receive_frame() returned %d (video)",
-					i);
-			}
+		if (i != 0 && i != AVERROR(EAGAIN)) {
+			LOG_VPRINT_ERROR("ERROR: avcodec_receive_frame() returned %d (video)",
+				i);
 		}
-
-		/* free packet */
-		av_packet_unref(packet);
-		free(packet);
 	}
 decoder_exit:
 	DEBUG_PRINT("player", "Video decoder exiting");
@@ -1195,8 +1197,9 @@ decoder_exit:
 			if ((frame = avbox_queue_get(inst->video_frames_q)) == NULL) {
 				LOG_VPRINT_ERROR("avbox_queue_get() returned error: %s",
 					strerror(errno));
+			} else {
+				free(frame);
 			}
-			free(frame);
 		}
 
 		avbox_queue_destroy(inst->video_frames_q);
@@ -1237,7 +1240,8 @@ decoder_exit:
 	}
 	if (inst->video_codec_ctx != NULL) {
 		avcodec_close(inst->video_codec_ctx);
-		inst->video_codec_ctx = NULL;
+		avcodec_free_context(&inst->video_codec_ctx);
+		inst->video_codec_ctx = NULL; /* avcodec_free_context() already does this */
 	}
 
 	inst->video_flush_decoder = 0;
@@ -1278,7 +1282,7 @@ avbox_player_audio_decode(void * arg)
 	/* open the audio codec */
 	if ((inst->audio_codec_ctx = open_codec_context(&inst->audio_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_AUDIO)) == NULL) {
 		LOG_PRINT_ERROR("Could not open audio codec!");
-		goto decoder_exit;
+		goto end;
 	}
 
 	/* allocate audio frames */
@@ -1286,7 +1290,7 @@ avbox_player_audio_decode(void * arg)
 	audio_frame = av_frame_alloc();
 	if (audio_frame_nat == NULL || audio_frame == NULL) {
 		LOG_PRINT_ERROR("Could not allocate audio frames");
-		goto decoder_exit;
+		goto end;
 	}
 
 	/* initialize audio filter graph */
@@ -1295,7 +1299,7 @@ avbox_player_audio_decode(void * arg)
 		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
 		audio_filters, inst->audio_stream_index) < 0) {
 		LOG_PRINT_ERROR("Could not init filter graph!");
-		goto decoder_exit;
+		goto end;
 	}
 
 	DEBUG_PRINT("player", "Audio decoder ready");
@@ -1308,7 +1312,7 @@ avbox_player_audio_decode(void * arg)
 
 	while (1) {
 		/* wait for the stream decoder to give us some packets */
-		if ((packet = avbox_queue_get(inst->audio_packets_q)) == NULL) {
+		if ((packet = avbox_queue_peek(inst->audio_packets_q, 1)) == NULL) {
 			if (errno == EAGAIN) {
 				continue;
 			} else if (errno == ESHUTDOWN) {
@@ -1316,13 +1320,27 @@ avbox_player_audio_decode(void * arg)
 			}
 			LOG_VPRINT_ERROR("ERROR!: avbox_queue_get() returned error: %s",
 				strerror(errno));
-			goto decoder_exit;
+			goto end;
 		}
 
 		/* send packets to codec for decoding */
 		if (UNLIKELY(ret = avcodec_send_packet(inst->audio_codec_ctx, packet) != 0)) {
-			LOG_VPRINT_ERROR("Error decoding audio (ret=%i)", ret);
-			continue;
+			if (ret == AVERROR(EAGAIN)) {
+				/* fall through */
+			} else {
+				LOG_VPRINT_ERROR("Error decoding audio (ret=%i)", ret);
+				goto end;
+			}
+		} else {
+			/* remove packet from queue */
+			if (avbox_queue_get(inst->audio_packets_q) != packet) {
+				LOG_VPRINT_ERROR("BUG: avbox_queue_get() returned an unexpected result (%p): %s",
+					packet, strerror(errno));
+				goto end;
+			}
+			/* free packet */
+			av_packet_unref(packet);
+			free(packet);
 		}
 
 		/* read decoded frames from codec */
@@ -1347,7 +1365,7 @@ avbox_player_audio_decode(void * arg)
 				}
 				if (UNLIKELY(ret < 0)) {
 					av_frame_unref(audio_frame);
-					goto decoder_exit;
+					goto end;
 				}
 
 				/* if this is the first frame then set the audio stream
@@ -1372,14 +1390,10 @@ avbox_player_audio_decode(void * arg)
 		}
 		if (ret != 0 && ret != AVERROR(EAGAIN)) {
 			LOG_VPRINT_ERROR("ERROR!: avcodec_receive_frame() returned %d (audio)",
-				AVERROR(EAGAIN));
+				AVERROR(ret));
 		}
-		/* free packet */
-		av_packet_unref(packet);
-		free(packet);
 	}
-
-decoder_exit:
+end:
 	DEBUG_PRINT("player", "Audio decoder exiting");
 
 	if (audio_frame_nat != NULL) {
@@ -1399,7 +1413,8 @@ decoder_exit:
 	}
 	if (inst->audio_codec_ctx != NULL) {
 		avcodec_close(inst->audio_codec_ctx);
-		inst->audio_codec_ctx = NULL;
+		avcodec_free_context(&inst->audio_codec_ctx);
+		inst->audio_codec_ctx = NULL; /* avcodec_free_context() already does this */
 	}
 
 	DEBUG_PRINT("player", "Audio decoder bailing out");
@@ -1550,6 +1565,7 @@ avbox_player_stream_parse(void *arg)
 		if (packet.stream_index == inst->video_stream_index) {
 			if ((ppacket = malloc(sizeof(AVPacket))) == NULL) {
 				LOG_PRINT_ERROR("Could not allocate memory for packet!");
+				av_packet_unref(&packet);
 				goto decoder_exit;
 			}
 			memcpy(ppacket, &packet, sizeof(AVPacket));
@@ -1558,10 +1574,14 @@ avbox_player_stream_parse(void *arg)
 					if (errno == EAGAIN) {
 						continue;
 					} else if (errno == ESHUTDOWN) {
+						av_packet_unref(ppacket);
+						free(ppacket);
 						break;
 					}
 					LOG_VPRINT_ERROR("Could not add packet to queue: %s",
 						strerror(errno));
+					av_packet_unref(ppacket);
+					free(ppacket);
 					goto decoder_exit;
 				}
 				break;
@@ -1570,6 +1590,7 @@ avbox_player_stream_parse(void *arg)
 		} else if (packet.stream_index == inst->audio_stream_index) {
 			if ((ppacket = malloc(sizeof(AVPacket))) == NULL) {
 				LOG_PRINT_ERROR("Could not allocate memory for packet!");
+				av_packet_unref(&packet);
 				goto decoder_exit;
 			}
 			memcpy(ppacket, &packet, sizeof(AVPacket));
@@ -1578,10 +1599,14 @@ avbox_player_stream_parse(void *arg)
 					if (errno == EAGAIN) {
 						continue;
 					} else if (errno == ESHUTDOWN) {
+						av_packet_unref(ppacket);
+						free(ppacket);
 						break;
 					}
 					LOG_VPRINT_ERROR("Could not enqueue packet: %s",
 						strerror(errno));
+					av_packet_unref(ppacket);
+					free(ppacket);
 					goto decoder_exit;
 				}
 				break;

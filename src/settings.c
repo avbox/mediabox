@@ -82,7 +82,7 @@ avbox_settings_escapesql(const char * const sql)
 	}
 
 	/* allocate memory for it */
-	if ((safesql = malloc(safesql_len * sizeof(char))) == NULL) {
+	if ((safesql = malloc((safesql_len + 1) * sizeof(char))) == NULL) {
 		return NULL;
 	}
 

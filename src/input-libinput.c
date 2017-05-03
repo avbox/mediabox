@@ -166,7 +166,7 @@ mbi_libinput_event_loop(void *arg)
 			libinput_event_destroy(ev);
 		}
 	}
-	while (!quit && poll(&fds, 1, -1) > -1);
+	while (poll(&fds, 1, 250) > -1 && !quit);
 
 	DEBUG_PRINT("input-libinput", "Exiting libinput event loop");
 
@@ -277,4 +277,5 @@ mbi_libinput_destroy(void)
 	DEBUG_PRINT("input-libinput", "Shutting down libinput driver");
 	quit = 1;
 	pthread_join(event_loop_thread, NULL);
+	libinput_unref(li);
 }

@@ -75,7 +75,7 @@ struct avbox_message
 	enum avbox_input_event msg;
 	int recipient;
 	size_t size;
-	char payload[];
+	uint8_t *payload;
 };
 
 
