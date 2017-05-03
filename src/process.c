@@ -15,6 +15,8 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/types.h>
+#include <fcntl.h>
 #include <limits.h>
 
 #define LOG_MODULE "process"
@@ -134,11 +136,41 @@ avbox_process_fork(struct avbox_process *proc)
 	int ret = -1;
 	int in[2] = { -1, -1 }, out[2] = { -1, -1 }, err[2] = { -1, -1 };
 
-	if (pipe(in) == -1 || pipe(out) == -1 || pipe(err) == -1) {
+	/* if the process is created with the STDERR_xxx or STDOUT_xxx flags
+	 * we create a pipe for it. Otherwise we open /dev/null and set it as
+	 * the process stdin/stderr respectively */
+	if (proc->flags & AVBOX_PROCESS_STDOUT) {
+		if (pipe(out) == -1) {
+			LOG_VPRINT_ERROR("Could not create pipes: %s", strerror(errno));
+			goto end;
+		}
+	} else {
+		if ((out[1] = open("/dev/null", O_WRONLY)) == -1) {
+			LOG_VPRINT_ERROR("Could not open /dev/null: %s",
+				strerror(errno));
+			goto end;
+		}
+	}
+	if (proc->flags & AVBOX_PROCESS_STDERR) {
+		if (pipe(err) == -1) {
+			LOG_VPRINT_ERROR("Could not create pipes: %s", strerror(errno));
+			goto end;
+		}
+	} else {
+		if ((err[1] = open("/dev/null", O_WRONLY)) == -1) {
+			LOG_VPRINT_ERROR("Could not open /dev/null: %s",
+				strerror(errno));
+			goto end;
+		}
+	}
+
+	/* for stdin we always create a pipe */
+	if (pipe(in) == -1) {
 		LOG_VPRINT_ERROR("Could not create pipes: %s", strerror(errno));
 		goto end;
 	}
 
+	/* fork */
 	if ((proc->pid = fork()) == -1) {
 		LOG_VPRINT_ERROR("Could not fork(): %s", strerror(errno));
 		goto end;
@@ -146,8 +178,12 @@ avbox_process_fork(struct avbox_process *proc)
 	} else if (proc->pid != 0) {
 		/* close child end of pipes */
 		close(in[0]);
-		close(out[1]);
-		close(err[1]);
+		if (out[1] != -1) {
+			close(out[1]);
+		}
+		if (err[1] != -1) {
+			close(err[1]);
+		}
 
 		proc->stdin = in[1];
 		proc->stdout = out[0];
@@ -161,8 +197,12 @@ avbox_process_fork(struct avbox_process *proc)
 
 	/* close parent end of pipes */
 	close(in[1]);
-	close(out[0]);
-	close(err[0]);
+	if (out[0] != -1) {
+		close(out[0]);
+	}
+	if (err[0] != -1) {
+		close(err[0]);
+	}
 
 	/* duplicate standard file descriptors */
 	if (dup2(in[0], STDIN_FILENO) == -1 ||
