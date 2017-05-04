@@ -29,7 +29,7 @@
 #include "su.h"
 #include "library-backend.h"
 #include "downloads-backend.h"
-#include "announce.h"
+#include "discovery.h"
 #include "debug.h"
 #include "log.h"
 #include "sysinit.h"
@@ -88,6 +88,8 @@ parse_kernel_args(int *argc)
 	/* we need to make sure /proc is mounted before we
 	 * can read /proc/cmdline */
 	if (mount("proc", "/proc", "proc", 0, "") == -1) {
+		fprintf(stderr, "%s Could not mount proc: %s",
+			prog, strerror(errno));
 		return NULL;
 	}
 
@@ -196,7 +198,6 @@ print_usage()
 	printf("%s: mediabox [options]\n", prog);
 	printf("\n");
 	printf(" --version\t\tPrint version information\n");
-	printf(" --no-direct\t\tDon't use direct rendering\n");
 	printf(" --video:driver=<drv>\tSet the video driver string\n");
 	printf(" --dont-launch-avmount\tAssume avmount is already mounted\n");
 	printf(" --dont-launch-mediatomb\tDon't launch mediatomb\n");
@@ -207,6 +208,20 @@ print_usage()
 }
 
 
+/**
+ * Prints version information.
+ */
+static void
+print_version()
+{
+	fprintf(stdout, PACKAGE_NAME " Version " PACKAGE_VERSION "\n");
+	fprintf(stdout, "Copyright (c) 2016 Fernando Rodriguez. All rights reserved.\n");
+}
+
+
+/**
+ * Program entry point.
+ */
 int
 main (int argc, char **cargv)
 {
@@ -221,7 +236,9 @@ main (int argc, char **cargv)
 
 	/* save program name */
 	if ((progmem = strdup(cargv[0])) == NULL) {
-		prog = cargv[0];
+		fprintf(stderr, "%s: Not enough memory!\n",
+			cargv[0]);
+		exit(EXIT_FAILURE);
 	} else {
 		prog = basename(progmem);
 	}
@@ -240,16 +257,11 @@ main (int argc, char **cargv)
 
 	/* parse command line */
 	for (i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "--no-direct")) {
-			fprintf(stderr, "main: Disabling of direct rendering not implemented.\n");
-
-		} else if (!strcmp(argv[i], "--help")) {
+		if (!strcmp(argv[i], "--help")) {
 			print_usage();
 			exit(EXIT_SUCCESS);
-
 		} else if (!strcmp(argv[i], "--version")) {
-			fprintf(stdout, "MediaBox Version " PACKAGE_VERSION "\n");
-			fprintf(stdout, "Copyright (c) 2016 Fernando Rodriguez. All rights reserved.\n");
+			print_version();
 			exit(EXIT_SUCCESS);
 		} else if (!memcmp(argv[i], "--dfb:", 6)) {
 			/* let dfb args pass */
@@ -264,7 +276,8 @@ main (int argc, char **cargv)
 		} else if (!strcmp(argv[i], "--logfile")) {
 			logfile = argv[++i];
 		} else {
-			fprintf(stderr, "main: Invalid argument %s\n", argv[i]);
+			fprintf(stderr, "%s: Invalid argument %s\n",
+				prog, argv[i]);
 			print_usage();
 			exit(EXIT_FAILURE);
 		}

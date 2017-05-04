@@ -62,7 +62,7 @@ mediabox_SOURCES = \
 	settings.c \
 	string_util.c \
 	about.c \
-	announce.c \
+	discovery.c \
 	iface_util.c \
 	library-backend.c \
 	library.c \
