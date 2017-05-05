@@ -45,6 +45,7 @@ struct mt_init_state
 {
 	int port;
 	int err;
+	int gotone;
 	char *home;
 };
 
@@ -78,6 +79,14 @@ mb_library_backend_startmediatomb(const char * iface_name, void  *data)
 
 	assert(data != NULL);
 	assert(state->port > 0 && state->port < 65536);
+
+	/* for now stop after the first instance is
+	 * launched */
+	if (!strcmp(iface_name, "lo") || state->gotone) {
+		return 0;
+	} else {
+		state->gotone = 1;
+	}
 
 	/* if we errored out on a previous iteration
 	 * then exit */
@@ -469,6 +478,7 @@ mb_library_backend_init(const int launch_avmount,
 		state.port = 49163;
 		state.home = mt_home;
 		state.err = 0;
+		state.gotone = 0;
 		ifaceutil_enumifaces(mb_library_backend_startmediatomb, &state);
 		free(mt_home);
 		if (state.err != 0) {
