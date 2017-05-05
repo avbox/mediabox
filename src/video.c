@@ -431,8 +431,8 @@ mbv_window_new(
 	struct mbv_window *window;
 	struct mbv_childwindow *window_node;
 
-	DEBUG_VPRINT("video", "mbv_window_new(\"%s\")",
-		identifier);
+	/* DEBUG_VPRINT("video", "mbv_window_new(\"%s\")",
+		identifier); */
 
 	/* allocate memory for the window and it's node on the
 	 * parent window */
@@ -515,8 +515,8 @@ mbv_window_new(
 	 * This is needed since without a paint handler only areas
 	 * covered by widgets will get painted. */
 	if (paint == NULL) {
-		DEBUG_VPRINT("video", "Clearing window %s",
-			window->identifier);
+		/* DEBUG_VPRINT("video", "Clearing window %s",
+			window->identifier); */
 		__window_clear(window, window->background_color);
 	}
 
@@ -536,8 +536,8 @@ mbv_window_getchildwindow(struct mbv_window * const window,
 	struct mbv_window *new_window;
 	struct mbv_childwindow *window_node;
 
-	DEBUG_VPRINT("video", "mbv_window_getchildwindow(\"%s\")",
-		identifier);
+	/* DEBUG_VPRINT("video", "mbv_window_getchildwindow(\"%s\")",
+		identifier); */
 
 	/* allocate memory for the window and it's node */
 	if ((new_window = malloc(sizeof(struct mbv_window))) == NULL) {
@@ -773,8 +773,8 @@ mbv_window_drawstring(struct mbv_window *window,
 void
 mbv_window_show(struct mbv_window * const window)
 {
-	DEBUG_VPRINT("video", "mbv_window_show(0x%p)",
-		window);
+	/* DEBUG_VPRINT("video", "mbv_window_show(0x%p)",
+		window); */
 
 	assert(window != &root_window);
 
@@ -825,8 +825,8 @@ mbv_window_hide(struct mbv_window *window)
 {
 	struct mbv_window *damaged_window = NULL;
 
-	DEBUG_VPRINT("video", "mbv_window_hide(\"%s\")",
-		window->identifier);
+	/* DEBUG_VPRINT("video", "mbv_window_hide(\"%s\")",
+		window->identifier); */
 
 	assert(window != &root_window);
 
@@ -836,8 +836,8 @@ mbv_window_hide(struct mbv_window *window)
 	mbv_window_finddamagedwindow(window, &root_window, &damaged_window);
 	assert(damaged_window != NULL);
 
-	DEBUG_VPRINT("video", "Repainting damaged window \"%s\"",
-		damaged_window->identifier);
+	/* DEBUG_VPRINT("video", "Repainting damaged window \"%s\"",
+		damaged_window->identifier); */
 
 	/* repaint the damaged window */
 	mbv_window_update(damaged_window);
@@ -850,8 +850,8 @@ mbv_window_hide(struct mbv_window *window)
 void
 mbv_window_destroy(struct mbv_window * const window)
 {
-	DEBUG_VPRINT("video", "mbv_window_destroy(\"%s\")",
-		window->identifier);
+	/* DEBUG_VPRINT("video", "mbv_window_destroy(\"%s\")",
+		window->identifier); */
 
 	assert(window != NULL);
 	assert(window->surface != NULL);

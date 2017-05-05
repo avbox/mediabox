@@ -84,8 +84,8 @@ mb_ui_menuitem_paint(struct mbv_window * const window)
 		return 0;
 	}
 
-	DEBUG_VPRINT("ui-menu", "mb_ui_menuitem_paint(0x%p)",
-		window);
+	/* DEBUG_VPRINT("ui-menu", "mb_ui_menuitem_paint(0x%p)",
+		window); */
 
 	/* get canvas size */
 	mbv_window_getcanvassize(item->window,

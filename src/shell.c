@@ -73,8 +73,8 @@ avbox_shell_paint(struct mbv_window *window)
 	PangoLayout *layout_time, *layout_date;
 	PangoFontDescription *font_desc;
 
-	DEBUG_VPRINT("shell", "avbox_shell_paint(0x%p)",
-		window);
+	/* DEBUG_VPRINT("shell", "avbox_shell_paint(0x%p)",
+		window); */
 
 	/* assert(mbv_window_isvisible(window)); */
 

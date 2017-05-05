@@ -85,7 +85,7 @@ surface_new(struct mbv_surface *parent,
 {
 	struct mbv_surface *inst;
 
-	DEBUG_PRINT("video-drm", "Entering surface_new()");
+	/* DEBUG_PRINT("video-drm", "Entering surface_new()"); */
 
 	/* allocate memory for the surface object */
 	if ((inst = malloc(sizeof(struct mbv_surface))) == NULL) {
@@ -143,6 +143,7 @@ surface_new(struct mbv_surface *parent,
 		return NULL;
 	}
 
+	/*
 	DEBUG_VPRINT("video-drm", "surface = %p", inst);
 	DEBUG_VPRINT("video-drm", "surface.parent = %p", inst->parent);
 	DEBUG_VPRINT("video-drm", "surface.real = %p", inst->real);
@@ -151,6 +152,7 @@ surface_new(struct mbv_surface *parent,
 	DEBUG_VPRINT("video-drm", "surface.realx = %i", inst->realx);
 	DEBUG_VPRINT("video-drm", "surface.realy = %i", inst->realy);
 	DEBUG_VPRINT("video-drm", "surface.buffers[0].map = %p", inst->buffers[0].map);
+	*/
 
 	return inst;
 }
@@ -260,7 +262,7 @@ surface_blit(struct mbv_surface * const dst,
 	void *buf;
 	int pitch, ret;
 
-	DEBUG_PRINT("video-drm", "Entering surface_blit()");
+	/* DEBUG_PRINT("video-drm", "Entering surface_blit()"); */
 
 	/* lock the src surface to get access to it's
 	 * buffer */
@@ -287,7 +289,7 @@ surface_update(struct mbv_surface * const surface,
 	assert(surface != NULL);
 
 	if (surface->real != surface) {
-		DEBUG_PRINT("video-drm", "Not update necessary for subsurfaces!");
+		/* DEBUG_PRINT("video-drm", "Not update necessary for subsurfaces!"); */
 		return;
 	}
 
@@ -315,8 +317,8 @@ surface_update(struct mbv_surface * const surface,
 	} else {
 		const unsigned int blitflags =
 			(update) ? MBV_BLITFLAGS_FRONT : MBV_BLITFLAGS_NONE;
-		DEBUG_VPRINT("video-drm", "Updating surface (update=%i)",
-			update);
+		/* DEBUG_VPRINT("video-drm", "Updating surface (update=%i)",
+			update); */
 		surface_blit(&surface->dev->root, surface, blitflags);
 	}
 }

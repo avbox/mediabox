@@ -230,7 +230,13 @@ avbox_player_updatestatus(struct avbox_player *inst, enum avbox_player_status st
 static inline void
 avbox_player_printstatus(const struct avbox_player * const inst, const int fps)
 {
-	static int i = 0, audio_frames = 0;;
+	static int i = 0;
+
+	int audio_frames = 0;;
+
+	if (getpid() == 1) {
+		return;
+	}
 	if ((i++ % 10) == 0) {
 		if (inst->have_audio) {
 			audio_frames = avbox_audiostream_count(inst->audio_stream);
