@@ -41,9 +41,8 @@ struct avbox_audiostream
 	int running;
 	int started;
 	int64_t frames;
-	int64_t clock_offset_internal;
+	int64_t clock_start;
 	int64_t clock_offset;
-	int64_t lasttime;
 	snd_pcm_uframes_t buffer_size;
 	unsigned int framerate;
 	struct avbox_queue *packets;
@@ -77,7 +76,7 @@ avbox_audiostream_frames2size(struct avbox_audiostream * const stream,
  * Flush the queue
  */
 static void
-avbox_audiostream_dropqueue(struct avbox_audiostream * const stream)
+__avbox_audiostream_drop(struct avbox_audiostream * const stream)
 {
 	DEBUG_PRINT("audio", "Dropping queue");
 	struct avbox_audio_packet *packet;
@@ -96,7 +95,7 @@ void
 avbox_audiostream_drop(struct avbox_audiostream * const inst)
 {
 	pthread_mutex_lock(&inst->lock);
-	avbox_audiostream_dropqueue(inst);
+	__avbox_audiostream_drop(inst);
 	pthread_cond_signal(&inst->wake);
 	pthread_mutex_unlock(&inst->lock);
 }
@@ -125,49 +124,6 @@ avbox_pcm_state_getstring(snd_pcm_state_t state)
 #endif
 
 
-static inline int64_t
-avbox_audiostream_gettime_internal(struct avbox_audiostream * const inst, snd_pcm_status_t *pcm_status)
-{
-	int64_t time;
-	snd_pcm_state_t state;
-	snd_htimestamp_t ts, tts;
-
-	state = snd_pcm_status_get_state(pcm_status);
-	snd_pcm_status_get_trigger_htstamp(pcm_status, &tts);
-	snd_pcm_status_get_htstamp(pcm_status, &ts);
-
-	switch (state) {
-	case SND_PCM_STATE_XRUN:
-	{
-		const int64_t xruntime = inst->clock_offset +
-			FRAMES2TIME(inst, inst->frames);
-		if (UNLIKELY(inst->lasttime != xruntime)) {
-			DEBUG_VPRINT("audio", "PCM State is XRUN! (clock_offset=%li xruntime=%li lasttime=%li",
-				inst->clock_offset_internal, xruntime, inst->lasttime);
-		}
-		inst->lasttime = xruntime;
-		/* fall through */
-	}
-	case SND_PCM_STATE_OPEN:
-	case SND_PCM_STATE_SETUP:
-	case SND_PCM_STATE_PREPARED:
-	case SND_PCM_STATE_PAUSED:
-	case SND_PCM_STATE_SUSPENDED:
-	case SND_PCM_STATE_DISCONNECTED:
-		return inst->lasttime;
-	case SND_PCM_STATE_RUNNING:
-	case SND_PCM_STATE_DRAINING:
-		time  = ((ts.tv_sec * 1000L * 1000L * 1000L) + ts.tv_nsec) / 1000L;
-		time -= ((tts.tv_sec * 1000L * 1000L * 1000L) + tts.tv_nsec) / 1000L;
-		time += inst->clock_offset_internal;
-		return inst->lasttime = (int64_t) time;
-	default:
-		DEBUG_VPRINT("audio", "Unknown ALSA state (state=%i)", state);
-		return inst->lasttime;
-	}
-}
-
-
 /**
  * Gets the time elapsed (in uSecs) since the
  * stream started playing. This clock stops when the audio stream is paused
@@ -177,13 +133,11 @@ int64_t
 avbox_audiostream_gettime(struct avbox_audiostream * const stream)
 {
 	int err = 0;
-	int64_t ret;
 	snd_pcm_status_t *status;
 
 	/* if the stream is pause or hasn't started return
 	 * the internal offset */
 	if (stream->paused || stream->frames == 0) {
-		ret = stream->clock_offset_internal;
 		goto end;
 	}
 
@@ -194,7 +148,6 @@ avbox_audiostream_gettime(struct avbox_audiostream * const stream)
 	if ((err = snd_pcm_avail(stream->pcm_handle)) < 0) {
 		LOG_VPRINT_ERROR("avbox_audiostream_gettime(): ALSA error detected: %s",
 			snd_strerror(err));
-		ret = stream->lasttime;
 		goto end;
 	}
 
@@ -202,14 +155,45 @@ avbox_audiostream_gettime(struct avbox_audiostream * const stream)
 	snd_pcm_status_alloca(&status);
 	if ((err = snd_pcm_status(stream->pcm_handle, status)) < 0) {
 		LOG_VPRINT_ERROR("Stream status error: %s", snd_strerror(err));
-		ret = stream->lasttime;
 		goto end;
 	}
 
-	/* calculate stream time */
-	ret = avbox_audiostream_gettime_internal(stream, status);
+	/* if the stream is running calculate it's runtime
+	 * based on the internal offset + timestamp - trigger timestamp */
+	switch (snd_pcm_status_get_state(status)) {
+	case SND_PCM_STATE_XRUN:
+	case SND_PCM_STATE_OPEN:
+	case SND_PCM_STATE_SETUP:
+	case SND_PCM_STATE_PREPARED:
+	case SND_PCM_STATE_PAUSED:
+	case SND_PCM_STATE_SUSPENDED:
+	case SND_PCM_STATE_DISCONNECTED:
+		break;
+	case SND_PCM_STATE_RUNNING:
+	case SND_PCM_STATE_DRAINING:
+	{
+		int64_t time;
+		snd_htimestamp_t ts, tts;
+		snd_pcm_status_get_trigger_htstamp(status, &tts);
+		snd_pcm_status_get_htstamp(status, &ts);
+		time = stream->clock_start + stream->clock_offset;
+#if 0
+		time += NSEC2USEC(SEC2NSEC(ts.tv_sec) + ts.tv_nsec);
+		time -= NSEC2USEC(SEC2NSEC(tts.tv_sec) + tts.tv_nsec);
+#else
+		time += SEC2USEC(ts.tv_sec) + NSEC2USEC(ts.tv_nsec);
+		time -= SEC2USEC(tts.tv_sec) + NSEC2USEC(tts.tv_nsec);
+#endif
+		return time;
+	}
+	default:
+		DEBUG_VPRINT("audio", "Unknown ALSA state (state=%i)",
+			snd_pcm_status_get_state(status));
+		abort();
+	}
 end:
-	return ret;
+	return stream->clock_start +
+		FRAMES2TIME(stream, stream->frames);
 }
 
 
@@ -258,18 +242,18 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 		break;
 	case SND_PCM_STATE_XRUN:
 	{
-		const int64_t xruntime = inst->clock_offset +
+		const int64_t xruntime = inst->clock_start +
 			FRAMES2TIME(inst, inst->frames);
-		DEBUG_VPRINT("audio", "Pausing on XRUN: offset=%li xruntime=%li lasttime=%li",
-			inst->clock_offset_internal, xruntime, inst->lasttime);
+		DEBUG_VPRINT("audio", "Pausing on XRUN: offset=%li xruntime=%li",
+			inst->clock_offset, xruntime);
 		inst->paused = 1;
 		ret = 0;
 		goto end;
 	}
 	case SND_PCM_STATE_RUNNING:
 	{
-		DEBUG_VPRINT("audio", "Pausing RUNNING stream (offset=%li,time=%li)",
-			inst->clock_offset_internal, avbox_audiostream_gettime_internal(inst, status));
+		DEBUG_VPRINT("audio", "Pausing RUNNING stream (offset=%li)",
+			inst->clock_offset);
 
 		/* start draining the buffer */
 		inst->paused = 1;
@@ -288,10 +272,6 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 
 		DEBUG_VPRINT("audio", "PCM state after pause: %s",
 			avbox_pcm_state_getstring(snd_pcm_state(inst->pcm_handle)));
-
-		/* make sure we return the right time while paused */
-		inst->lasttime = inst->clock_offset_internal =
-			inst->clock_offset + FRAMES2TIME(inst, inst->frames);
 
 		ret = 0;
 		goto end;
@@ -482,7 +462,7 @@ avbox_audiostream_output(void *arg)
 	DEBUG_VPRINT("audio", "ALSA Silence threshold: %lu", silen_thres);
 	DEBUG_VPRINT("audio", "ALSA status: %s",
 		avbox_pcm_state_getstring(snd_pcm_state(inst->pcm_handle)));
-	DEBUG_VPRINT("audio", "Stream offset: %lu", inst->clock_offset_internal);
+	DEBUG_VPRINT("audio", "Stream clock: %lu", inst->clock_start);
 
 	/* drop superuser privileges */
 	(void) avbox_droproot();
@@ -537,12 +517,9 @@ avbox_audiostream_output(void *arg)
 					snd_strerror(frames));
 
 				/* update the offset */
-				inst->clock_offset_internal = inst->clock_offset +
-					FRAMES2TIME(inst, inst->frames);
+				inst->clock_offset = FRAMES2TIME(inst, inst->frames);
 
-				DEBUG_VPRINT("audio", "Setting offset to %li",
-					inst->clock_offset_internal);
-
+				/* attempt to recover */
 				if ((frames = snd_pcm_recover(inst->pcm_handle, frames, 1)) < 0) {
 					LOG_VPRINT_ERROR("Could not recover from ALSA underrun: %s",
 						snd_strerror(frames));
@@ -595,9 +572,6 @@ end:
 		snd_pcm_close(inst->pcm_handle);
 		inst->pcm_handle = NULL;
 	}
-
-	/* free any remaining packets */
-	avbox_audiostream_dropqueue(inst);
 
 	/* signal that we're quitting */
 	inst->running = 0;
@@ -727,9 +701,8 @@ avbox_audiostream_setclock(struct avbox_audiostream * const stream, const int64_
 		goto end;
 	}
 
-	stream->clock_offset_internal =
-		stream->clock_offset =
-		stream->lasttime = clock;
+	stream->clock_start = clock;
+	stream->clock_offset = 0;
 	stream->frames = ret = 0;
 end:
 	pthread_mutex_unlock(&stream->lock);
@@ -790,7 +763,7 @@ avbox_audiostream_destroy(struct avbox_audiostream * const stream)
 	pthread_mutex_unlock(&stream->lock);
 
 	/* free any remaining packets */
-	avbox_audiostream_dropqueue(stream);
+	__avbox_audiostream_drop(stream);
 	avbox_queue_destroy(stream->packets);
 
 	/* free stream object */

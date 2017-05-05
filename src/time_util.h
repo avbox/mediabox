@@ -9,6 +9,21 @@
 #include <stdint.h>
 
 
+/*
+ * Time conversion macros
+ */
+#define SEC2MSEC(sec)	((sec) * 1000L)
+#define SEC2USEC(sec)	((sec) * 1000L * 1000L)
+#define SEC2NSEC(sec)	((sec) * 1000L * 1000L * 1000L)
+#define MSEC2USEC(msec)	((msec) * (1000L))
+#define MSEC2SEC(msec)	((msec) * (1000L * 1000L))
+#define MSEC2NSEC(msec)	((msec) / (1000L))
+#define NSEC2USEC(nsec)	((nsec) / (1000L))
+#define NSEC2MSEC(nsec)	((nsec) / (1000L * 1000L))
+#define NSEC2SEC(nsec)	((nsec) / (1000L * 1000L * 1000L))
+
+
+
 int
 timelt(const struct timespec *time1, const struct timespec *time2);
 
