@@ -5,20 +5,24 @@
 
 #ifndef __MB_DOWNLOADS_H__
 #define __MB_DOWNLOADS_H__
+#include "lib/dispatch.h"
+
+
+struct mbox_downloads;
 
 
 /**
- * mb_downloads_init() -- Initialize the MediaBox downloads list
+ * Initialize the MediaBox downloads list
  */
-int
-mb_downloads_init(void);
+struct mbox_downloads*
+mbox_downloads_new(struct avbox_dispatch_object *parent);
 
 
 int
-mb_downloads_showdialog(void);
+mbox_downloads_show(struct mbox_downloads * const inst);
 
 
 void
-mb_downloads_destroy(void);
+mbox_downloads_destroy(struct mbox_downloads * const inst);
 
 #endif

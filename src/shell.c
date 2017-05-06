@@ -12,41 +12,47 @@
 
 #define LOG_MODULE "shell"
 
-#include "video.h"
-#include "input.h"
-#include "mainmenu.h"
-#include "player.h"
-#include "su.h"
-#include "timers.h"
-#include "debug.h"
-#include "log.h"
-#include "volume.h"
+#include "lib/ui/video.h"
+#include "lib/ui/progressview.h"
+#include "lib/ui/player.h"
+#include "lib/ui/input.h"
+#include "lib/su.h"
+#include "lib/timers.h"
+#include "lib/debug.h"
+#include "lib/log.h"
+#include "lib/volume.h"
 #include "library.h"
-#include "ui-progressbar.h"
+#include "lib/dispatch.h"
+#include "lib/application.h"
+#include "mainmenu.h"
+#include "discovery.h"
+#include "downloads-backend.h"
+#include "library-backend.h"
 
 
 #define MEDIA_FILE "/mov.mp4"
 
 
 static int pw = 0, ph = 0;
-static struct mbv_window *main_window = NULL;
-static struct mbv_window *progress = NULL;
-static struct mb_ui_progressbar *progressbar = NULL;
+static struct avbox_dispatch_object *dispatch_object = NULL;
+static struct avbox_window *main_window = NULL;
+static struct avbox_window *progress = NULL;
+static struct avbox_progressview *progressbar = NULL;
 static struct avbox_player *player = NULL;
-static struct mbv_window *volumebar_window = NULL;
-static struct mb_ui_progressbar *volumebar = NULL;
+static struct avbox_window *volumebar_window = NULL;
+static struct avbox_progressview *volumebar = NULL;
+static struct mbox_mainmenu *mainmenu = NULL;
 static int volumebar_timer_id = -1;
-static int input_fd = -1;
 static int clock_timer_id = 0;
 static char time_string[256] = "";
 static char date_string[256] = "";
 
 
 /**
- * mbs_get_active_player() -- Gets the currently active player instance.
+ * Gets the currently active player instance.
  */
 struct avbox_player *
-avbox_shell_getactiveplayer(void)
+mbox_shell_getactiveplayer(void)
 {
 	return player;
 }
@@ -55,10 +61,10 @@ avbox_shell_getactiveplayer(void)
 /**
  * Gets the shell's message queue fd.
  */
-int
-avbox_shell_getqueue(void)
+struct avbox_dispatch_object *
+mbox_shell_getqueue(void)
 {
-	return input_fd;
+	return dispatch_object;
 }
 
 
@@ -66,23 +72,23 @@ avbox_shell_getqueue(void)
  * Draws the welcome screen.
  */
 static int
-avbox_shell_paint(struct mbv_window *window)
+mbox_shell_draw(struct avbox_window *window)
 {
 	int w, h;
 	cairo_t *context;
 	PangoLayout *layout_time, *layout_date;
 	PangoFontDescription *font_desc;
 
-	/* DEBUG_VPRINT("shell", "avbox_shell_paint(0x%p)",
+	/* DEBUG_VPRINT("shell", "mbox_shell_draw(0x%p)",
 		window); */
 
-	/* assert(mbv_window_isvisible(window)); */
+	/* assert(avbox_window_isvisible(window)); */
 
-	mbv_window_getcanvassize(window, &w, &h);
-	mbv_window_clear(window);
-	mbv_window_drawline(window, 0, h / 2, w - 1, h / 2);
+	avbox_window_getcanvassize(window, &w, &h);
+	avbox_window_clear(window);
+	avbox_window_drawline(window, 0, h / 2, w - 1, h / 2);
 
-	if ((context = mbv_window_cairo_begin(window)) != NULL) {
+	if ((context = avbox_window_cairo_begin(window)) != NULL) {
 		if ((layout_time = pango_cairo_create_layout(context)) != NULL) {
 			if ((font_desc = pango_font_description_from_string("Sans Bold 128px")) != NULL) {
 				pango_layout_set_font_description(layout_time, font_desc);
@@ -116,7 +122,7 @@ avbox_shell_paint(struct mbv_window *window)
 		if (layout_date != NULL) {
 			g_object_unref(layout_date);
 		}
-		mbv_window_cairo_end(window);
+		avbox_window_cairo_end(window);
 	} else {
 		DEBUG_PRINT("about", "Could not get cairo context");
 	}
@@ -126,11 +132,48 @@ avbox_shell_paint(struct mbv_window *window)
 
 
 /**
+ * Draws the shutdown dialog */
+static int
+mbox_shell_shutdowndraw(struct avbox_window *window)
+{
+	int w, h;
+	cairo_t *context;
+	PangoLayout *msg;
+	PangoFontDescription *font_desc;
+
+	DEBUG_PRINT("shell", "Drawing shutdown dialog");
+
+	avbox_window_getcanvassize(window, &w, &h);
+	avbox_window_clear(window);
+
+	if ((context = avbox_window_cairo_begin(window)) != NULL) {
+		if ((msg = pango_cairo_create_layout(context)) != NULL) {
+			if ((font_desc = pango_font_description_from_string("Sans Bold 48px")) != NULL) {
+				pango_layout_set_font_description(msg, font_desc);
+				pango_layout_set_width(msg, w * PANGO_SCALE);
+				pango_layout_set_alignment(msg, PANGO_ALIGN_CENTER);
+				pango_layout_set_text(msg, "Shutting Down", -1);
+				pango_cairo_update_layout(context, msg);
+				pango_font_description_free(font_desc);
+				cairo_translate(context, 0, 0);
+				cairo_set_source_rgba(context, 1.0, 1.0, 1.0, 1.0);
+				pango_cairo_show_layout(context, msg);
+				g_object_unref(msg);
+			}
+		}
+		avbox_window_cairo_end(window);
+	} else {
+		DEBUG_PRINT("about", "Could not get cairo context");
+	}
+	return 0;
+}
+
+/**
  * This is the callback function for the timer
  * that updates the clock on the welcome screen.
  */
 static enum avbox_timer_result
-avbox_shell_welcomescreen(int id, void *data)
+mbox_shell_welcomescreen(int id, void *data)
 {
 	time_t now;
 	static char old_time_string[256] = { 0 };
@@ -143,7 +186,7 @@ avbox_shell_welcomescreen(int id, void *data)
 	strftime(time_string, sizeof(time_string), "%I:%M %p",
 		localtime(&now));
 
-	/* if the time has not changed there's no need to repaint */
+	/* if the time has not changed there's no need to redraw */
 	if (!strcmp(old_time_string, time_string)) {
 		return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
 	} else {
@@ -155,40 +198,40 @@ avbox_shell_welcomescreen(int id, void *data)
 	strftime(date_string, sizeof(time_string), "%B %d, %Y",
 		localtime(&now));
 
-	/* repaint the window */
-        mbv_window_update(main_window);
+	/* redraw the window */
+        avbox_window_update(main_window);
 
 	return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
 }
 
 
 static void
-avbox_shell_startclock(void)
+mbox_shell_startclock(void)
 {
 	struct timespec tv;
 	
 	DEBUG_PRINT("shell", "Starting clock");
 
-	avbox_shell_welcomescreen(0, NULL);
+	mbox_shell_welcomescreen(0, NULL);
 
 	tv.tv_sec = 2;
 	tv.tv_nsec = 0;
 	clock_timer_id = avbox_timer_register(&tv,
 		AVBOX_TIMER_TYPE_AUTORELOAD | AVBOX_TIMER_MESSAGE,
-		input_fd, NULL, NULL);
+		dispatch_object, NULL, NULL);
 }
 
 
 static enum avbox_timer_result
-avbox_shell_dismissvolumebar(int id, void *data)
+mbox_shell_dismissvolumebar(int id, void *data)
 {
 	if (id == volumebar_timer_id) {
 		DEBUG_VPRINT("shell", "Dismissing volume indicator (id=%i)",
 			id);
 
-		mbv_window_hide(volumebar_window);
-		mb_ui_progressbar_destroy(volumebar);
-		mbv_window_destroy(volumebar_window);
+		avbox_window_hide(volumebar_window);
+		avbox_progressview_destroy(volumebar);
+		avbox_window_destroy(volumebar_window);
 		volumebar = NULL;
 		volumebar_window = NULL;
 		volumebar_timer_id = -1;
@@ -206,7 +249,7 @@ avbox_shell_dismissvolumebar(int id, void *data)
  * Handles volume changes.
  */
 static void
-avbox_shell_volumechanged(int volume)
+mbox_shell_volumechanged(int volume)
 {
 	int x, y, w, h;
 	int new_timer_id;
@@ -214,45 +257,46 @@ avbox_shell_volumechanged(int volume)
 	const int bar_width = 800;
 
 	if (volumebar_timer_id == -1) {
-		struct mbv_window *root_window;
+		struct avbox_window *root_window;
 
 		assert(volumebar == NULL);
 		assert(volumebar_window == NULL);
 
 		/* calculate volumebar size and location */
-		root_window = mbv_getrootwindow();
-		mbv_window_getcanvassize(root_window, &w, &h);
+		root_window = avbox_video_getrootwindow(0);
+		avbox_window_getcanvassize(root_window, &w, &h);
 		x = (w / 2) - (bar_width / 2);
 		y = h - 150;
 
 		/* create a new window with a progressbar widget */
-		volumebar_window = mbv_window_new("volumebar", NULL, x, y, bar_width, 60, NULL);
+		volumebar_window = avbox_window_new(NULL, "volumebar",
+			AVBOX_WNDFLAGS_NONE, x, y, bar_width, 60, NULL, NULL, NULL);
 		if (volumebar_window == NULL) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
 				"Could not create volume indicator window");
 			return;
 		}
-		volumebar = mb_ui_progressbar_new(volumebar_window, 0, 0, bar_width, 60, 0, 100, volume);
+		volumebar = avbox_progressview_new(volumebar_window, 0, 0, bar_width, 60, 0, 100, volume);
 		if (volumebar == NULL) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
 				"Could not create volume indicator");
-			mbv_window_destroy(volumebar_window);
+			avbox_window_destroy(volumebar_window);
 			return;
 		}
 
-		mbv_window_show(volumebar_window);
+		avbox_window_show(volumebar_window);
 
 	} else {
-		mb_ui_progressbar_setvalue(volumebar, volume);
+		avbox_progressview_setvalue(volumebar, volume);
 	}
 
-	mb_ui_progressbar_update(volumebar);
+	avbox_progressview_update(volumebar);
 
 	/* Register timer to dismiss volume bar */
 	tv.tv_sec = 5;
 	tv.tv_nsec = 0;
 	new_timer_id = avbox_timer_register(&tv, AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
-		input_fd, NULL, NULL);
+		dispatch_object, NULL, NULL);
 	if (new_timer_id == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "shell", "Could not register volume bar timer");
 
@@ -260,9 +304,9 @@ avbox_shell_volumechanged(int volume)
 		 * running. Otherwise it'll get hidden when the timer
 		 * expires */
 		if (volumebar_timer_id == -1) {
-			mbv_window_hide(volumebar_window);
-			mb_ui_progressbar_destroy(volumebar);
-			mbv_window_destroy(volumebar_window);
+			avbox_window_hide(volumebar_window);
+			avbox_progressview_destroy(volumebar);
+			avbox_window_destroy(volumebar_window);
 			volumebar = NULL;
 			volumebar_window = NULL;
 			return;
@@ -284,7 +328,7 @@ avbox_shell_volumechanged(int volume)
  * mbs_playerstatuschanged() -- Handle player state change events
  */
 static void
-avbox_shell_playerstatuschanged(struct avbox_player *inst,
+mbox_shell_playerstatuschanged(struct avbox_player *inst,
 	enum avbox_player_status status, enum avbox_player_status last_status)
 {
 	if (inst == player) {
@@ -298,9 +342,9 @@ avbox_shell_playerstatuschanged(struct avbox_player *inst,
 				assert(progressbar != NULL);
 
 				/* hide and destroy progress bar */
-				mbv_window_hide(progress);
-				mb_ui_progressbar_destroy(progressbar);
-				mbv_window_destroy(progress);
+				avbox_window_hide(progress);
+				avbox_progressview_destroy(progressbar);
+				avbox_window_destroy(progress);
 				progressbar = NULL;
 				progress = NULL;
 			}
@@ -314,8 +358,10 @@ avbox_shell_playerstatuschanged(struct avbox_player *inst,
 		/* if we're out of the READY state then cancel the clock
 		 * timer */
 		if (clock_timer_id != 0 && status != MB_PLAYER_STATUS_READY) {
+			DEBUG_PRINT("shell", "Hiding main window");
+
 			/* hide the welcome screen window */
-			mbv_window_hide(main_window);
+			avbox_window_hide(main_window);
 
 			DEBUG_PRINT("shell", "Stoping clock timer");
 			if (avbox_timer_cancel(clock_timer_id) == 0) {
@@ -331,9 +377,10 @@ avbox_shell_playerstatuschanged(struct avbox_player *inst,
 		case MB_PLAYER_STATUS_READY:
 			DEBUG_PRINT("shell", "Player state changed to READY");
 			if (clock_timer_id == 0) {
-				assert(!mbv_window_isvisible(main_window));
-				mbv_window_show(main_window);
-				avbox_shell_startclock();
+				DEBUG_PRINT("shell", "Showing main window");
+				assert(!avbox_window_isvisible(main_window));
+				avbox_window_show(main_window);
+				mbox_shell_startclock();
 			}
 			break;
 
@@ -347,7 +394,7 @@ avbox_shell_playerstatuschanged(struct avbox_player *inst,
 			 * next time */
 			if (progress == NULL) {
 				int sw, sh, px, py;
-				struct mbv_window *root_window;
+				struct avbox_window *root_window;
 
 				DEBUG_PRINT("shell", "Initializing progress bar");
 
@@ -355,12 +402,12 @@ avbox_shell_playerstatuschanged(struct avbox_player *inst,
 
 				/* clear the root window */
 				/* TODO: This is not needed now */
-				root_window = mbv_getrootwindow();
+				root_window = avbox_video_getrootwindow(0);
 				assert(root_window != NULL);
-				mbv_window_clear(root_window);
-				mbv_window_update(root_window);
+				avbox_window_clear(root_window);
+				avbox_window_update(root_window);
 
-				mbv_window_getsize(root_window, &sw, &sh);
+				avbox_window_getsize(root_window, &sw, &sh);
 
 				pw = (sw * 70) / 100;
 				ph = 30;
@@ -368,30 +415,31 @@ avbox_shell_playerstatuschanged(struct avbox_player *inst,
 				py = (sh / 2) - (ph / 2);
 
 				/* create a window for the progress bar */
-				if ((progress = mbv_window_new("progressbar", NULL, px, py, pw, ph, NULL)) == NULL) {
+				if ((progress = avbox_window_new(NULL, "progressbar",
+					AVBOX_WNDFLAGS_NONE, px, py, pw, ph, NULL, NULL, NULL)) == NULL) {
 					LOG_PRINT_ERROR("Could not create progressbar window");
 					break;
 				}
 
 				/* create the progressbar widget */
-				if ((progressbar = mb_ui_progressbar_new(progress, 0, 0, pw, ph, 0, 100, 0)) == NULL) {
+				if ((progressbar = avbox_progressview_new(progress, 0, 0, pw, ph, 0, 100, 0)) == NULL) {
 					LOG_PRINT_ERROR("Could not create progressbar widget");
-					mbv_window_destroy(progress);
+					avbox_window_destroy(progress);
 					break;
 				}
 
 				/* show the progress bar */
-				mb_ui_progressbar_update(progressbar);
-				mbv_window_show(progress);
+				avbox_progressview_update(progressbar);
+				avbox_window_show(progress);
 
 			} else {
 				assert(progress != NULL);
 				assert(progressbar != NULL);
 
 				/* update the progress bar */
-				mb_ui_progressbar_setvalue(progressbar, avbox_player_bufferstate(inst));
-				mb_ui_progressbar_update(progressbar);
-				mbv_window_update(progress);
+				avbox_progressview_setvalue(progressbar, avbox_player_bufferstate(inst));
+				avbox_progressview_update(progressbar);
+				avbox_window_update(progress);
 			}
 			break;
 
@@ -414,93 +462,108 @@ avbox_shell_playerstatuschanged(struct avbox_player *inst,
 
 
 /**
- * Initialize the MediaBox shell
+ * Destroy the shell.
  */
-int
-avbox_shell_init(void)
+static void
+mbox_shell_shutdown(void)
 {
 	int w, h;
-	struct mbv_window *root_window;
+	struct avbox_window *msgwin, *root_window;
 
-	/* get the screen size in pixels (that's the
-	 * size of the root window */
-	root_window = mbv_getrootwindow();
+	DEBUG_PRINT("shell", "Shutting down");
+
+	if (volumebar_timer_id != -1) {
+		avbox_timer_cancel(volumebar_timer_id);
+	}
+	if (clock_timer_id != -1) {
+		avbox_timer_cancel(clock_timer_id);
+	}
+	if (player != NULL) {
+		avbox_player_destroy(player);
+	}
+
+	avbox_volume_shutdown();
+	avbox_dispatch_destroyobject(dispatch_object);
+
+	/* destroy the main window */
+	avbox_window_destroy(main_window);
+
+	/* clear the root window the root window */
+	root_window = avbox_video_getrootwindow(0);
 	assert(root_window != NULL);
-	mbv_window_getcanvassize(root_window, &w, &h);
+	avbox_window_getcanvassize(root_window, &w, &h);
+	avbox_window_clear(root_window);
+	avbox_window_update(root_window);
 
-	/* create the welcome screen window */
-        main_window = mbv_window_new("welcome", NULL, 0, 0, w, h,
-		&avbox_shell_paint);
-	if (main_window == NULL) {
-		fprintf(stderr, "Could not create root window\n");
-		return -1;
-	}
-	mbv_window_setbgcolor(main_window, 0x000000ff);
-	mbv_window_setcolor(main_window, 0x8080ffff);
-
-	/* initialize main media player */
-	player = avbox_player_new(NULL);
-	if (player == NULL) {
-		fprintf(stderr, "Could not initialize main media player\n");
-		return -1;
-	}
-
-	/* grab the input device */
-	if ((input_fd = avbox_input_grab()) == -1) {
-		fprintf(stderr, "mbs_show() -- avbox_input_grab() failed\n");
-		return -1;
+	/* draw a shutdown dialog, since there's no main
+	 * window this will stay on the display after
+	 * it is destroyed */
+        msgwin = avbox_window_new(NULL, "shutdown",
+		AVBOX_WNDFLAGS_NONE, (w/2) - 240, (h/2) - 30, 480, 60,
+		NULL, &mbox_shell_shutdowndraw, NULL);
+	if (msgwin != NULL) {
+		DEBUG_PRINT("shell", "Showing shutdown message");
+		avbox_window_setbgcolor(msgwin, 0x000000ff);
+		avbox_window_setcolor(msgwin, 0x8080ffff);
+		avbox_window_show(msgwin);
+		avbox_window_destroy(msgwin);
+	} else {
+		LOG_PRINT_ERROR("Could not show shutdown dialog");
 	}
 
-	return 0;
+	/* shutdown services */
+	avbox_discovery_shutdown();
+	mb_downloadmanager_destroy();
+
+	DEBUG_PRINT("shell", "Shell shutdown complete");
 }
 
 
-int
-avbox_shell_run(void)
+/**
+ * Handle incomming messages.
+ */
+static int
+mbox_shell_handler(void *context, struct avbox_message *msg)
 {
-	int quit = 0;
-	struct avbox_message *message;
+	int ret = AVBOX_DISPATCH_OK;
 
-	/* start the clock timer */
-	mbv_window_show(main_window);
-	avbox_shell_startclock();
+	(void) context;
 
-	/* initialize the volume control */
-	if (avbox_volume_init(input_fd) != 0) {
-		fprintf(stderr, "shell: Could not initialize volume control");
-		return -1;
-	}
+	switch (avbox_dispatch_getmsgtype(msg)) {
+	case AVBOX_MESSAGETYPE_INPUT:
+	{ 
+		struct avbox_input_message *event =
+			avbox_dispatch_getmsgpayload(msg);
 
-	/* register our queue as the player's notification queue */
-	if (avbox_player_registernotificationqueue(avbox_shell_getactiveplayer(), input_fd) == -1) {
-		LOG_PRINT_ERROR("Could not reqister notification queue");
-		return -1;
-	}
+		DEBUG_PRINT("shell", "Input event received");
 
-	/* run the message loop */
-	while (!quit && (message = avbox_input_getmessage(input_fd)) != NULL) {
-		switch (message->msg) {
+		switch (event->msg) {
 		case MBI_EVENT_KBD_Q:
-		case MBI_EVENT_QUIT:
-		{
-			close(input_fd);
-			quit = 1;
+			mbox_shell_shutdown();
+			avbox_application_quit(0);
 			break;
-		}
 		case MBI_EVENT_KBD_SPACE:
 		case MBI_EVENT_MENU:
 		{
 
 			DEBUG_PRINT("shell", "MENU key pressed");
 
-			if (mb_mainmenu_init() == -1) {
+			/* the main menu is already visible */
+			if (mainmenu != NULL) {
+				break;
+			}
+
+			/* initialize meain menu */
+			if ((mainmenu = mbox_mainmenu_new(dispatch_object)) == NULL) {
 				LOG_PRINT_ERROR("Could not initialize main menu!");
 				break;
 			}
-			if (mb_mainmenu_showdialog() == -1) {
-				DEBUG_PRINT("shell", "Main Menu dismissed");
+
+			/* attempt to show the main menu */
+			if (mbox_mainmenu_show(mainmenu) == -1) {
+				LOG_PRINT_ERROR("Could not show main menu!");
+				mbox_mainmenu_destroy(mainmenu);
 			}
-			mb_mainmenu_destroy();
 			break;
 		}
 		case MBI_EVENT_KBD_P:
@@ -600,56 +663,170 @@ avbox_shell_run(void)
 			avbox_volume_set(volume);
 			break;
 		}
-		case MBI_EVENT_TIMER:
-		{
-			struct avbox_timer_data *timer_data;
-			timer_data = (struct avbox_timer_data*) message->payload;
-
-			/* DEBUG_VPRINT("shell", "Received timer message id=%i",
-				timer_data->id); */
-
-			if (timer_data->id == clock_timer_id) {
-				avbox_shell_welcomescreen(timer_data->id, timer_data->data);
-			} else if (timer_data->id == volumebar_timer_id) {
-				avbox_shell_dismissvolumebar(timer_data->id, timer_data->data);
-			}
-			break;
-		}
-		case MBI_EVENT_VOLUME_CHANGED:
-		{
-			int *vol;
-			vol = ((int*) message->payload);
-			avbox_shell_volumechanged(*vol);
-			break;
-		}
-		case MBI_EVENT_PLAYER_NOTIFICATION:
-		{
-			struct avbox_player_status_data *status_data;
-			status_data = (struct avbox_player_status_data*) message->payload;
-			avbox_shell_playerstatuschanged(status_data->sender,
-				status_data->status, status_data->last_status);
-			break;
-		}
 		default:
-			DEBUG_VPRINT("shell", "Received event %i", (int) message->msg);
+			DEBUG_VPRINT("shell", "Received event %i", (int) event->msg);
+			/* since we're the root window we need to
+			 * free the input event even if we don't process it
+			 * so we always return AVBOX_DISPATCH_OK */
 			break;
 		}
-		free(message);
+
+		avbox_input_eventfree(event);
+		break;
+	}
+	case AVBOX_MESSAGETYPE_TIMER:
+	{
+		struct avbox_timer_data * const timer_data =
+			avbox_dispatch_getmsgpayload(msg);
+
+		/* DEBUG_VPRINT("shell", "Received timer message id=%i",
+			timer_data->id); */
+
+		if (timer_data->id == clock_timer_id) {
+			mbox_shell_welcomescreen(timer_data->id, timer_data->data);
+		} else if (timer_data->id == volumebar_timer_id) {
+			mbox_shell_dismissvolumebar(timer_data->id, timer_data->data);
+		}
+		break;
+	} 
+	case AVBOX_MESSAGETYPE_VOLUME:
+	{
+		int *vol;
+		vol = avbox_dispatch_getmsgpayload(msg);
+		mbox_shell_volumechanged(*vol);
+		break;
+	}
+	case AVBOX_MESSAGETYPE_PLAYER:
+	{
+		struct avbox_player_status_data * const status_data =
+			avbox_dispatch_getmsgpayload(msg);
+		mbox_shell_playerstatuschanged(status_data->sender,
+			status_data->status, status_data->last_status);
+		free(status_data);
+		break;
+	}
+	case AVBOX_MESSAGETYPE_DISMISSED:
+	{
+		DEBUG_PRINT("shell", "Received DISMISSED message");
+
+		if (avbox_dispatch_getmsgpayload(msg) == mainmenu) {
+			mbox_mainmenu_destroy(mainmenu);
+			mainmenu = NULL;
+		}
+		break;
+	}
+	default:
+		DEBUG_VPRINT("shell", "Invalid message type: %i",
+			avbox_dispatch_getmsgtype(msg));
+		break;
+	}
+	return ret;
+}
+
+
+/**
+ * Initialize the MediaBox shell
+ */
+int
+mbox_shell_init(int launch_avmount, int launch_mediatomb)
+{
+	int w, h;
+	struct avbox_window *root_window;
+
+	/* initialize the library backend */
+	if (mb_library_backend_init(launch_avmount, launch_mediatomb) == -1) {
+		fprintf(stderr, "Could not initialize library backend\n");
+		exit(EXIT_FAILURE);
 	}
 
-	DEBUG_PRINT("shell", "Exiting");
+	if (mb_downloadmanager_init() == -1) {
+		fprintf(stderr, "Could not initialize download manager\n");
+		exit(EXIT_FAILURE);
+	}
 
-	avbox_volume_shutdown();
+	/* initialize the discovery service */
+	if (avbox_discovery_init() == -1) {
+		fprintf(stderr, "Could not start announcer.\n");
+		mb_downloadmanager_destroy();
+		exit(EXIT_FAILURE);
+	}
+
+
+
+	/* get the screen size in pixels (that's the
+	 * size of the root window */
+	root_window = avbox_video_getrootwindow(0);
+	assert(root_window != NULL);
+	avbox_window_getcanvassize(root_window, &w, &h);
+
+	/* create the welcome screen window */
+        main_window = avbox_window_new(NULL, "welcome",
+		AVBOX_WNDFLAGS_NONE, 0, 0, w, h,
+		NULL, &mbox_shell_draw, NULL);
+	if (main_window == NULL) {
+		fprintf(stderr, "Could not create root window\n");
+		return -1;
+	}
+	avbox_window_setbgcolor(main_window, 0x000000ff);
+	avbox_window_setcolor(main_window, 0x8080ffff);
+
+	/* initialize main media player */
+	player = avbox_player_new(NULL);
+	if (player == NULL) {
+		fprintf(stderr, "Could not initialize main media player\n");
+		return -1;
+	}
+
+	/* create dispatch object */
+	if ((dispatch_object = avbox_dispatch_createobject(mbox_shell_handler, 0, NULL)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
+			strerror(errno));
+		return -1;
+	}
+
+	/* initialize the volume control */
+	if (avbox_volume_init(dispatch_object) != 0) {
+		LOG_PRINT_ERROR("Could not initialize volume control!");
+		return -1;
+	}
+
+	/* register our queue as the player's notification queue */
+	if (avbox_player_registernotificationqueue(mbox_shell_getactiveplayer(), dispatch_object) == -1) {
+		LOG_PRINT_ERROR("Could not reqister notification queue");
+		return -1;
+	}
+
+	return 0;
+}
+
+
+/**
+ * Start the shell.
+ */
+int
+mbox_shell_show(void)
+{
+	/* start the clock timer */
+	avbox_window_show(main_window);
+	mbox_shell_startclock();
+
+	/* grab the input device */
+	if (avbox_input_grab(dispatch_object) == -1) {
+		LOG_VPRINT_ERROR("Could not grab input: %s",
+			strerror(errno));
+		return -1;
+	}
 
 	return 0;
 }
 
 
 void
-avbox_shell_reboot(void)
+mbox_shell_reboot(void)
 {
 	if (avbox_gainroot() == 0) {
-		close(input_fd);
+		avbox_input_release(dispatch_object);
+		avbox_dispatch_destroyobject(dispatch_object);
 		if (system("systemctl stop avmount") != 0) {
 			fprintf(stderr, "shell: systemctl stop avmount failed\n");
 			return;
@@ -660,19 +837,3 @@ avbox_shell_reboot(void)
 		avbox_droproot();
 	}
 }
-
-
-/**
- * Destroy the shell.
- */
-void
-avbox_shell_shutdown(void)
-{
-	if (player != NULL) {
-		avbox_player_destroy(player);
-	}
-
-	/* destroy the main window */
-	mbv_window_destroy(main_window);
-}
-

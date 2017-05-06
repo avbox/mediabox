@@ -6,47 +6,90 @@
 #include <time.h>
 #include <unistd.h>
 
+#define LOG_MODULE "mediasearch"
 
-#include "video.h"
-#include "input.h"
-#include "ui-menu.h"
-#include "url_util.h"
-#include "linkedlist.h"
+#include "lib/ui/video.h"
+#include "lib/ui/listview.h"
+#include "lib/ui/input.h"
+#include "lib/url_util.h"
+#include "lib/linkedlist.h"
+#include "lib/time_util.h"
+#include "lib/debug.h"
+#include "lib/dispatch.h"
+#include "lib/thread.h"
+#include "lib/application.h"
 #include "downloads-backend.h"
-#include "time_util.h"
-#include "debug.h"
 
 
-#define MB_MEDIASEARCH_STATE_NONE       (0)
-#define MB_MEDIASEARCH_STATE_CATEGORIES (1)
-#define MB_MEDIASEARCH_STATE_ITEMS      (2)
+#define AVBOX_MEDIASEARCH_STATE_NONE       (0)
+#define AVBOX_MEDIASEARCH_STATE_CATEGORIES (1)
+#define AVBOX_MEDIASEARCH_STATE_ITEMS      (2)
 
 
-LISTABLE_TYPE(mb_searchresult,
+struct mbox_mediasearch
+{
+	struct avbox_window *window;
+	struct avbox_listview *menu;
+	struct avbox_dispatch_object *dispatch_object;
+	struct avbox_dispatch_object *parent_object;
+	int state;
+	char *terms;
+	char *last_terms;
+	size_t terms_sz;
+	int items_count;
+	int updater_quit;
+	char *cat;
+	pthread_mutex_t terms_lock;
+};
+
+
+struct avbox_additem_args
+{
+	struct avbox_listview *inst;
 	char *name;
 	char *url;
-);
+};
 
 
-static struct mbv_window *window = NULL;
-static struct mb_ui_menu *menu = NULL;
-static int state = MB_MEDIASEARCH_STATE_NONE;
-static int items_count = 0;
-static int input_quit = 0;
-static int updater_quit = 0;
-static char *terms = NULL;
-static char *cat = NULL;
-static size_t terms_sz = 0;
-static pthread_mutex_t menu_lock = PTHREAD_MUTEX_INITIALIZER;
+/**
+ * Called back by avbox_listview_enumitems(). Used to free
+ * item list entries
+ */
+static int
+mbox_mediasearch_freeitems(void *item, void *data)
+{
+	(void) data;
+	free(item);
+	return 0;
+}
 
-static pthread_t updater;
-static pthread_mutex_t updater_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t updater_signal = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t terms_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/**
+ * Clear the list.
+ */
+static void *
+mbox_mediasearch_clearlist(void *arg)
+{
+	struct mbox_mediasearch * const inst = arg;
+	avbox_listview_enumitems(inst->menu, mbox_mediasearch_freeitems, NULL);
+	avbox_listview_clearitems(inst->menu);
+	inst->items_count = 0;
+	return NULL;
+}
+
+
+static void *
+mbox_mediasearch_additem(void *arg)
+{
+	struct avbox_additem_args * const args = arg;
+	avbox_listview_additem(args->inst, args->name, args->url);
+	return NULL;
+}
 
 
 static int
-mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
+mbox_mediasearch_search(struct mbox_mediasearch *inst,
+	char *terms, unsigned int skip, unsigned int count)
 {
 	#define ITEMS_PER_PAGE (25)
 	char *content = NULL;
@@ -56,9 +99,6 @@ mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
 	unsigned int page = 0, skipped = 0;
 
 	static struct timespec tv = { 0, 0 };
-
-	(void) terms;
-
 
 	if (skip) {
 		page = skip / ITEMS_PER_PAGE;
@@ -74,10 +114,10 @@ mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
 
 		if (terms != NULL && strcmp(terms, "")) {
 			snprintf(url, 255-1, "https://kat.cr/usearch/%s category:%s/%i/",
-				terms, cat, page);
+				terms, inst->cat, page);
 
 		} else {
-			snprintf(url, 255-1, "https://kat.cr/%s/%i/", cat, page);
+			snprintf(url, 255-1, "https://kat.cr/%s/%i/", inst->cat, page);
 		}
 
 		fprintf(stderr, "mediasearch: Fetching page %s...\n", url);
@@ -161,25 +201,38 @@ mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
 						}
 					}
 					if (name != NULL && magnet != NULL) {
-						mb_ui_menu_additem(menu, name, magnet);
-						/* fprintf(stderr, "Added %s\n", name); */
+						struct avbox_delegate *del;
+						struct avbox_additem_args args;
+						args.inst = inst->menu;
+						args.name = name;
+						args.url = magnet;
+
+						/* add the item to the list from the main thread */
+						if ((del = avbox_application_delegate(
+							mbox_mediasearch_additem, &args)) == NULL) {
+							LOG_VPRINT_ERROR("Could not delegate call 'additem' to main thread: %s",
+								strerror(errno));
+						} else {
+							avbox_delegate_wait(del, NULL);
+						}
+
 						free(name);
 						count--;
-						items_count++;
+						inst->items_count++;
 						/* free(magnet) -- later */
 
 					}
 				}
 			}
 		} else {
-			fprintf(stderr, "Invalid input\n");
-			fprintf(stderr, "Content %s\n", content);
+			LOG_VPRINT_ERROR("Invalid input (content=\"%s\")",
+				content);
 			return -1;
 		}
 		free(content);
 	}
 
-	mbv_window_update(window);
+	avbox_window_update(inst->window);
 
 	return 0;
 }
@@ -188,147 +241,130 @@ mb_mediasearch_search(char *terms, unsigned int skip, unsigned int count)
 #define STRINGIZE2(x) #x
 #define STRINGIZE(x) STRINGIZE2(x)
 
-/**
- * mb_mediasearch_freeitems() -- Called back by mb_ui_menu_enumitems(). Used to free
- * item list entries
- */
-static int
-mb_mediasearch_freeitems(void *item, void *data)
-{
-	(void) data;
-	free(item);
-	return 0;
-}
-
-
 static void *
-mb_mediasearch_resultsupdater(void *arg)
+mbox_mediasearch_dosearch(void *arg)
 {
-	char *last_terms = NULL, *tmp;
+	char *tmp;
+	struct mbox_mediasearch * const inst = arg;
 
-	MB_DEBUG_SET_THREAD_NAME("searchupdater");
+	DEBUG_PRINT("mediasearch", "Performing search");
 
-	assert(terms != NULL);
-
-	while (!updater_quit) {
-
-		pthread_mutex_lock(&updater_lock);
-		if (last_terms != NULL && !strcmp(last_terms, terms)) {
-			/* fprintf(stderr, "mediasearch: Waiting\n"); */
-			pthread_cond_wait(&updater_signal, &updater_lock);
-			if (updater_quit) {
-				pthread_mutex_unlock(&updater_lock);
-				continue;
-			}
-		} else {
-			/* fprintf(stderr, "mediasearch: last_terms='%s' terms='%s'\n",
-				last_terms, terms); */
-		}
-		pthread_mutex_unlock(&updater_lock);
-
-		pthread_mutex_lock(&terms_lock);
-		if ((tmp = strdup(terms)) == NULL) {
-			fprintf(stderr, "mediasearch: strdup() failed\n");
-			pthread_mutex_unlock(&terms_lock);
-			continue;
-		}
-		pthread_mutex_unlock(&terms_lock);
-
-		pthread_mutex_lock(&menu_lock);
-
-		mb_ui_menu_enumitems(menu, mb_mediasearch_freeitems, NULL);
-		mb_ui_menu_clearitems(menu);
-
-		items_count = 0;
-		if (mb_mediasearch_search(tmp, items_count, 25) == 0) {
-			mbv_window_update(window);
-		} else {
-			fprintf(stderr, "mediasearch: search() failed\n");
-		}
-
-
-		pthread_mutex_unlock(&menu_lock);
-
-		if (last_terms != NULL) {
-			free(last_terms);
-		}
-		if ((last_terms = strdup(tmp)) == NULL) {
-			fprintf(stderr, "mediasearch: strdup() failed 2\n");
-		}
-		free(tmp);
+	pthread_mutex_lock(&inst->terms_lock);
+	if ((tmp = strdup(inst->terms)) == NULL) {
+		LOG_PRINT_ERROR("strdup() failed!");
+		return NULL;
 	}
-	if (last_terms != NULL) {
-		free(last_terms);
+	pthread_mutex_unlock(&inst->terms_lock);
+
+	/* clear the list */
+	struct avbox_delegate *del;
+	if ((del = avbox_application_delegate(
+		mbox_mediasearch_clearlist, inst)) == NULL) {
+		LOG_VPRINT_ERROR("Could not delegate call 'clearlist' to main thread: %s",
+			strerror(errno));
+	} else {
+		avbox_delegate_wait(del, NULL);
 	}
-	/* fprintf(stderr, "updater exiting\n"); */
+
+	/* search with the new terms */
+	if (mbox_mediasearch_search(inst, tmp, inst->items_count, 25) == 0) {
+		avbox_window_update(inst->window);
+	} else {
+		LOG_PRINT_ERROR("Search failed!");
+	}
+
+	if (inst->last_terms != NULL) {
+		free(inst->last_terms);
+	}
+	if ((inst->last_terms = strdup(tmp)) == NULL) {
+		LOG_PRINT_ERROR("Out of memory");
+	}
+	free(tmp);
 	return NULL;
 }
 
+
 static int
-mb_mediasearch_appendtoterms(char *c)
+mbox_mediasearch_appendtoterms(struct mbox_mediasearch * const inst, char *c)
 {
 	int ret = 0;
 
-	assert(terms != NULL || terms_sz == 0);
+	assert(inst->terms != NULL || inst->terms_sz == 0);
 
-	pthread_mutex_lock(&terms_lock);
+	pthread_mutex_lock(&inst->terms_lock);
 
-	if (*c == '\b' && strlen(terms) > 0) {
-		terms[strlen(terms) - 1] = '\0';
+	if (*c == '\b' && strlen(inst->terms) > 0) {
+		inst->terms[strlen(inst->terms) - 1] = '\0';
 		goto end;
 	}
 
-	if (terms == NULL || terms_sz <= strlen(terms) + 2) {
-		terms_sz += 25;
+	if (inst->terms == NULL || inst->terms_sz <= strlen(inst->terms) + 2) {
+		inst->terms_sz += 25;
 		char *newterms;
-		if ((newterms = realloc(terms, terms_sz)) == NULL) {
-			fprintf(stderr, "mediasearch: Out of memory\n");
-			terms_sz -= 25;
+		if ((newterms = realloc(inst->terms, inst->terms_sz)) == NULL) {
+			LOG_PRINT_ERROR("Out of memory");
+			inst->terms_sz -= 25;
 			ret = -1;
+			assert(errno == ENOMEM);
 			goto end;
 		} else {
-			terms = newterms;
+			inst->terms = newterms;
 		}	
 	}
-	strcat(terms, c);
+	strcat(inst->terms, c);
 end:
-	pthread_mutex_unlock(&terms_lock);
+	pthread_mutex_unlock(&inst->terms_lock);
 	return ret;
 }
 
 
-static void *
-mb_mediasearch_inputthread(void *arg)
+/**
+ * Called by the menu widget when it reaches the end of the list.
+ */
+int
+mbox_mediasearch_endoflist(struct avbox_listview *inst, void *context)
 {
-	int fd;
-	enum avbox_input_event e;
+	struct mbox_mediasearch * const me = context;
 
+	if (me->state == AVBOX_MEDIASEARCH_STATE_ITEMS) {
+		(void) inst;
+		if (mbox_mediasearch_search(me, me->terms, me->items_count, 25) == 0) {
+			avbox_window_update(me->window);
+			return 0;
+		} else {
+			LOG_PRINT_ERROR("Search failed!");
+		}
+	}
+	return -1;
+}
+
+
+static int
+mbox_mediasearch_msghandler(void *context, struct avbox_message *msg)
+{
+	struct mbox_mediasearch * const inst = context;
 #define CASE_KBD(x) \
 	case MBI_EVENT_KBD_ ## x: \
-		mb_mediasearch_appendtoterms(STRINGIZE(x)); \
+		mbox_mediasearch_appendtoterms(inst, STRINGIZE(x)); \
 		istext = 1; \
 		break;
 
-	(void) arg;
-
-	/* grab the input device */
-	if ((fd = avbox_input_grabnonblock()) == -1) {
-		fprintf(stderr, "mbs_show() -- mbi_grab_input failed\n");
-		return NULL;
-	}
-
-	while (input_quit == 0 && avbox_input_getevent(fd, &e) != -1) {
+	switch (avbox_dispatch_getmsgtype(msg)) {
+	case AVBOX_MESSAGETYPE_INPUT:
+	{
 		int istext = 0;
-
-		switch (e) {
+		struct avbox_input_message * const ev =
+			avbox_dispatch_getmsgpayload(msg);
+		switch (ev->msg) {
 		case MBI_EVENT_CLEAR:
-			mb_mediasearch_appendtoterms("\b");
+			mbox_mediasearch_appendtoterms(inst, "\b");
 			istext = 1;
 			break;
 		case MBI_EVENT_KBD_SPACE:
-			mb_mediasearch_appendtoterms(" ");
+			mbox_mediasearch_appendtoterms(inst, " ");
 			istext = 1;
 			break;
+
 		CASE_KBD(A)
 		CASE_KBD(B)
 		CASE_KBD(C)
@@ -355,80 +391,137 @@ mb_mediasearch_inputthread(void *arg)
 		CASE_KBD(X)
 		CASE_KBD(Y)
 		CASE_KBD(Z)
+
 		default:
-			break;
+			return AVBOX_DISPATCH_CONTINUE;
 		}
 
 		if (istext) {
 			char *title;
 
-			if ((title = malloc(strlen(terms) + 14 + 1)) != NULL) {
-				snprintf(title, strlen(terms) + 14 + 1, "MEDIA SEARCH: %s",
-					terms);
-				mbv_window_settitle(window, title);
-				mbv_window_update(window);
+			if ((title = malloc(strlen(inst->terms) + 14 + 1)) != NULL) {
+				snprintf(title, strlen(inst->terms) + 14 + 1, "MEDIA SEARCH: %s",
+					inst->terms);
+				avbox_window_settitle(inst->window, title);
+				avbox_window_update(inst->window);
 
-				fprintf(stderr, "mediasearch: signaling\n");
-				pthread_mutex_lock(&updater_lock);
-				pthread_cond_signal(&updater_signal);
-				pthread_mutex_unlock(&updater_lock);
+				struct avbox_delegate *del;
+				if ((del = avbox_thread_delegate(mbox_mediasearch_dosearch, inst)) == NULL) {
+					LOG_PRINT_ERROR("Could not call search delegate!");
+				} else {
+					avbox_delegate_wait(del, NULL);
+				}
 				free(title);
 			}
 		}
+
+		avbox_input_eventfree(ev);
+		break;
 	}
+	case AVBOX_MESSAGETYPE_DISMISSED:
+	{
+		break;
+	}
+	case AVBOX_MESSAGETYPE_SELECTED:
+	{
+		char * selected = avbox_listview_getselected(inst->menu);
 
-	close(fd);
+		switch (inst->state) {
+		case AVBOX_MEDIASEARCH_STATE_CATEGORIES:
+		{
+			if (!strcmp(selected, "MOV")) {
+				inst->cat = "movies";
+			} else if (!strcmp(selected, "TV")) {
+				inst->cat = "tv";
+			} else {
+				DEBUG_ABORT("mediasearch", "list state corrupted!");
+			}
 
-	return NULL;
-
-#undef CASE_KBD
-}
-
-
-/**
- * mb_mediasearch_endoflist() -- Called by the menu widget when it reaches the end of the list.
- */
-int
-mb_mediasearch_endoflist(struct mb_ui_menu *inst)
-{
-	if (state == MB_MEDIASEARCH_STATE_ITEMS) {
-		(void) inst;
-		pthread_mutex_lock(&menu_lock);
-		if (mb_mediasearch_search(terms, items_count, 25) == 0) {
-			mbv_window_update(window);
-			pthread_mutex_unlock(&menu_lock);
-			return 0;
-		} else {
-			fprintf(stderr, "mediasearch: search() failed\n");
+			avbox_listview_clearitems(inst->menu);
+			inst->state = AVBOX_MEDIASEARCH_STATE_ITEMS;
+			avbox_window_update(inst->window);
+			break;
 		}
-		pthread_mutex_unlock(&menu_lock);
+		case AVBOX_MEDIASEARCH_STATE_ITEMS:
+		{
+			char *selected = avbox_listview_getselected(inst->menu);
+
+			assert(selected != NULL);
+
+			/* send url to download manager */
+			if (mb_downloadmanager_addurl(selected) == -1) {
+				LOG_VPRINT_ERROR("Could not add '%s' to downloads list!",
+					selected);
+			}
+
+			DEBUG_VPRINT("mediasearch", "Downloading '%s'",
+				selected);
+
+			/* hide the window */
+			avbox_window_hide(inst->window);
+
+			/* reset state */
+			inst->state = AVBOX_MEDIASEARCH_STATE_CATEGORIES;
+			avbox_listview_enumitems(inst->menu, mbox_mediasearch_freeitems, NULL);
+			avbox_listview_clearitems(inst->menu);
+			avbox_listview_additem(inst->menu, "Movies", "MOV");
+			avbox_listview_additem(inst->menu, "TV Shows", "TV");
+			avbox_window_update(inst->window);
+
+			/* send DISMISSED message */
+			if (avbox_dispatch_sendmsg(-1, &inst->parent_object,
+				AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
+				LOG_PRINT_ERROR("Could not send DISMISSED message!");
+			}
+
+			break;
+		}
+		default:
+			DEBUG_ABORT("mediasearch", "Invalid state!");
+		}
 	}
-	return -1;
+	default:
+		abort();
+	}
+	return AVBOX_DISPATCH_OK;
 }
 
 
 /**
- * mb_downloads_init() -- Initialize the MediaBox downloads list
+ * Initialize the MediaBox mediasearch tool.
  */
-int
-mb_mediasearch_init(void)
+struct mbox_mediasearch*
+mbox_mediasearch_new(struct avbox_dispatch_object *parent)
 {
 	int xres, yres;
 	int font_height;
 	int window_height, window_width;
 	int n_entries = 10;
+	struct mbox_mediasearch *inst;
 
-	if ((terms = malloc(1)) == NULL) {
-		fprintf(stderr, "mediasearch: Out of memory\n");
-		return -1;
+	/* allocate memory for instance */
+	if ((inst = malloc(sizeof(struct mbox_mediasearch))) == NULL) {
+		assert(errno == ENOMEM);
+		return NULL;
 	}
 
-	state = MB_MEDIASEARCH_STATE_NONE;
-	terms_sz = 1;
-	strcpy(terms, "");
+	/* allocate memory for search terms */
+	if ((inst->terms = malloc(1)) == NULL) {
+		assert(errno == ENOMEM);
+		free(inst);
+		return NULL;
+	}
+
+	/* initialize context */
+	inst->state = AVBOX_MEDIASEARCH_STATE_NONE;
+	inst->parent_object = parent;
+	inst->cat = NULL;
+	inst->updater_quit = 0;
+	inst->terms_sz = 1;
+	strcpy(inst->terms, "");
 
 	/* set height according to font size */
-	mbv_window_getcanvassize(mbv_getrootwindow(), &xres, &yres);
+	avbox_window_getcanvassize(avbox_video_getrootwindow(0), &xres, &yres);
 	font_height = mbv_getdefaultfontheight();
 	window_height = 30 + font_height + ((font_height + 10) * n_entries);
 
@@ -442,104 +535,65 @@ mb_mediasearch_init(void)
 	}
 
 	/* create a new window for the menu dialog */
-	window = mbv_window_new("mediasearch", "FIND MEDIA",
+	inst->window = avbox_window_new(NULL, "mediasearch",
+		AVBOX_WNDFLAGS_DECORATED,
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
-		window_width, window_height, NULL);
-	if (window == NULL) {
-		fprintf(stderr, "mediasearch: Could not create new window!\n");
-		return -1;
+		window_width, window_height, NULL, NULL, NULL);
+	if (inst->window == NULL) {
+		LOG_PRINT_ERROR("Could not create new window!");
+		free(inst->terms);
+		free(inst);
+		return NULL;
+	}
+	if (avbox_window_settitle(inst->window, "MEDIA SEARCH") == -1) {
+		LOG_VPRINT_ERROR("Could not set window title: %s",
+			strerror(errno));
+	}
+
+	/* create dispatch object */
+	if ((inst->dispatch_object = avbox_dispatch_createobject(
+		mbox_mediasearch_msghandler, 0, inst)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
+			strerror(errno));
+		avbox_window_destroy(inst->window);
+		free(inst->terms);
+		free(inst);
 	}
 
 	/* create a new menu widget inside main window */
-	menu = mb_ui_menu_new(window);
-	if (menu == NULL) {
-		fprintf(stderr, "mediasearch: Could not create menu\n");
-		return -1;
+	inst->menu = avbox_listview_new(inst->window, inst->dispatch_object);
+	if (inst->menu == NULL) {
+		LOG_PRINT_ERROR("Could not create listview!");
+		avbox_window_destroy(inst->window);
+		free(inst->terms);
+		free(inst);
+		return NULL;
 	}
 
-	/* set the end of list callback function */
-	mb_ui_menu_seteolcallback(menu, mb_mediasearch_endoflist);
+	/* initialize listview */
+	avbox_listview_additem(inst->menu, "Movies", "MOV");
+	avbox_listview_additem(inst->menu, "TV Shows", "TV");
+	avbox_listview_seteolcallback(inst->menu, mbox_mediasearch_endoflist, inst);
+
+	/* initialize context */
+	inst->terms = NULL;
+	inst->last_terms = NULL;
+	inst->state = AVBOX_MEDIASEARCH_STATE_CATEGORIES;
 
 	return 0;
 }
 
 
 int
-mb_mediasearch_showdialog(void)
+mbox_mediasearch_show(struct mbox_mediasearch * const inst)
 {
-	pthread_t input_thread;
-	char *selected;
-	int quit = 0;
-
 	/* show the menu window */
-        mbv_window_show(window);
+        avbox_window_show(inst->window);
 
-	mb_ui_menu_additem(menu, "Movies", "MOV");
-	mb_ui_menu_additem(menu, "TV Shows", "TV");
-	state = MB_MEDIASEARCH_STATE_CATEGORIES;
-	mbv_window_update(window);
-
-	while (!quit && mb_ui_menu_showdialog(menu) == 0) {
-
-		selected = mb_ui_menu_getselected(menu);
-
-		if (!strcmp(selected, "MOV")) {
-			cat = "movies";
-		} else if (!strcmp(selected, "TV")) {
-			cat = "tv";
-		} else {
-			abort();
-		}
-
-		mb_ui_menu_clearitems(menu);
-		state = MB_MEDIASEARCH_STATE_ITEMS;
-		mbv_window_update(window);
-
-		input_quit = 0;
-		if (pthread_create(&input_thread, NULL, mb_mediasearch_inputthread, NULL) != 0) {
-			fprintf(stderr, "mediasearch: Could not start input thread;\n");
-			return -1;
-		}
-
-		updater_quit = 0;
-		if (pthread_create(&updater, NULL, mb_mediasearch_resultsupdater, NULL) != 0) {
-			fprintf(stderr, "mediasearch: Could not start updater thread\n");
-			pthread_mutex_unlock(&updater_lock);
-			input_quit = 1;
-			avbox_input_dispatchevent(MBI_EVENT_NONE);
-			pthread_join(input_thread, NULL);
-			return -1;
-		}
-
-		/* show the menu widget and run it's input loop */
-		if (mb_ui_menu_showdialog(menu) == 0) {
-			selected = mb_ui_menu_getselected(menu);
-
-			assert(selected != NULL);
-
-			if (mb_downloadmanager_addurl(selected) == -1) {
-				fprintf(stderr, "mediasearch: deluge_add() failed\n");
-			}
-
-			fprintf(stderr, "mediasearch: Selected %s\n",
-				selected);
-			quit = 1;
-		}
-
-		input_quit = 1;
-		avbox_input_dispatchevent(MBI_EVENT_NONE);
-		pthread_join(input_thread, NULL);
-		updater_quit = 1;
-		pthread_cond_signal(&updater_signal);
-		pthread_join(updater, NULL);
-
-		mb_ui_menu_enumitems(menu, mb_mediasearch_freeitems, NULL);
-		mb_ui_menu_clearitems(menu);
-		mb_ui_menu_additem(menu, "Movies", "MOV");
-		mb_ui_menu_additem(menu, "TV Shows", "TV");
-		state = MB_MEDIASEARCH_STATE_CATEGORIES;
-		mbv_window_update(window);
+	if (avbox_listview_focus(inst->menu) == -1) {
+		LOG_PRINT_ERROR("Could not show listview!");
+		return -1;
 	}
 
 	return 0;
@@ -547,16 +601,16 @@ mb_mediasearch_showdialog(void)
 
 
 void
-mb_mediasearch_destroy(void)
+mbox_mediasearch_destroy(struct mbox_mediasearch * const inst)
 {
-	/* fprintf(stderr, "mediasearch: Destroying instance\n"); */
-	if (state == MB_MEDIASEARCH_STATE_ITEMS) {
-		mb_ui_menu_enumitems(menu, mb_mediasearch_freeitems, NULL);
+	if (inst->state == AVBOX_MEDIASEARCH_STATE_ITEMS) {
+		avbox_listview_enumitems(inst->menu, mbox_mediasearch_freeitems, NULL);
 	}
-	mb_ui_menu_destroy(menu);
-	mbv_window_destroy(window);
-	if (terms != NULL) {
-		free(terms);
+
+	/* free resources */
+	avbox_listview_destroy(inst->menu);
+	avbox_window_destroy(inst->window);
+	if (inst->terms != NULL) {
+		free(inst->terms);
 	}
 }
-

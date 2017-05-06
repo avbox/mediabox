@@ -16,17 +16,20 @@
 
 #define LOG_MODULE "library"
 
-#include "video.h"
-#include "input.h"
-#include "ui-menu.h"
-#include "shell.h"
-#include "player.h"
-#include "debug.h"
-#include "log.h"
+#include "lib/log.h"
+#include "lib/debug.h"
+#include "lib/dispatch.h"
+#include "lib/thread.h"
+#include "lib/application.h"
+#include "lib/ui/video.h"
+#include "lib/ui/listview.h"
+#include "lib/ui/input.h"
+#include "lib/ui/player.h"
 #include "library.h"
+#include "shell.h"
 
 
-struct mb_library_playlist_item
+struct mbox_library_playlist_item
 {
 	int isdir;
 	union
@@ -37,17 +40,37 @@ struct mb_library_playlist_item
 };
 
 
-LIST_DECLARE_STATIC(playlist);
+struct mbox_library
+{
+	LIST playlist;
+	struct avbox_window *window;
+	struct avbox_listview *menu;
+	struct avbox_dispatch_object *dispatch_object;
+	struct avbox_dispatch_object *parent_obj;
+	char *dotdot;
+};
 
-static struct mbv_window *window = NULL;
-static struct mb_ui_menu *menu = NULL;
-static char *dotdot = NULL;
+
+struct mbox_library_loadlist_context
+{
+	struct mbox_library *inst;
+	char *path;
+};
+
+
+struct mbox_library_additem_context
+{
+	struct mbox_library *inst;
+	struct mbox_library_playlist_item *item;
+	char *title;
+};
+
 
 #define LIBRARY_ROOT "/media/UPnP"
 
 
 static struct avbox_playlist_item *
-avbox_library_addtoplaylist(const char *file)
+mbox_library_addtoplaylist(struct mbox_library *inst, const char *file)
 {
 	struct avbox_playlist_item *item;
 
@@ -71,14 +94,14 @@ avbox_library_addtoplaylist(const char *file)
 		return NULL;
 	}
 
-	LIST_ADD(&playlist, item);
+	LIST_ADD(&inst->playlist, item);
 
 	return item;
 }
 
 
 static void
-avbox_library_freeplaylistitem(struct avbox_playlist_item *item)
+mbox_library_freeplaylistitem(struct avbox_playlist_item *item)
 {
 	assert(item != NULL);
 
@@ -91,23 +114,23 @@ avbox_library_freeplaylistitem(struct avbox_playlist_item *item)
 
 
 static void
-avbox_library_freeplaylist(void)
+mbox_library_freeplaylist(struct mbox_library *inst)
 {
 	struct avbox_playlist_item *item;
 
-	LIST_FOREACH_SAFE(struct avbox_playlist_item*, item, &playlist, {
+	LIST_FOREACH_SAFE(struct avbox_playlist_item*, item, &inst->playlist, {
 		LIST_REMOVE(item);
-		avbox_library_freeplaylistitem(item);
+		mbox_library_freeplaylistitem(item);
 	});
 }
 
 
 /**
- * mb_library_stripext() -- Strip a file extension IN PLACE
+ * Strip a file extension IN PLACE
  * and return a pointer to the extension.
  */
 static char *
-avbox_library_stripext(char *filename)
+mbox_library_stripext(char *filename)
 {
 	char *p;
 
@@ -132,28 +155,62 @@ avbox_library_stripext(char *filename)
 }
 
 
-static int
-avbox_library_loadlist(const char *path)
+/**
+ * Update the window from the main thread.
+ */
+static void *
+mbox_library_updatewindow(void *ctx)
 {
-	DIR *dir;
-	int isroot;
+	struct mbox_library * const inst = ctx;
+	avbox_window_update(inst->window);
+	return NULL;
+}
+
+
+/**
+ * Add a list item from the main thread.
+ */
+static void *
+mbox_library_additem(void *ctx)
+{
+	struct mbox_library * const inst = ((struct mbox_library_additem_context*)ctx)->inst;
+	struct mbox_library_playlist_item * const library_item =
+		((struct mbox_library_additem_context*)ctx)->item;
+	char * const title = ((struct mbox_library_additem_context*)ctx)->title;
+	avbox_listview_additem(inst->menu, title, library_item);
+	return NULL;
+}
+
+
+/**
+ * Populate the list from a background thread.
+ */
+static void *
+__mbox_library_loadlist(void *ctx)
+{
+	struct mbox_library * const inst =
+		((struct mbox_library_loadlist_context*) ctx)->inst;
+	const char * const path = ((struct mbox_library_loadlist_context*) ctx)->path;
+	DIR *dir = NULL;
+	int isroot, ret = -1;
 	struct dirent *ent;
 	char *rpath;
 	const size_t path_len = strlen(path);
 	size_t resolved_path_len;
 	char resolved_path[PATH_MAX];
+	struct avbox_delegate *del;
 
 	assert(path != NULL);
 
 	/* first free the playlist */
-	avbox_library_freeplaylist();
+	mbox_library_freeplaylist(inst);
 
 	/* allocate memory for item path */
 	rpath = malloc(sizeof(LIBRARY_ROOT) + path_len + 2);
 	if (rpath == NULL) {
 		LOG_VPRINT_ERROR("Could not load list: %s",
 			strerror(errno));
-		return -1;
+		goto end;
 	}
 
 	/* concatenate the library root with the given path
@@ -168,7 +225,7 @@ avbox_library_loadlist(const char *path)
 		DEBUG_VPRINT("library", "Invalid path %s",
 			rpath);
 		free(rpath);
-		return -1;
+		goto end;
 	}
 
 	isroot = (strcmp(LIBRARY_ROOT, resolved_path) == 0);
@@ -178,12 +235,12 @@ avbox_library_loadlist(const char *path)
 	if ((dir = opendir(resolved_path)) == NULL) {
 		LOG_VPRINT_ERROR("Cannot open directory '%s': %s",
 			resolved_path, strerror(errno));
-		return -1;
+		goto end;
 	}
 
-	if (dotdot != NULL) {
-		free(dotdot);
-		dotdot = NULL;
+	if (inst->dotdot != NULL) {
+		free(inst->dotdot);
+		inst->dotdot = NULL;
 	}
 
 	while ((ent = readdir(dir)) != NULL) {
@@ -207,12 +264,11 @@ avbox_library_loadlist(const char *path)
 		if (title == NULL) {
 			LOG_VPRINT_ERROR("Could not load list: %s",
 				strerror(errno));
-			closedir(dir);
-			return -1;
+			goto end;
 		}
 
 		/* strip the filename extension from the title */
-		ext = avbox_library_stripext(title);
+		ext = mbox_library_stripext(title);
 
 		/* do not show subtitles */
 		if (ext != NULL) {
@@ -228,8 +284,7 @@ avbox_library_loadlist(const char *path)
 			LOG_VPRINT_ERROR("Could not load list: %s",
 				strerror(errno));
 			free(title);
-			closedir(dir);
-			return -1;
+			goto end;
 		}
 
 		strcpy(filepath, resolved_path);
@@ -255,22 +310,20 @@ avbox_library_loadlist(const char *path)
 				strerror(errno));
 			free(filepath);
 			free(title);
-			closedir(dir);
-			return -1;
+			goto end;
 		}
 
 		if (!strcmp(ent->d_name, "..")) {
-			dotdot = filepathrel;
+			inst->dotdot = filepathrel;
 		} else {
-			struct mb_library_playlist_item *library_item;
+			struct mbox_library_playlist_item *library_item;
 
-			if ((library_item = malloc(sizeof(struct mb_library_playlist_item))) == NULL) {
+			if ((library_item = malloc(sizeof(struct mbox_library_playlist_item))) == NULL) {
 				LOG_PRINT_ERROR("Add to playlist failed");
 				free(filepathrel);
 				free(filepath);
 				free(title);
-				closedir(dir);
-				return -1;
+				goto end;
 			}
 
 			if (S_ISDIR(st.st_mode)) {
@@ -280,14 +333,14 @@ avbox_library_loadlist(const char *path)
 				library_item->isdir = 0;
 
 				/* add item to playlist */
-				if ((library_item->data.playlist_item = avbox_library_addtoplaylist(filepathrel)) == NULL) {
+				if ((library_item->data.playlist_item =
+					mbox_library_addtoplaylist(inst, filepathrel)) == NULL) {
 					LOG_PRINT_ERROR("Add to playlist failed");
 					free(library_item);
 					free(filepathrel);
 					free(filepath);
 					free(title);
-					closedir(dir);
-					return -1;
+					goto end;
 				}
 
 				free(filepathrel);
@@ -296,26 +349,58 @@ avbox_library_loadlist(const char *path)
 			assert(library_item != NULL);
 
 			/* add item to menu */
-			mb_ui_menu_additem(menu, title, library_item);
+			struct mbox_library_additem_context addctx;
+			addctx.inst = inst;
+			addctx.title = title;
+			addctx.item = library_item;
+			if ((del = avbox_application_delegate(mbox_library_additem, &addctx)) == NULL) {
+				LOG_VPRINT_ERROR("Could not add item. "
+					"avbox_application_delegate() failed: %s",
+					strerror(errno));
+			} else {
+				avbox_delegate_wait(del, NULL);
+			}
 		}
 
 		free(filepath);
 		free(title);
 	}
-	closedir(dir);
-	return 0;
+
+	/* update the library window */
+	if ((del = avbox_application_delegate(mbox_library_updatewindow, inst)) == NULL) {
+		LOG_VPRINT_ERROR("Could not update window!: %s",
+			strerror(errno));
+	} else {
+		avbox_delegate_wait(del, NULL);
+	}
+
+	ret = 0;
+end:
+	if (ret != 0) {
+		DEBUG_VPRINT("library", "Loadlist baling with status %i",
+			ret);
+	}
+	if (dir != NULL) {
+		closedir(dir);
+	}
+	if (path != NULL) {
+		free(((struct mbox_library_loadlist_context*)ctx)->path);
+	}
+	free(ctx);
+
+	return (void*) (intptr_t) ret;
 }
 
 
 /**
- * Called back by mb_ui_menu_enumitems(). Used to free
+ * Called back by avbox_listview_enumitems(). Used to free
  * item list entries
  */
 static int
-avbox_library_freeitems(void *item, void *data)
+mbox_library_freeitems(void *item, void *data)
 {
-	struct mb_library_playlist_item *playlist_item =
-		(struct mb_library_playlist_item*) item;
+	struct mbox_library_playlist_item *playlist_item =
+		(struct mbox_library_playlist_item*) item;
 
 	if (playlist_item->isdir) {
 		if (playlist_item->data.filepath != NULL) {
@@ -329,7 +414,7 @@ avbox_library_freeitems(void *item, void *data)
 
 		/*
 		if (playlist_item->data.playlist_item != NULL) {
-			mb_library_freeplaylistitem(playlist_item->data.playlist_item);
+			mbox_library_freeplaylistitem(playlist_item->data.playlist_item);
 		}
 		*/
 	}
@@ -339,17 +424,156 @@ avbox_library_freeitems(void *item, void *data)
 
 
 /**
- * mbm_init() -- Initialize the MediaBox menu
+ * Populate the list on a background thread.
  */
-int
-avbox_library_init(void)
+static void
+mbox_library_loadlist(struct mbox_library * const inst, const char * const path)
+{
+	struct mbox_library_loadlist_context *ctx;
+	struct avbox_delegate *del;
+	char *selected_copy;
+
+	/* allocate memory for context */
+	if ((selected_copy = strdup(path)) == NULL) {
+		abort(); /* for now */
+	}
+	if ((ctx = malloc(sizeof(struct mbox_library_loadlist_context))) == NULL) {
+		abort();
+	}
+
+	/* clear the list and load the next page */
+	avbox_listview_enumitems(inst->menu, mbox_library_freeitems, NULL);
+	avbox_listview_clearitems(inst->menu);
+
+	/* populate the list from a background thread */
+	ctx->inst = inst;
+	ctx->path = selected_copy;
+	if ((del = avbox_thread_delegate(__mbox_library_loadlist, ctx)) == NULL) {
+		LOG_VPRINT_ERROR("Could not delegate to main thread: %s",
+			strerror(errno));
+		free(ctx);
+		free(selected_copy);
+	} else {
+		avbox_delegate_dettach(del);
+	}
+}
+
+
+/**
+ * Handle incoming messages.
+ */
+static int
+mbox_library_messagehandler(void *context, struct avbox_message *msg)
+{
+	struct mbox_library * const inst = context;
+
+	switch (avbox_dispatch_getmsgtype(msg)) {
+	case AVBOX_MESSAGETYPE_SELECTED:
+	{
+		DEBUG_PRINT("library", "Received SELECTED message");
+
+		assert(avbox_dispatch_getmsgpayload(msg) == inst->menu);
+		struct mbox_library_playlist_item *selected =
+			avbox_listview_getselected(inst->menu);
+
+		assert(selected != NULL);
+
+		if (selected->isdir) {
+			DEBUG_VPRINT("library", "Selected directory: %s",
+				selected->data.filepath);
+			mbox_library_loadlist(inst, selected->data.filepath);
+		} else {
+			struct avbox_player *player;
+			struct avbox_playlist_item *playlist_item;
+
+			DEBUG_PRINT("library", "Selected item");
+
+			playlist_item = selected->data.playlist_item;
+			assert(selected->data.playlist_item != NULL);
+
+			DEBUG_VPRINT("library", "Selected %s",
+				selected->data.playlist_item->filepath);
+
+			assert(LIST_SIZE(&inst->playlist) > 0);
+
+			/* get the active player instance */
+			player = mbox_shell_getactiveplayer();
+			if (player == NULL) {
+				LOG_PRINT_ERROR("Could not get active player!");
+				break;
+			}
+
+			if (avbox_player_playlist(player, &inst->playlist, playlist_item) == 0) {
+				DEBUG_PRINT("library", "Play succeeded. Closing");
+
+				/* hide window */
+				avbox_window_hide(inst->window);
+
+				/* send dismissed message */
+				if (avbox_dispatch_sendmsg(-1, &inst->parent_obj,
+					AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
+					LOG_VPRINT_ERROR("Could not send DISMISSED message: %s",
+						strerror(errno));
+				}
+				break;
+			} else {
+				LOG_PRINT_ERROR("Could not play item!");
+				/* TODO: Display an error message */
+			}
+		}
+
+		break;
+	}
+	case AVBOX_MESSAGETYPE_DISMISSED:
+	{
+		DEBUG_PRINT("library", "Received DISMISSED message");
+		DEBUG_ASSERT("library", avbox_dispatch_getmsgpayload(msg) == inst->menu,
+			"Invalid message payload!");
+
+		if (inst->dotdot != NULL) {
+			mbox_library_loadlist(inst, inst->dotdot);
+		} else {
+			/* hide window */
+			avbox_window_hide(inst->window);
+
+			DEBUG_PRINT("library", "Sending DISMISSED message");
+
+			/* send DISMISSED message */
+			if (avbox_dispatch_sendmsg(-1, &inst->parent_obj,
+				AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
+				LOG_VPRINT_ERROR("Could not send DISMISSED message: %s",
+					strerror(errno));
+			}
+		}
+
+		break;
+	}
+	default:
+		abort();
+	}
+	return AVBOX_DISPATCH_OK;
+}
+
+
+/**
+ * Initialize the MediaBox menu
+ */
+struct mbox_library *
+mbox_library_new(struct avbox_dispatch_object *parent)
 {
 	int resx, resy, width;
 	const int height = 450;
+	struct mbox_library *inst;
 
-	LIST_INIT(&playlist);
+	/* allocate memory */
+	if ((inst = malloc(sizeof(struct mbox_library))) == NULL) {
+		assert(errno == ENOMEM);
+		return NULL;
+	}
 
-	mbv_window_getcanvassize(mbv_getrootwindow(), &resx, &resy);
+	LIST_INIT(&inst->playlist);
+
+	avbox_window_getcanvassize(avbox_video_getrootwindow(0), &resx, &resy);
 
 	/* set width according to screen size */
 	switch (resx) {
@@ -361,121 +585,85 @@ avbox_library_init(void)
 	}
 
 	/* create a new window for the library dialog */
-	window = mbv_window_new("library", "MEDIA LIBRARY",
+	inst->window = avbox_window_new(NULL, "library",
+		AVBOX_WNDFLAGS_DECORATED,
 		(resx / 2) - (width / 2),
 		(resy / 2) - (height / 2),
-		width, height, NULL);
-	if (window == NULL) {
+		width, height, NULL, NULL, NULL);
+	if (inst->window == NULL) {
 		LOG_PRINT_ERROR("Could not create library window!");
-		return -1;
+		free(inst);
+		return NULL;
+	}
+	if (avbox_window_settitle(inst->window, "MEDIA LIBRARY") == -1) {
+		assert(errno == ENOMEM);
+		LOG_PRINT_ERROR("Could not set window title");
+	}
+
+	if ((inst->dispatch_object = avbox_dispatch_createobject(
+		mbox_library_messagehandler, 0, inst)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
+			strerror(errno));
+		avbox_window_destroy(inst->window);
+		free(inst);
+		return NULL;
 	}
 
 	/* create a new menu widget inside main window */
-	menu = mb_ui_menu_new(window);
-	if (menu == NULL) {
+	inst->menu = avbox_listview_new(inst->window, inst->dispatch_object);
+	if (inst->menu == NULL) {
 		LOG_PRINT_ERROR("Could not create menu widget!");
-		return -1;
+		return NULL;
 	}
 
+	/* initialize context */
+	inst->parent_obj = parent;
+	inst->dotdot = NULL;
+
 	/* populate the menu */
-	avbox_library_loadlist("/");
+	mbox_library_loadlist(inst, "/");
+
+	return inst;
+}
+
+
+int
+mbox_library_show(struct mbox_library * const inst)
+{
+	/* show the menu window */
+        avbox_window_show(inst->window);
+
+	if (avbox_listview_focus(inst->menu) == -1) {
+		LOG_PRINT_ERROR("Could not show menu!");
+		return -1;
+	}
 
 	return 0;
 }
 
 
-int
-avbox_library_showdialog(void)
-{
-	int ret = -1, quit = 0;
-
-	/* show the menu window */
-        mbv_window_show(window);
-
-	/* show the menu widget and run it's input loop */
-	while (!quit) {
-		while (mb_ui_menu_showdialog(menu) == 0) {
-			struct mb_library_playlist_item *selected =
-				mb_ui_menu_getselected(menu);
-
-			assert(selected != NULL);
-
-			if (selected->isdir) {
-
-				char *selected_copy = strdup(selected->data.filepath);
-				if (selected_copy == NULL) {
-					abort(); /* for now */
-				}
-
-				/* clear the list and load the next page */
-				mb_ui_menu_enumitems(menu, avbox_library_freeitems, NULL);
-				mb_ui_menu_clearitems(menu);
-				avbox_library_loadlist(selected_copy);
-				mbv_window_update(window);
-				free(selected_copy);
-
-			} else {
-				struct avbox_player *player;
-				struct avbox_playlist_item *playlist_item;
-
-				playlist_item = selected->data.playlist_item;
-				assert(selected->data.playlist_item != NULL);
-
-				DEBUG_VPRINT("library", "Selected %s",
-					selected->data.playlist_item->filepath);
-
-				assert(LIST_SIZE(&playlist) > 0);
-
-				/* get the active player instance */
-				player = avbox_shell_getactiveplayer();
-				if (player == NULL) {
-					LOG_PRINT_ERROR("Could not get active player!");
-					break;
-				}
-
-				mbv_window_hide(window);
-
-				if (avbox_player_playlist(player, &playlist, playlist_item) == 0) {
-					ret = 0;
-					quit = 1;
-					break;
-				} else {
-					mbv_window_show(window);
-
-					LOG_PRINT_ERROR("Could not play item!");
-					/* TODO: Display an error message */
-				}
-			}
-		}
-		if (!quit && dotdot != NULL) {
-			/* clear the list and load the parent directory */
-			mb_ui_menu_enumitems(menu, avbox_library_freeitems, NULL);
-			mb_ui_menu_clearitems(menu);
-			avbox_library_loadlist(dotdot);
-			mbv_window_update(window);
-		} else {
-			break;
-		}
-	}
-
-	/* hide the mainmenu window */
-	mbv_window_hide(window);
-
-	return ret;
-}
-
-
+/**
+ * Destroy the library object.
+ */
 void
-avbox_library_shutdown(void)
+mbox_library_destroy(struct mbox_library * const inst)
 {
 	DEBUG_PRINT("library", "Shutdown library");
-	if (dotdot != NULL) {
-		free(dotdot);
-		dotdot = NULL;
+
+	if (inst->dotdot != NULL) {
+		free(inst->dotdot);
+		inst->dotdot = NULL;
 	}
 
-	avbox_library_freeplaylist();
-	mb_ui_menu_enumitems(menu, avbox_library_freeitems, NULL);
-	mb_ui_menu_destroy(menu);
-	mbv_window_destroy(window);
+	if (avbox_window_isvisible(inst->window)) {
+		avbox_input_release(inst->dispatch_object);
+		avbox_window_hide(inst->window);
+	}
+
+	avbox_dispatch_destroyobject(inst->dispatch_object);
+	mbox_library_freeplaylist(inst);
+	avbox_listview_enumitems(inst->menu, mbox_library_freeitems, NULL);
+	avbox_listview_destroy(inst->menu);
+	avbox_window_destroy(inst->window);
+	free(inst);
 }

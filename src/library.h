@@ -5,21 +5,25 @@
 
 #ifndef __MB_LIBRARY_H__
 #define __MB_LIBRARY_H__
+#include "lib/dispatch.h"
+
+
+struct mbox_library;
 
 
 /**
- * mbm_init() -- Initialize the MediaBox menu
+ *Initialize the MediaBox menu
  */
-int
-avbox_library_init(void);
+struct mbox_library*
+mbox_library_new(struct avbox_dispatch_object *parent);
 
 
 int
-avbox_library_showdialog(void);
+mbox_library_show(struct mbox_library * const inst);
 
 
 void
-avbox_library_shutdown(void);
+mbox_library_destroy(struct mbox_library * const inst);
 
 
 #endif

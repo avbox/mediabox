@@ -18,12 +18,12 @@
 #include <sys/sendfile.h>
 
 #ifdef ENABLE_IONICE
-#include "ionice.h"
+#include "lib/ionice.h"
 #endif
-#include "process.h"
-#include "debug.h"
-#include "log.h"
-#include "file_util.h"
+#include "lib/process.h"
+#include "lib/debug.h"
+#include "lib/log.h"
+#include "lib/file_util.h"
 
 #define DELUGE_BIN "/usr/bin/deluge-console"
 #define DELUGED_BIN "/usr/bin/deluged"
@@ -92,8 +92,8 @@ mb_downloadmanager_init(void)
 	umask(000);
 
 	mkdir_p("/tmp/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	cp(DATADIR "/mediabox/deluge/deluge-core.conf", "/tmp/mediabox/deluge/core.conf");
-	cp(DATADIR "/mediabox/deluge/deluge-auth", "/tmp/mediabox/deluge/auth");
+	cp(DATADIR "/mediabox/deluge/core.conf", "/tmp/mediabox/deluge/core.conf");
+	cp(DATADIR "/mediabox/deluge/auth", "/tmp/mediabox/deluge/auth");
 	unlink("/tmp/mediabox/deluge/deluged.pid");
 
 	/* launch the deluged process */

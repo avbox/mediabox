@@ -1,19 +1,22 @@
 #ifndef __MB_MEDIASEARCH_H__
 #define __MB_MEDIASEARCH_H__
+#include "lib/dispatch.h"
 
+
+struct mbox_mediasearch;
 
 /**
- * mb_mediasearch_init() -- Initialize the MediaBox "Find Media" dialog.
+ * Initialize the MediaBox "Find Media" dialog.
  */
-int
-mb_mediasearch_init(void);
+struct mbox_mediasearch*
+mbox_mediasearch_new(struct avbox_dispatch_object *parent);
 
 
 int
-mb_mediasearch_showdialog(void);
+mbox_mediasearch_show(struct mbox_mediasearch *inst);
 
 
 void
-mb_mediasearch_destroy(void);
+mbox_mediasearch_destroy(struct mbox_mediasearch *inst);
 
 #endif

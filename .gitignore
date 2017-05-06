@@ -1,5 +1,9 @@
 android/remote/projectFilesBackup
 src/*.o
+src/lib/*.o
+src/lib/.dirstamp
+src/lib/ui/*.o
+src/lib/ui/.dirstamp
 src/mediabox
 src/Makefile
 src/Makefile.in
@@ -9,6 +13,8 @@ src/config.h.in~
 src/mediabox.service
 src/stamp-h1
 src/.deps/
+src/lib/.deps/
+src/lib/ui/.deps/
 sdk/build/
 sdk/packages/
 sdk/temp/

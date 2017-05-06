@@ -1,3 +1,4 @@
+AUTOMAKE_OPTIONS = subdir-objects
 
 AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
 	-DDATADIR='"$(datadir)"' \
@@ -36,52 +37,56 @@ AM_LDFLAGS = -lz -lm \
 bin_PROGRAMS = mediabox
 
 mediabox_SOURCES = \
-	main.c \
-	video.c \
-	video-directfb.c \
-	audio.c \
-	input.c \
-	input-libinput.c \
-	input-directfb.c \
-	input-socket.c \
-	input-tcp.c \
-	pipe_util.c \
-	player.c \
+	lib/queue.c \
+	lib/dispatch.c \
+	lib/application.c \
+	lib/thread.c \
+	lib/delegate.c \
+	lib/timers.c \
+	lib/process.c \
+	lib/audio.c \
+	lib/settings.c \
+	lib/log.c \
+	lib/sysinit.c \
+	lib/volume.c \
+	lib/su.c \
+	lib/iface_util.c \
+	lib/url_util.c \
+	lib/time_util.c \
+	lib/pipe_util.c \
+	lib/file_util.c \
+	lib/string_util.c \
+	lib/proc_util.c \
+	lib/ui/video.c \
+	lib/ui/video-directfb.c \
+	lib/ui/listview.c \
+	lib/ui/textview.c \
+	lib/ui/progressview.c \
+	lib/ui/input.c \
+	lib/ui/input-libinput.c \
+	lib/ui/input-directfb.c \
+	lib/ui/input-socket.c \
+	lib/ui/input-tcp.c \
+	lib/ui/player.c \
 	shell.c \
-	su.c \
-	ui-textview.c \
-	ui-menu.c \
-	ui-progressbar.c \
 	mainmenu.c \
 	downloads.c \
 	downloads-backend.c \
 	mediasearch.c \
-	url_util.c \
-	time_util.c \
-	file_util.c \
-	settings.c \
-	string_util.c \
 	about.c \
 	discovery.c \
-	iface_util.c \
 	library-backend.c \
 	library.c \
-	timers.c \
-	volume.c \
-	process.c \
-	sysinit.c \
-	log.c \
-	queue.c \
-	proc_util.c
+	main.c
 
 if ENABLE_BLUETOOTH
 AM_CFLAGS += @BLUEZ_CFLAGS@
 AM_LDFLAGS += @BLUEZ_LIBS@
-mediabox_SOURCES += input-bluetooth.c
+mediabox_SOURCES += lib/ui/input-bluetooth.c
 endif
 
 if ENABLE_LIBDRM
-mediabox_SOURCES += video-drm.c
+mediabox_SOURCES += lib/ui/video-drm.c
 AM_CFLAGS += @LIBDRM_CFLAGS@
 AM_LDFLAGS += @LIBDRM_LIBS@
 endif

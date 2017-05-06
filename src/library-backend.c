@@ -18,14 +18,14 @@
 
 #define LOG_MODULE "library-backend"
 
+#include "lib/log.h"
+#include "lib/debug.h"
+#include "lib/process.h"
+#include "lib/iface_util.h"
+#include "lib/linkedlist.h"
+#include "lib/proc_util.h"
+#include "lib/file_util.h"
 #include "library-backend.h"
-#include "process.h"
-#include "debug.h"
-#include "log.h"
-#include "iface_util.h"
-#include "linkedlist.h"
-#include "proc_util.h"
-#include "file_util.h"
 
 
 #define MEDIATOMB_BIN "/usr/bin/mediatomb"

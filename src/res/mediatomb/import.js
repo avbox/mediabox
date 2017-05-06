@@ -148,6 +148,11 @@ function addAudio(obj)
 
 function addVideo(obj)
 {
+    if (checkIfSerieAndAdd(obj)) {
+        return;
+    }
+
+
     var chain = new Array('Movies');
 		
 		obj.title = tranformTitle(obj.title);
@@ -188,6 +193,8 @@ function addWeborama(obj)
 
 function addImage(obj)
 {
+    return;
+
     var chain = new Array('Photos', 'All Photos');
     addCdsObject(obj, createContainerChain(chain), UPNP_CLASS_CONTAINER);
 
@@ -293,6 +300,124 @@ function addTrailer(obj)
                           postdate.slice(0, 7));
         addCdsObject(obj, createContainerChain(chain));
     }
+}
+
+function checkIfSerieAndAdd(obj)
+{
+  var excludeSamples = true;
+  var fixEpisodeNames = true;
+  
+  var patterns = [  /(.*)s(\d\d)e(\d\d)(\D.*)/i,
+					/(.*)s(\d\d)(\D)(.*)/i,
+					/(\D*)[\.|\-|_](\d)(\d\d)([\.|\-|_]\D.*)/i,
+					/(\D*)(\d)[^0-9](\d\d)(\D.*)/i  ];
+  for(var i=0;i<patterns.length;i++){
+	  var match = patterns[i].exec(obj.title);
+	  if(match){
+		var name = fixSerieName(match[1]);
+		if(name.length == 0)
+			continue;
+		var season = parseFloat(match[2]);
+		if(season == 0)
+			continue;
+				
+		var episode = parseFloat(match[3]);
+		var leftover = match[4];
+		var r = new RegExp();
+		
+		if(excludeSamples && /\Wsample\W/i.test(leftover))
+			return true;		
+		
+		if(episode == 0){
+			// Some malformed string
+			leftover = obj.title;			
+		}
+		
+		var chain = new Array('TV Shows');
+		chain.push(name);
+		var paddedSeason = 'Season ' + padLeft(season, '0', 2);
+		chain.push(paddedSeason);
+
+		var paddedEpisode = padLeft(episode, '0', 2);
+		if(paddedEpisode == 'NaN')
+			paddedEpisode = '';
+		else
+			paddedEpisode = ' ' + paddedEpisode;
+		
+		if(fixEpisodeNames){
+			var commonabbr = [ 'divx', 'xvid', 'dvdrip', 'hdtv', 'lol', 'axxo', 'repack', 'xor', 
+								'pdtv', 'real', 'vtv', 'caph', '2hd', 'proper', 'fqm', 'uncut', 
+								'topaz', 'tvt', 'notv', 'fpn', 'fov', 'orenji', '0tv', 'omicron', 
+								'dsr', 'ws', 'sys', 'crimson', 'wat', 'hiqt', 'internal']
+			for(var j=0;j<commonabbr.length;j++){
+				var re = new RegExp("[\\W|_]" + commonabbr[j] + "[\\W|_]", 'gi');
+				leftover = leftover.replace(re, '.');
+			}
+			while(leftover.indexOf('..')!=-1)
+				leftover = leftover.replace(/\.\./g, '.');
+			
+			leftover = leftover.replace(/\.\w*$/, ' ');
+			
+			leftover = fixSerieName(leftover);
+			if(leftover.length > 0)
+				leftover = ' - ' + leftover;
+		}
+		
+		obj.title = 'Episode' + paddedEpisode + leftover;
+
+		addCdsObject(obj, createContainerChain(chain));
+		
+		return true;
+	  }
+  }
+
+  return false;
+}
+
+function fixSerieName(name){
+	name = name.replace(/_/g, ' ');
+	name = name.replace(/\./g, ' ');
+	name = name.replace(/  /g, ' ');
+	name = removeStartingDashesAndSpaces(name);
+	name = removeEndingDashesAndSpaces(name);
+	
+	return toProperCase(name);
+}
+
+function removeStartingDashesAndSpaces(name){
+	if(name.length == 0)
+		return name;
+	
+	while(name.indexOf(' ') == 0 || name.indexOf('-') == 0){
+		name = name.replace(/^ /g, '');
+		name = name.replace(/^-/g, '');
+	}
+	return name;
+}
+
+function removeEndingDashesAndSpaces(name){
+	if(name.length == 0)
+		return name;
+	
+	while(name.lastIndexOf(' ') == name.length - 1 || name.lastIndexOf('-') == name.length - 1){
+		name = name.replace(/ $/g, '');
+		name = name.replace(/-$/g, '');
+	}
+	return name;
+}
+
+function toProperCase(s)
+{
+  return s.toLowerCase().replace(/^(.)|\s(.)/g, 
+          function($1) { return $1.toUpperCase(); });
+}
+
+function padLeft(str, pad, count) {
+	str += '';
+	while(str.length < count){
+		str = pad + str;
+	}
+	return str;
 }
 
 // main script part

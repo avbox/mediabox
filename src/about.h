@@ -1,18 +1,23 @@
 #ifndef __MB_ABOUT_H__
 #define __MB_ABOUT_H__
+#include "lib/dispatch.h"
+
+
+struct mbox_about;
+
 
 /**
- * mb_about_init() -- Initialize the MediaBox about box.
+ * Initialize the MediaBox about box.
  */
-int
-mb_about_init(void);
+struct mbox_about*
+mbox_about_new(struct avbox_dispatch_object *parent);
 
 
 int
-mb_about_showdialog(void);
+mbox_about_show(struct mbox_about *inst);
 
 
 void
-mb_about_destroy(void);
+mbox_about_destroy(struct mbox_about *inst);
 
 #endif

@@ -5,19 +5,23 @@
 
 #ifndef __MB_MAINMENU_H__
 #define __MB_MAINMENU_H__
+#include "lib/dispatch.h"
+
+struct mbox_mainmenu;
+
 
 /**
- * mbm_init() -- Initialize the MediaBox menu
+ * Initialize the MediaBox menu
  */
-int
-mb_mainmenu_init(void);
+struct mbox_mainmenu*
+mbox_mainmenu_new(struct avbox_dispatch_object *parent);
 
 
 int
-mb_mainmenu_showdialog(void);
+mbox_mainmenu_show(struct mbox_mainmenu * const inst);
 
 
 void
-mb_mainmenu_destroy(void);
+mbox_mainmenu_destroy(struct mbox_mainmenu * const inst);
 
 #endif

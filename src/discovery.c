@@ -17,11 +17,10 @@
 
 #define LOG_MODULE		"announce"
 
-#include "debug.h"
-#include "iface_util.h"
-#include "timers.h"
-#include "debug.h"
-#include "log.h"
+#include "lib/log.h"
+#include "lib/debug.h"
+#include "lib/timers.h"
+#include "lib/iface_util.h"
 
 #define MB_ANNOUNCE_INTERVAL  	(10)
 #define MB_ANNOUNCE_PORT	(49550)
@@ -151,7 +150,7 @@ avbox_discovery_init(void)
 	tv.tv_sec = MB_ANNOUNCE_INTERVAL;
 	tv.tv_nsec = 0;
 	if ((timerid = avbox_timer_register(&tv, AVBOX_TIMER_TYPE_AUTORELOAD,
-		-1, avbox_discovery_sendbroadcast, NULL)) == -1) {
+		NULL, avbox_discovery_sendbroadcast, NULL)) == -1) {
 		LOG_PRINT(MB_LOGLEVEL_ERROR, "announce", "Could not register timer");
 		close(sockfd);
 		return sockfd = -1;

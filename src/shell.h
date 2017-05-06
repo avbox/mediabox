@@ -11,32 +11,28 @@
  * mbs_get_active_player() -- Gets the currently active player instance.
  */
 struct avbox_player *
-avbox_shell_getactiveplayer(void);
+mbox_shell_getactiveplayer(void);
 
 
 /**
  * Gets the shell's message queue fd.
  */
 int
-avbox_shell_getqueue(void);
+mbox_shell_getqueue(void);
 
 
 /**
  * Initialize the MediaBox shell
  */
 int
-avbox_shell_init(void);
+mbox_shell_init(int lauch_avmount, int launch_mediatomb);
 
 
 int
-avbox_shell_run(void);
+mbox_shell_show(void);
 
 
 void
-avbox_shell_reboot(void);
-
-
-void
-avbox_shell_shutdown(void);
+mbox_shell_reboot(void);
 
 #endif
