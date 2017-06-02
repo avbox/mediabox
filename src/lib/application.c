@@ -33,10 +33,17 @@
 #endif
 
 
+LISTABLE_STRUCT(avbox_application_subscriber,
+	avbox_application_eventhandler handler;
+	void *context;
+);
+
+
 static int quit = 0;
 static int pid1 = 0;
 static int result = 0;
 static struct avbox_dispatch_object *dispatch_object;
+static LIST subscribers;
 
 
 /**
@@ -179,6 +186,8 @@ free_kernel_args(int argc, char **argv)
 
 /**
  * Delegate a function call to the application's thread.
+ *
+ * This function is thread safe.
  */
 struct avbox_delegate*
 avbox_application_delegate(avbox_delegate_func func, void *arg)
@@ -223,6 +232,15 @@ avbox_application_msghandler(void *context, struct avbox_message *msg)
 	}
 	case AVBOX_MESSAGETYPE_QUIT:
 	{
+		struct avbox_application_subscriber *subscriber;
+
+		/* NOTE: We use the safe version here because the
+		 * handler may call avbox_application_unsubscribe() and since
+		 * that can only happen on the application thread no locking is
+		 * needed */
+		LIST_FOREACH_SAFE(struct avbox_application_subscriber*, subscriber, &subscribers, {
+			subscriber->handler(subscriber->context, AVBOX_APPEVENT_QUIT);
+		});
 		quit = 1;
 		break;
 	}
@@ -230,6 +248,72 @@ avbox_application_msghandler(void *context, struct avbox_message *msg)
 		DEBUG_ABORT("application", "Received invalid message!");
 	}
 	return AVBOX_DISPATCH_OK;
+}
+
+
+/**
+ * Finds an event subscriber
+ */
+static struct avbox_application_subscriber*
+avbox_application_findsubscriber(avbox_application_eventhandler handler, void *context)
+{
+	struct avbox_application_subscriber *subscriber;
+	LIST_FOREACH(struct avbox_application_subscriber*, subscriber, &subscribers) {
+		if (subscriber->handler == handler && subscriber->context == context) {
+			return subscriber;
+		}
+	}
+	return NULL;
+}
+
+
+/**
+ * Subscribe to application events. This function can only
+ * be called from the main thread.
+ */
+int
+avbox_application_subscribe(avbox_application_eventhandler handler, void *context)
+{
+	struct avbox_application_subscriber *subscriber;
+
+	/* make sure the subscription has not been registered */
+	if (avbox_application_findsubscriber(handler, context) != NULL) {
+		errno = EEXIST;
+		return -1;
+	}
+
+	/* allocate memory for the subscriber structure */
+	if ((subscriber = malloc(sizeof(struct avbox_application_subscriber))) == NULL) {
+		assert(errno == ENOMEM);
+		return -1;
+	}
+
+	/* initialize and add it to list */
+	subscriber->handler = handler;
+	subscriber->context = context;
+	LIST_APPEND(&subscribers, subscriber);
+
+	return 0;
+}
+
+
+/**
+ * Unsubscribe from application events. This function can only
+ * be called from the application thread.
+ */
+int
+avbox_application_unsubscribe(avbox_application_eventhandler handler, void *context)
+{
+	struct avbox_application_subscriber *subscriber;
+	LIST_FOREACH_SAFE(struct avbox_application_subscriber*, subscriber, &subscribers, {
+		if (subscriber->handler == handler && subscriber->context == context) {
+			LIST_REMOVE(subscriber);
+			free(subscriber);
+			return 0;
+		}
+	});
+	errno = ENOENT;
+	return -1;
 }
 
 
@@ -353,6 +437,7 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 		free_kernel_args(argc, argv);
 	}
 
+	LIST_INIT(&subscribers);
 
 	/* drop root prividges after initializing framebuffer */
 	avbox_droproot();

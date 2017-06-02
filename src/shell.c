@@ -461,6 +461,25 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 }
 
 
+static void
+mbox_shell_shutdown(void);
+
+
+/**
+ * Handle application events.
+ */
+static int
+mbox_shell_appevent(void *context, int event)
+{
+	switch (event) {
+	case AVBOX_APPEVENT_QUIT:
+		mbox_shell_shutdown();
+		break;
+	}
+	return 0;
+}
+
+
 /**
  * Destroy the shell.
  */
@@ -472,14 +491,23 @@ mbox_shell_shutdown(void)
 
 	DEBUG_PRINT("shell", "Shutting down");
 
+	/* cancel all timers */
 	if (volumebar_timer_id != -1) {
 		avbox_timer_cancel(volumebar_timer_id);
 	}
 	if (clock_timer_id != -1) {
 		avbox_timer_cancel(clock_timer_id);
 	}
+
+	/* destroy player */
 	if (player != NULL) {
 		avbox_player_destroy(player);
+	}
+
+	/* unsubscribe from app events */
+	if (avbox_application_unsubscribe(mbox_shell_appevent, NULL) == -1) {
+		LOG_VPRINT_ERROR("Could not unsubscribe from app events: %s",
+			strerror(errno));
 	}
 
 	avbox_volume_shutdown();
@@ -539,7 +567,6 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 
 		switch (event->msg) {
 		case MBI_EVENT_KBD_Q:
-			mbox_shell_shutdown();
 			avbox_application_quit(0);
 			break;
 		case MBI_EVENT_KBD_SPACE:
@@ -736,22 +763,21 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	/* initialize the library backend */
 	if (mb_library_backend_init(launch_avmount, launch_mediatomb) == -1) {
 		fprintf(stderr, "Could not initialize library backend\n");
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
+	/* initialize download manager */
 	if (mb_downloadmanager_init() == -1) {
-		fprintf(stderr, "Could not initialize download manager\n");
-		exit(EXIT_FAILURE);
+		LOG_PRINT_ERROR("Could not initialize download manager!");
+		return -1;
 	}
 
 	/* initialize the discovery service */
 	if (avbox_discovery_init() == -1) {
-		fprintf(stderr, "Could not start announcer.\n");
+		LOG_PRINT_ERROR("Could not start discovery service");
 		mb_downloadmanager_destroy();
-		exit(EXIT_FAILURE);
+		return -1;
 	}
-
-
 
 	/* get the screen size in pixels (that's the
 	 * size of the root window */
@@ -764,7 +790,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 		AVBOX_WNDFLAGS_NONE, 0, 0, w, h,
 		NULL, &mbox_shell_draw, NULL);
 	if (main_window == NULL) {
-		fprintf(stderr, "Could not create root window\n");
+		LOG_PRINT_ERROR("Could not create root window!");
 		return -1;
 	}
 	avbox_window_setbgcolor(main_window, 0x000000ff);
@@ -773,7 +799,8 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	/* initialize main media player */
 	player = avbox_player_new(NULL);
 	if (player == NULL) {
-		fprintf(stderr, "Could not initialize main media player\n");
+		LOG_PRINT_ERROR("Could not initialize main player!");
+		avbox_window_destroy(main_window);
 		return -1;
 	}
 
@@ -781,18 +808,35 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	if ((dispatch_object = avbox_dispatch_createobject(mbox_shell_handler, 0, NULL)) == NULL) {
 		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 			strerror(errno));
+		avbox_player_destroy(player);
+		avbox_window_destroy(main_window);
 		return -1;
 	}
 
 	/* initialize the volume control */
 	if (avbox_volume_init(dispatch_object) != 0) {
 		LOG_PRINT_ERROR("Could not initialize volume control!");
+		avbox_dispatch_destroyobject(dispatch_object);
+		avbox_player_destroy(player);
+		avbox_window_destroy(main_window);
 		return -1;
 	}
 
 	/* register our queue as the player's notification queue */
 	if (avbox_player_registernotificationqueue(mbox_shell_getactiveplayer(), dispatch_object) == -1) {
 		LOG_PRINT_ERROR("Could not reqister notification queue");
+		avbox_dispatch_destroyobject(dispatch_object);
+		avbox_player_destroy(player);
+		avbox_window_destroy(main_window);
+		return -1;
+	}
+
+	if (avbox_application_subscribe(mbox_shell_appevent, NULL) == -1) {
+		LOG_VPRINT_ERROR("Could not subscribe to app events: %s",
+			strerror(errno));
+		avbox_dispatch_destroyobject(dispatch_object);
+		avbox_player_destroy(player);
+		avbox_window_destroy(main_window);
 		return -1;
 	}
 
