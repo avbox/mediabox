@@ -5,8 +5,11 @@
 ################################################################################
 
 MEDIABOX_VERSION = staging
-MEDIABOX_SITE = https://bitbucket.org/frodzdev/mediabox.git
+
+# this file is run from /sdk/build/x86_64/qemu/output/build/<tempdir>/
+MEDIABOX_SITE = ../../../../../../../.git
 MEDIABOX_SITE_METHOD = git
+MEDIABOX_REDISTRIBUTE = NO
 MEDIABOX_LICENSE = OTHER
 MEDIABOX_LICENSE_FILES = COPYING
 MEDIABOX_INSTALL_STAGING = NO
@@ -26,5 +29,12 @@ endif
 ifeq ($(BR2_PACKAGE_MEDIABOX_LIBDRM),y)
 MEDIABOX_CONF_OPTS += --enable-libdrm
 endif
+
+# remove from package cache
+define MEDIABOX_UNCACHE
+rm -f $(DL_DIR)/mediabox-staging.tar.gz
+endef
+
+MEDIABOX_PRE_DOWNLOAD_HOOKS += MEDIABOX_UNCACHE
 
 $(eval $(autotools-package))
