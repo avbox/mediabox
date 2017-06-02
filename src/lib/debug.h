@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include "log.h"
+#include "compiler.h"
 
 
 /**
@@ -46,23 +47,43 @@
 #endif
 
 /**
+ * Identical to the standard library's assert() but writes
+ * to the debug stream rather than stdout.
+ */
+#ifndef NDEBUG
+#define ASSERT(expr) \
+do { \
+	if (UNLIKELY(!(expr))) { \
+		DEBUG_VPRINT("ASSERT", "(%s) failed at %s:%s", #expr,  __FILE__, __LINE__ ); \
+	} \
+} while (0)
+#else
+#define ASSERT(expr) (void) 0
+#endif
+
+
+/**
  * Combindes DEBUG_PRINT() and assert()
  */
 #ifndef NDEBUG
 #define DEBUG_ASSERT(module, cond, fmt) \
-	if (!(cond)) { \
+do { \
+	if (UNLIKELY(!(cond))) { \
 		DEBUG_PRINT(module, fmt); \
 		abort(); \
-	}
+	} \
+} while (0)
 #else
 #define DEBUG_ASSERT(module, cond, fmt)
 #endif
 #ifndef NDEBUG
 #define DEBUG_VASSERT(module, cond, fmt, ...) \
-	if (!(cond)) { \
+do { \
+	if (UNLIKELY(!(cond))) { \
 		DEBUG_VPRINT(module, fmt, __VA_ARGS__); \
 		abort(); \
-	}
+	} \
+} while (0)
 #else
 #define DEBUG_VASSERT(module, cond, fmt, ...)
 #endif
@@ -72,20 +93,20 @@
  */
 #ifndef NDEBUG
 #define DEBUG_ABORT(module, fmt) \
-	do { \
-		DEBUG_PRINT(module, fmt); \
-		abort(); \
-	} while (0)
+do { \
+	DEBUG_PRINT(module, fmt); \
+	abort(); \
+} while (0)
 #else
 #define DEBUG_ABORT(module, fmt) (void)0
 #endif
 
 #ifndef NDEBUG
 #define DEBUG_VABORT(module, fmt, ...) \
-	do { \
-		DEBUG_VPRINT(module, fmt, __VA_ARGS__); \
-		abort(); \
-	} while (0)
+do { \
+	DEBUG_VPRINT(module, fmt, __VA_ARGS__); \
+	abort(); \
+} while (0)
 #else
 #define DEBUG_VABORT(module, fmt, ...) (void) 0
 #endif

@@ -1057,9 +1057,10 @@ avbox_video_init(int argc, char **argv)
 
 	if (root_window.surface == NULL) {
 		LOG_PRINT_ERROR("Could not find a suitable driver!");
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
+	/* initialize the root window */
 	root_window.content_window = &root_window;
 	root_window.node = NULL;
 	root_window.title = NULL;
@@ -1068,7 +1069,6 @@ avbox_video_init(int argc, char **argv)
 	root_window.rect.w = w;
 	root_window.rect.h = h;
 	root_window.visible = 1;
-	root_window.identifier = strdup("root_window");
 	root_window.background_color = 0x000000FF;
 	root_window.foreground_color = 0xFFFFFFFF;
 	root_window.user_context = NULL;
@@ -1078,8 +1078,14 @@ avbox_video_init(int argc, char **argv)
 	root_window.flags = AVBOX_WNDFLAGS_NONE;
 	root_window.stack_node.window = &root_window;
 
-	LIST_INIT(&root_window.children);
+	if ((root_window.identifier = strdup("root_window")) == NULL) {
+		ASSERT(errno == ENOMEM);
+		driver.shutdown();
+		return -1;
+	}
+
 	LIST_INIT(&window_stack);
+	LIST_INIT(&root_window.children);
 	LIST_APPEND(&window_stack, &root_window.stack_node);
 
 	/* calculate default font height based on screen size */
@@ -1095,20 +1101,58 @@ avbox_video_init(int argc, char **argv)
 	sprintf(font_desc_str, "Sans Bold %dpx", default_font_height);
 	font_desc = pango_font_description_from_string(font_desc_str);
 	if (font_desc == NULL) {
-		fprintf(stderr, "video: Could not initialize font description. Exiting!\n");
-		exit(EXIT_FAILURE);
+		LOG_PRINT_ERROR("Could not initialize font description");
+		driver.shutdown();
+		free((void*)root_window.identifier);
+		return -1;
 	}
 
 	return 0;
 }
 
 
+/**
+ * Shutdown the graphics subsystem.
+ */
 void
 avbox_video_shutdown()
 {
-	assert(font_desc != NULL);
+	DEBUG_PRINT("video", "Shutting down graphics system");
 
+	ASSERT(font_desc != NULL);
+	ASSERT(root_window.identifier != NULL);
+
+	/* clear screen */
+	avbox_window_clear(&root_window);
+	avbox_window_update(&root_window);
+
+	/* remove the root window from the
+	 * visible window stack */
+	LIST_REMOVE(&root_window.stack_node);
+
+	/* free root window resources */
+	free((void*)root_window.identifier);
+
+	/* If any windows are still visible then
+	 * display a warning.
+	 * TODO: keep counters for hidden windows */
+#ifndef NDEBUG
+	size_t cnt;
+	struct avbox_window_node *node;
+	LIST_COUNT(&window_stack, cnt);
+	if (cnt > 0) {
+		DEBUG_VPRINT("video", "LEAK: There are %zd windows on the stack!!",
+			cnt);
+		LIST_FOREACH(struct avbox_window_node*, node, &window_stack) {
+			DEBUG_VPRINT("video", "--> Window: %s",
+				node->window->identifier);
+		}
+	}
+#endif
+
+	/* free default font */
 	pango_font_description_free(font_desc);
+
+	/* shutdown driver */
 	driver.shutdown();
 }
-
