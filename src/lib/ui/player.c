@@ -55,6 +55,7 @@
 #include "../queue.h"
 #include "../dispatch.h"
 #include "../application.h"
+#include "../math_util.h"
 
 
 /*
@@ -72,6 +73,12 @@
 #define MB_VIDEO_BUFFER_FRAMES  (10)
 #define MB_VIDEO_BUFFER_PACKETS (1)
 #define MB_AUDIO_BUFFER_PACKETS (1)
+
+enum avbox_aspect_ratio
+{
+	AVBOX_ASPECT_16_9 = 0,
+	AVBOX_ASPECT_4_3 = 1
+};
 
 /* #define MB_DECODER_PRINT_FPS */
 
@@ -92,6 +99,7 @@ struct avbox_player
 	struct avbox_queue *video_packets_q;
 	struct avbox_queue *audio_packets_q;
 	struct avbox_queue *video_frames_q;
+	struct avbox_rational aspect_ratio;
 	uint8_t *video_buffers[MB_VIDEO_BUFFER_FRAMES + 1];
 	int video_buffer_index;
 
@@ -166,6 +174,13 @@ struct avbox_player
 };
 
 
+struct avbox_dimensions
+{
+	int w;
+	int h;
+};
+
+
 /* Pango global context */
 PangoFontDescription *pango_font_desc = NULL;
 static pthread_mutex_t thread_start_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -179,6 +194,46 @@ avbox_player_getnextvideobuffer(struct avbox_player * const inst)
 	inst->video_buffer_index = (inst->video_buffer_index + 1) %
 		(MB_VIDEO_BUFFER_FRAMES + 1);
 	return inst->video_buffers[inst->video_buffer_index];
+}
+
+
+/**
+ * Calculate the resolution to scale to with aspect
+ * ratio adjustment.
+ */
+static void
+avbox_player_scale2display(
+	struct avbox_rational *ratio,
+	struct avbox_dimensions *screen,
+	struct avbox_dimensions *in,
+	struct avbox_dimensions *out)
+{
+	ASSERT(screen->w >= screen->h);
+
+#define SCALE (10000)
+	if (in->w > in->h) {
+		/* first scale to fit to resolution and then
+		 * adjust to aspect ratio */
+		out->w = screen->w * SCALE;
+		out->h = (((in->h * SCALE) * ((out->w * 100) / (in->w * SCALE))) / 100);
+		out->h += (out->h * ((((screen->h * SCALE) - (((screen->w * SCALE) * ratio->den) / ratio->num)) * 100)
+			/ (screen->h * SCALE))) / 100;
+	} else {
+		/* first scale to fit to resolution and then
+		 * adjust to aspect ratio */
+		out->h = screen->h * SCALE;
+		out->w = (((in->w * SCALE) * ((out->h * 100) / (in->h * SCALE))) / 100);
+		out->w += (out->w * ((((screen->w * SCALE) - (((screen->h * SCALE) * ratio->den) / ratio->num)) * 100)
+			/ (screen->w * SCALE))) / 100;
+	}
+
+	/* scale result */
+	out->w /= SCALE;
+	out->h /= SCALE;
+
+	ASSERT(out->w <= screen->w);
+	ASSERT(out->h <= screen->h);
+#undef SCALE
 }
 
 
@@ -1021,6 +1076,7 @@ avbox_player_video_decode(void *arg)
 	int i, video_time_set = 0;
 	struct avbox_player *inst = (struct avbox_player*) arg;
 	struct avbox_video_frame *frame;
+	struct avbox_dimensions screen, in, out;
 	char video_filters[512];
 	AVPacket *packet;
 	AVFrame *video_frame_nat = NULL, *video_frame_flt = NULL;
@@ -1028,7 +1084,7 @@ avbox_player_video_decode(void *arg)
 	AVFilterContext *video_buffersink_ctx = NULL;
 	AVFilterContext *video_buffersrc_ctx = NULL;
 
-	MB_DEBUG_SET_THREAD_NAME("video_decode");
+	DEBUG_SET_THREAD_NAME("video_decode");
 	DEBUG_PRINT("player", "Video decoder starting");
 
 	assert(inst != NULL);
@@ -1050,11 +1106,30 @@ avbox_player_video_decode(void *arg)
 		goto decoder_exit;
 	}
 
+#if 1
+	/* Calculate the dimensions to scale to */
+	screen.w = inst->width;
+	screen.h = inst->height;
+	in.w = inst->video_codec_ctx->width;
+	in.h = inst->video_codec_ctx->height;
+	avbox_player_scale2display(&inst->aspect_ratio,
+		&screen, &in, &out);
+
+	DEBUG_VPRINT("player", "Scale %i:%i -> %i:%i",
+		in.w, in.h, out.w, out.h);
+
+	/* initialize video filter graph */
+	snprintf(video_filters, sizeof(video_filters),
+		"scale=%i:%i,"
+		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
+		out.w, out.h, inst->width, inst->height);
+#else
 	/* initialize video filter graph */
 	snprintf(video_filters, sizeof(video_filters),
 		"scale='if(lt(in_w,in_h),-1,%i)':'if(lt(in_w,in_h),%i,-1)',"
 		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
 		inst->width, inst->height, inst->width, inst->height);
+#endif
 
 	DEBUG_VPRINT("player", "Video filters: %s", video_filters);
 
@@ -2449,6 +2524,8 @@ avbox_player_new(struct avbox_window *window)
 	inst->notify_object = NULL;
 	inst->video_decoder_running = 0;
 	inst->audio_decoder_running = 0;
+	inst->aspect_ratio.num = 16;
+	inst->aspect_ratio.den = 9;
 
 	LIST_INIT(&inst->playlist);
 
