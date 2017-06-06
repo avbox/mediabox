@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <pango/pangocairo.h>
 #include "../dispatch.h"
+#include "video-drv.h"
 
 /**
  * Window flags */
@@ -81,6 +82,26 @@ avbox_window_cairo_end(struct avbox_window *window);
 
 
 /**
+ * Lock the window surface, map it, and return a pointer
+ * and a pitch describing the content window surface.
+ */
+uint8_t *
+avbox_window_lock(struct avbox_window * const window, int flags, int *pitch);
+
+
+/**
+ * Unlock and unmap the content window surface.
+ */
+void
+avbox_window_unlock(struct avbox_window * const window);
+
+
+int
+avbox_window_blit(struct avbox_window * const dest,
+	struct avbox_window * const src, int flags, int x, int y);
+
+
+/**
  * Gets the window's user context
  */
 void *
@@ -148,7 +169,7 @@ mbv_font_destroy(struct mbv_font *inst);
 
 int
 avbox_window_blitbuf(
-	struct avbox_window *window, void *buf, int width, int height,
+	struct avbox_window *window, void *buf, int pitch, int width, int height,
 	int x, int y);
 
 

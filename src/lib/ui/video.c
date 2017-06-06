@@ -189,6 +189,27 @@ __window_clear(struct avbox_window *window, const uint32_t color)
 
 
 /**
+ * Lock the window surface, map it, and return a pointer
+ * and a pitch describing the content window surface.
+ */
+uint8_t *
+avbox_window_lock(struct avbox_window * const window, int flags, int *pitch)
+{
+	return driver.surface_lock(window->content_window->surface, flags, pitch);
+}
+
+
+/**
+ * Unlock and unmap the content window surface.
+ */
+void
+avbox_window_unlock(struct avbox_window * const window)
+{
+	driver.surface_unlock(window->content_window->surface);
+}
+
+
+/**
  * Gets the cairo context for a window
  */
 cairo_t *
@@ -340,14 +361,26 @@ mbv_getdefaultfontheight(void)
  */
 int
 avbox_window_blitbuf(
-	struct avbox_window *window, void *buf, int width, int height,
+	struct avbox_window *window, void *buf, int pitch, int width, int height,
 	int x, int y)
 {
 	int ret;
 	ret = driver.surface_blitbuf(
 		window->content_window->surface,
-		buf, MBV_BLITFLAGS_NONE, width, height, x, y);
+		buf, pitch, MBV_BLITFLAGS_NONE, width, height, x, y);
 	return ret;
+}
+
+
+/**
+ * Blit a window to another window
+ */
+int
+avbox_window_blit(struct avbox_window * const dest,
+	struct avbox_window * const src, int flags, int x, int y)
+{
+	return driver.surface_blit(dest->content_window->surface,
+		src->content_window->surface, flags, x, y);
 }
 
 

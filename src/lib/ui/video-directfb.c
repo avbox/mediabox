@@ -123,7 +123,7 @@ surface_unlock(struct mbv_surface * const inst)
 static int
 surface_blitbuf(
 	struct mbv_surface * const inst,
-	void *buf, unsigned int flags, int width, int height, const int x, const int y)
+	void *buf, int pitch, unsigned int flags, int width, int height, const int x, const int y)
 {
 	DFBSurfaceDescription dsc;
 	static IDirectFBSurface *surface = NULL;
@@ -141,7 +141,7 @@ surface_blitbuf(
 	dsc.caps = DSCAPS_NONE;
 	dsc.pixelformat = DSPF_RGB32;
 	dsc.preallocated[0].data = buf;
-	dsc.preallocated[0].pitch = width * 4;
+	dsc.preallocated[0].pitch = pitch;
 	dsc.preallocated[1].data = NULL;
 	dsc.preallocated[1].pitch = 0;
 
@@ -152,6 +152,35 @@ surface_blitbuf(
 	pthread_mutex_unlock(&inst->lock);
 	surface->Release(surface);
 	return 0;
+}
+
+
+/**
+ * Blit surface to surface.
+ */
+static int
+surface_blit(
+	struct mbv_surface * const dst,
+	struct mbv_surface * const src,
+	unsigned int flags, int x, int y)
+{
+	void *buf;
+	int pitch, ret;
+
+	/* DEBUG_PRINT("video-drm", "Entering surface_blit()"); */
+
+	/* lock the src surface to get access to it's
+	 * buffer */
+	if ((buf = surface_lock(src, MBV_LOCKFLAGS_READ, &pitch)) == NULL) {
+		LOG_PRINT_ERROR("Could not lock surface!");
+		return -1;
+	}
+
+	/* blit the buffer */
+	ret = surface_blitbuf(dst, buf, pitch, flags,
+		src->rect.w, src->rect.h, x, y);
+	surface_unlock(src);
+	return ret;
 }
 
 
@@ -373,6 +402,7 @@ mbv_dfb_initft(struct mbv_drv_funcs * const funcs)
 	funcs->surface_lock = &surface_lock;
 	funcs->surface_unlock = &surface_unlock;
 	funcs->surface_blitbuf = &surface_blitbuf;
+	funcs->surface_blit = &surface_blit;
 	funcs->surface_update = &surface_update;
 	funcs->surface_destroy = &surface_destroy;
 	funcs->shutdown = &__shutdown;

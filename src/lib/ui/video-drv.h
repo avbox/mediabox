@@ -50,7 +50,7 @@ typedef void (*mbv_drv_surface_unlock)(
  */
 typedef int (*mbv_drv_surface_blitbuf)(
 	struct mbv_surface * const surface,
-	void * buf, unsigned int flags, int x, int y, int w, int h);
+	void * buf, int pitch, unsigned int flags, int x, int y, int w, int h);
 
 
 /**
@@ -59,7 +59,7 @@ typedef int (*mbv_drv_surface_blitbuf)(
 typedef int (*mbv_drv_surface_blit)(
 	struct mbv_surface * const dst,
 	struct mbv_surface * const src,
-	unsigned int flags);
+	unsigned int flags, int x, int y);
 
 
 /**

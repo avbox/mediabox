@@ -18,7 +18,7 @@ AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
 	@LIBINPUT_CFLAGS@ \
 	@SQLITE3_CFLAGS@
 
-AM_LDFLAGS = -lz -lm \
+AM_LDFLAGS = -lz -lm -lswscale \
 	@LIBS@ \
 	@PTHREAD_LIBS@ \
 	@DIRECTFB_LIBS@ \

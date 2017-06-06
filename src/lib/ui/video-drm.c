@@ -216,10 +216,8 @@ surface_unlock(struct mbv_surface * const inst)
 
 static int
 surface_blitbuf(struct mbv_surface * const surface,
-	void *buf, unsigned int flags, int w, int h, int x, int y)
+	void *buf, int pitch, unsigned int flags, int w, int h, int x, int y)
 {
-	int pitch = w * 4;
-
 	/* DEBUG_VPRINT("video-drm", "Entering surface_blitbuf(front=%i)",
 		(flags & MBV_BLITFLAGS_FRONT) != 0);
 	DEBUG_VPRINT("video-drm", "w=%i h=%i x=%i, y=%i",
@@ -257,7 +255,7 @@ surface_blitbuf(struct mbv_surface * const surface,
 static int
 surface_blit(struct mbv_surface * const dst,
 	struct mbv_surface * const src,
-	unsigned int flags)
+	unsigned int flags, int x, int y)
 {
 	void *buf;
 	int pitch, ret;
@@ -272,8 +270,8 @@ surface_blit(struct mbv_surface * const dst,
 	}
 
 	/* blit the buffer */
-	ret = surface_blitbuf(dst, buf, flags,
-		src->w, src->h, src->realx, src->realy);
+	ret = surface_blitbuf(dst, buf, pitch, flags,
+		src->w, src->h, x, y);
 	surface_unlock(src);
 	return ret;
 }
@@ -319,7 +317,7 @@ surface_update(struct mbv_surface * const surface,
 			(update) ? MBV_BLITFLAGS_FRONT : MBV_BLITFLAGS_NONE;
 		/* DEBUG_VPRINT("video-drm", "Updating surface (update=%i)",
 			update); */
-		surface_blit(&surface->dev->root, surface, blitflags);
+		surface_blit(&surface->dev->root, surface, blitflags, surface->realx, surface->realy);
 	}
 }
 

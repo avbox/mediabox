@@ -82,11 +82,11 @@ enum avbox_aspect_ratio
 
 /* #define MB_DECODER_PRINT_FPS */
 
-struct avbox_video_frame
+
+struct avbox_size
 {
-	uint8_t *data;
-	int64_t pts;
-	AVRational time_base;
+	int w;
+	int h;
 };
 
 
@@ -96,12 +96,12 @@ struct avbox_video_frame
 struct avbox_player
 {
 	struct avbox_window *window;
+	struct avbox_window *video_window;
 	struct avbox_queue *video_packets_q;
 	struct avbox_queue *audio_packets_q;
 	struct avbox_queue *video_frames_q;
 	struct avbox_rational aspect_ratio;
-	uint8_t *video_buffers[MB_VIDEO_BUFFER_FRAMES + 1];
-	int video_buffer_index;
+	struct avbox_size video_size;
 
 	const char *media_file;
 	enum avbox_player_status status;
@@ -116,8 +116,6 @@ struct avbox_player
 	int stopping;
 	int64_t seek_to;
 	int seek_result;
-	uint8_t *buf;
-	int bufsz;
 	struct timespec systemreftime;
 	int64_t lasttime;
 	int64_t systemtimeoffset;
@@ -125,24 +123,18 @@ struct avbox_player
 	struct avbox_dispatch_object *notify_object;
 
 	AVFormatContext *fmt_ctx;
+	AVCodecContext *audio_codec_ctx;
+	AVCodecContext *video_codec_ctx;
+	struct SwsContext *swscale_ctx;
 
 	struct avbox_audiostream *audio_stream;
 
-	AVCodecContext *audio_codec_ctx;
 	int audio_time_set;
 
 	int audio_stream_index;
 	pthread_t audio_decoder_thread;
 
-	/* FIXME: We shouldn't save a copy of the last frame but
-	 * instead keep a reference to it. Hopefully we can come
-	 * up with a solution that does not require a lock to
-	 * handle avbox_player_update() */
-	void *video_last_frame;
-	pthread_mutex_t update_lock;
-
 	int video_stream_index;
-	AVCodecContext *video_codec_ctx;
 	int video_paused;
 	int video_playback_running;
 	int video_flush_decoder;
@@ -174,27 +166,11 @@ struct avbox_player
 };
 
 
-struct avbox_dimensions
-{
-	int w;
-	int h;
-};
-
-
 /* Pango global context */
 PangoFontDescription *pango_font_desc = NULL;
 static pthread_mutex_t thread_start_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t thread_start_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t thread_start_cond = PTHREAD_COND_INITIALIZER;
-
-
-static uint8_t *
-avbox_player_getnextvideobuffer(struct avbox_player * const inst)
-{
-	inst->video_buffer_index = (inst->video_buffer_index + 1) %
-		(MB_VIDEO_BUFFER_FRAMES + 1);
-	return inst->video_buffers[inst->video_buffer_index];
-}
 
 
 /**
@@ -204,9 +180,9 @@ avbox_player_getnextvideobuffer(struct avbox_player * const inst)
 static void
 avbox_player_scale2display(
 	struct avbox_rational *ratio,
-	struct avbox_dimensions *screen,
-	struct avbox_dimensions *in,
-	struct avbox_dimensions *out)
+	struct avbox_size *screen,
+	struct avbox_size *in,
+	struct avbox_size *out)
 {
 	ASSERT(screen->w >= screen->h);
 
@@ -374,7 +350,7 @@ avbox_player_dumpvideo(struct avbox_player * const inst, const int64_t pts, cons
 {
 	int ret = 0, c = 0;
 	int64_t video_time;
-	struct avbox_video_frame *frame;
+	AVFrame *frame;
 
 	DEBUG_VPRINT("player", "Skipping frames until %li (flush=%i)",
 		pts, flush);
@@ -401,7 +377,7 @@ avbox_player_dumpvideo(struct avbox_player * const inst, const int64_t pts, cons
 				abort();
 			}
 		}
-		video_time = av_rescale_q(frame->pts, frame->time_base, AV_TIME_BASE_Q);
+		video_time = av_rescale_q(frame->pts, inst->fmt_ctx->streams[inst->video_stream_index]->time_base, AV_TIME_BASE_Q);
 		if (!flush && pts != -1 && video_time >= (pts - 10000)) {
 			goto end;
 		}
@@ -414,7 +390,8 @@ avbox_player_dumpvideo(struct avbox_player * const inst, const int64_t pts, cons
 			LOG_PRINT_ERROR("We peeked one frame but got a different one. WTF?");
 			abort();
 		}
-		free(frame);
+		av_frame_unref(frame);
+		av_free(frame);
 		c++;
 		ret = 1;
 	}
@@ -516,12 +493,6 @@ avbox_player_postproc(struct avbox_player *inst, void *buf)
 	}
 }
 
-struct avbox_player_update_context
-{
-	struct avbox_player *inst;
-	uint8_t *buf;
-};
-
 
 /**
  * Update the display from main thread.
@@ -529,10 +500,11 @@ struct avbox_player_update_context
 static void *
 avbox_player_doupdate(void *arg)
 {
-	struct avbox_player_update_context * const ctx = arg;
-	avbox_window_blitbuf(ctx->inst->window, ctx->buf,
-		ctx->inst->width, ctx->inst->height, 0, 0);
-	avbox_window_update(ctx->inst->window);
+	struct avbox_player * const inst = arg;
+	avbox_window_blit(inst->window, inst->video_window,
+		MBV_BLITFLAGS_NONE, 0, 0);
+	/* avbox_player_postproc(inst, buf); */
+	avbox_window_update(inst->window);
 	return NULL;
 }
 
@@ -543,26 +515,27 @@ avbox_player_doupdate(void *arg)
 static void *
 avbox_player_video(void *arg)
 {
+	int pitch, linesize;
 	uint8_t *buf;
-	int64_t frame_pts, delay, frame_time = 0;
+	int64_t delay, frame_time = 0;
 	struct avbox_player *inst = (struct avbox_player*) arg;
-	struct avbox_video_frame *frame;
-	struct avbox_player_update_context ctx;
+	AVFrame *frame;
 	struct avbox_delegate *del;
 
-	
 #ifdef MB_DECODER_PRINT_FPS
 	struct timespec new_tp, last_tp, elapsed_tp;
 	int frames = 0, fps = 0;
 #endif
 
-	MB_DEBUG_SET_THREAD_NAME("video_playback");
+	DEBUG_SET_THREAD_NAME("video_playback");
 	DEBUG_PRINT("player", "Video renderer started");
-	assert(inst != NULL);
-	assert(inst->video_output_quit == 0);
 
-	ctx.inst = inst;
+	ASSERT(inst != NULL);
+	ASSERT(inst->video_output_quit == 0);
+	ASSERT(inst->swscale_ctx != NULL);
+
 	inst->video_playback_running = 1;
+	linesize = av_image_get_linesize(MB_DECODER_PIX_FMT, inst->video_codec_ctx->width, 0);
 
 #ifdef MB_DECODER_PRINT_FPS
 	(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
@@ -619,25 +592,29 @@ avbox_player_video(void *arg)
 			}
 		}
 
-		/* dereference the frame pointer for later use */
-		buf = frame->data;
-
-		/* for now just copy the last frame */
-		memcpy(inst->video_last_frame, buf, inst->bufsz);
-
-		/* perform post processing (overlays, etc) */
-		avbox_player_postproc(inst, buf);
+		/* copy the frame to the video window. For now we
+		 * just scale here but in the future this should be done
+		 * by the video driver (possibly accelerated). */
+		if ((buf = avbox_window_lock(inst->video_window, MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
+			LOG_VPRINT_ERROR("Could not lock video window: %s",
+				strerror(errno));
+		} else {
+			buf += pitch * ((inst->height - inst->video_size.h) / 2);
+			sws_scale(inst->swscale_ctx, (uint8_t const * const *) frame->data, &linesize, 0,
+				inst->video_codec_ctx->height, &buf, &pitch);
+			avbox_window_unlock(inst->video_window);
+		}
 
 		/* get the frame pts */
-		frame_pts = frame->pts;
-
-		if  (LIKELY(frame_pts != AV_NOPTS_VALUE)) {
+		if  (LIKELY(frame->pts != AV_NOPTS_VALUE)) {
 			int64_t elapsed;
 
-			frame_time = av_rescale_q(frame_pts, frame->time_base, AV_TIME_BASE_Q);
+			frame_time = av_rescale_q(frame->pts,
+				inst->fmt_ctx->streams[inst->video_stream_index]->time_base,
+				AV_TIME_BASE_Q);
 			inst->video_renderer_pts = frame_time;
-
 			elapsed = inst->getmastertime(inst);
+
 			if (UNLIKELY(elapsed > frame_time)) {
 				delay = 0;
 				if (elapsed - frame_time > 100000) {
@@ -695,8 +672,7 @@ avbox_player_video(void *arg)
 		}
 
 		/* perform the actual update from the main thread */
-		ctx.buf = buf;
-		if ((del = avbox_application_delegate(avbox_player_doupdate, &ctx)) == NULL) {
+		if ((del = avbox_application_delegate(avbox_player_doupdate, inst)) == NULL) {
 			LOG_PRINT_ERROR("Could not delegate update!");
 		} else {
 			avbox_delegate_wait(del, NULL);
@@ -721,7 +697,8 @@ frame_complete:
 			LOG_PRINT_ERROR("We peeked one frame but got another one!");
 			abort();
 		}
-		free(frame);
+		av_frame_unref(frame);
+		av_free(frame);
 	}
 
 video_exit:
@@ -729,13 +706,13 @@ video_exit:
 
 	/* free any frames left in the queue */
 	while ((frame = avbox_queue_get(inst->video_frames_q)) != NULL) {
-		free(frame);
+		av_frame_unref(frame);
+		av_free(frame);
 	}
 
 	/* clear screen */
-	memset(inst->video_buffers[0], 0, inst->bufsz);
-	ctx.buf = inst->video_buffers[0];
-	if ((del = avbox_application_delegate(avbox_player_doupdate, &ctx)) == NULL) {
+	avbox_window_clear(inst->video_window);
+	if ((del = avbox_application_delegate(avbox_player_doupdate, inst)) == NULL) {
 		LOG_PRINT_ERROR("Could not delegate update!");
 	} else {
 		avbox_delegate_wait(del, NULL);
@@ -755,33 +732,7 @@ video_exit:
 void
 avbox_player_update(struct avbox_player *inst)
 {
-	void *frame_data;
-
-	/* DEBUG_PRINT("player", "Updating surface"); */
-
-	assert(inst != NULL);
-	if ((frame_data = av_malloc(inst->bufsz)) == NULL) {
-		return;
-	}
-
-	pthread_mutex_lock(&inst->update_lock);
-
-	/* if the last frame buffer is NULL it means that we're not
-	 * currently playing
-	 */
-	if (inst->video_last_frame == NULL || inst->status == MB_PLAYER_STATUS_READY) {
-		pthread_mutex_unlock(&inst->update_lock);
-		return;
-	}
-
-	memcpy(frame_data, inst->video_last_frame, inst->bufsz);
-
-	pthread_mutex_unlock(&inst->update_lock);
-
-	avbox_player_postproc(inst, frame_data);
-	avbox_window_blitbuf(inst->window, frame_data, inst->width, inst->height, 0, 0);
-	avbox_window_update(inst->window);
-	free(frame_data);
+	avbox_player_doupdate(inst);
 }
 
 
@@ -1075,8 +1026,6 @@ avbox_player_video_decode(void *arg)
 {
 	int i, video_time_set = 0;
 	struct avbox_player *inst = (struct avbox_player*) arg;
-	struct avbox_video_frame *frame;
-	struct avbox_dimensions screen, in, out;
 	char video_filters[512];
 	AVPacket *packet;
 	AVFrame *video_frame_nat = NULL, *video_frame_flt = NULL;
@@ -1087,52 +1036,26 @@ avbox_player_video_decode(void *arg)
 	DEBUG_SET_THREAD_NAME("video_decode");
 	DEBUG_PRINT("player", "Video decoder starting");
 
-	assert(inst != NULL);
-	assert(inst->fmt_ctx != NULL);
-	assert(inst->video_stream_index == -1);
-	assert(inst->video_decoder_pts == 0);
-	assert(inst->video_codec_ctx == NULL);
-	assert(!inst->video_decoder_running);
-
-	/* initialize all frame data buffers to NULL */
-	inst->video_last_frame = NULL;
-	for (i = 0; i < (MB_VIDEO_BUFFER_FRAMES + 1); i++) {
-		inst->video_buffers[i] = NULL;
-	}
+	ASSERT(inst != NULL);
+	ASSERT(inst->fmt_ctx != NULL);
+	ASSERT(inst->video_stream_index == -1);
+	ASSERT(inst->video_decoder_pts == 0);
+	ASSERT(inst->video_codec_ctx == NULL);
+	ASSERT(inst->swscale_ctx == NULL);
+	ASSERT(!inst->video_decoder_running);
 
 	/* open the video codec */
-	if ((inst->video_codec_ctx = open_codec_context(&inst->video_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_VIDEO)) == NULL) {
+	if ((inst->video_codec_ctx = open_codec_context(
+		&inst->video_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_VIDEO)) == NULL) {
 		LOG_PRINT_ERROR("Could not open video codec context");
 		goto decoder_exit;
 	}
 
-#if 1
-	/* Calculate the dimensions to scale to */
-	screen.w = inst->width;
-	screen.h = inst->height;
-	in.w = inst->video_codec_ctx->width;
-	in.h = inst->video_codec_ctx->height;
-	avbox_player_scale2display(&inst->aspect_ratio,
-		&screen, &in, &out);
-
-	DEBUG_VPRINT("player", "Scale %i:%i -> %i:%i",
-		in.w, in.h, out.w, out.h);
-
 	/* initialize video filter graph */
-	snprintf(video_filters, sizeof(video_filters),
-		"scale=%i:%i,"
-		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
-		out.w, out.h, inst->width, inst->height);
-#else
-	/* initialize video filter graph */
-	snprintf(video_filters, sizeof(video_filters),
-		"scale='if(lt(in_w,in_h),-1,%i)':'if(lt(in_w,in_h),%i,-1)',"
-		"pad=%i:%i:'((out_w - in_w) / 2)':'((out_h - in_h) / 2)'",
-		inst->width, inst->height, inst->width, inst->height);
-#endif
-
+	strcpy(video_filters, "null");
+	DEBUG_VPRINT("player", "Video width: %i height: %i",
+		inst->video_codec_ctx->width, inst->video_codec_ctx->height);
 	DEBUG_VPRINT("player", "Video filters: %s", video_filters);
-
 	if (avbox_player_initvideofilters(inst->fmt_ctx, inst->video_codec_ctx,
 		&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
 		video_filters, inst->video_stream_index) < 0) {
@@ -1141,28 +1064,44 @@ avbox_player_video_decode(void *arg)
 	}
 
 	/* calculate the size of each frame and allocate buffer for it */
-	inst->bufsz = av_image_get_buffer_size(MB_DECODER_PIX_FMT, inst->width, inst->height,
-		av_image_get_linesize(MB_DECODER_PIX_FMT, inst->width, 0));
-	inst->video_last_frame = av_malloc(inst->bufsz * sizeof(int8_t));
-	if (inst->video_last_frame == NULL) {
-		goto decoder_exit;
-	}
-	for (i = 0; i < (MB_VIDEO_BUFFER_FRAMES + 1); i++) {
-		inst->video_buffers[i] = av_malloc(inst->bufsz * sizeof(int8_t));
-		if (inst->video_buffers[i] == NULL) {
-			LOG_PRINT_ERROR("Could not allocate video buffers!");
-			goto decoder_exit;
-		}
-	}
 
-	DEBUG_VPRINT("player", "video_codec_ctx: width=%i height=%i pix_fmt=%i",
-		inst->width, inst->height, inst->video_codec_ctx->pix_fmt);
+	/* create an offscreen window for rendering */
+	if ((inst->video_window = avbox_window_new(NULL, "video_surface", 0,
+		0, 0, inst->width, inst->height,
+		NULL, NULL, NULL)) == NULL) {
+		LOG_PRINT_ERROR("Could not create video window!");
+	}
+	avbox_window_setbgcolor(inst->video_window, 0x000000ff);
+	avbox_window_clear(inst->video_window);
 
 	/* allocate video frames */
 	video_frame_nat = av_frame_alloc(); /* native */
-	video_frame_flt = av_frame_alloc(); /* filtered */
-	if (video_frame_nat == NULL || video_frame_flt == NULL) {
+	if (video_frame_nat == NULL) {
 		LOG_PRINT_ERROR("Could not allocate frames!");
+		goto decoder_exit;
+	}
+
+	{
+		struct avbox_size screen, in;
+		screen.w = inst->width;
+		screen.h = inst->height;
+		in.w = inst->video_codec_ctx->width;
+		in.h = inst->video_codec_ctx->height;
+		avbox_player_scale2display(&inst->aspect_ratio,
+			&screen, &in, &inst->video_size);
+	}
+
+	/* initialize the software scaler */
+	if ((inst->swscale_ctx = sws_getContext(
+		inst->video_codec_ctx->width,
+		inst->video_codec_ctx->height,
+		MB_DECODER_PIX_FMT,
+		inst->video_size.w,
+		inst->video_size.h,
+		MB_DECODER_PIX_FMT,
+		SWS_PRINT_INFO,
+		NULL, NULL, NULL)) == NULL) {
+		LOG_PRINT_ERROR("Could not create swscale context!");
 		goto decoder_exit;
 	}
 
@@ -1173,7 +1112,6 @@ avbox_player_video_decode(void *arg)
 	pthread_mutex_lock(&thread_start_mutex);
 	pthread_cond_signal(&thread_start_cond);
 	pthread_mutex_unlock(&thread_start_mutex);
-
 
 	while (1) {
 
@@ -1242,8 +1180,14 @@ avbox_player_video_decode(void *arg)
 				goto decoder_exit;
 			}
 
+
 			/* pull filtered frames from the filtergraph */
 			while (1) {
+				if (video_frame_flt == NULL) {
+					video_frame_flt = av_frame_alloc();
+					ASSERT(video_frame_flt != NULL);
+				}
+
 				i = av_buffersink_get_frame(video_buffersink_ctx, video_frame_flt);
 				if (UNLIKELY(i == AVERROR(EAGAIN) || i == AVERROR_EOF)) {
 					break;
@@ -1251,33 +1195,16 @@ avbox_player_video_decode(void *arg)
 				if (UNLIKELY(i < 0)) {
 					LOG_VPRINT_ERROR("Could not get video frame from filtergraph (ret=%i)",
 						i);
+					av_free(video_frame_flt);
+					video_frame_flt = NULL;
 					goto decoder_exit;
 				}
 
-
-				if ((frame = malloc(sizeof(struct avbox_video_frame))) == NULL) {
-					LOG_PRINT_ERROR("Could not allocate video frame!");
-					goto decoder_exit;
-				}
-				frame->data = avbox_player_getnextvideobuffer(inst);
-				assert(frame->data != NULL);
-
-				if (video_frame_flt->repeat_pict) {
-					DEBUG_VPRINT("player", "repeat_pict = %i",
-						video_frame_flt->repeat_pict);
-				}
-
-				/* copy picture to buffer */
-				av_image_copy_to_buffer(frame->data,
-					inst->bufsz, (const uint8_t **) video_frame_flt->data, video_frame_flt->linesize,
-					MB_DECODER_PIX_FMT, inst->width, inst->height,
-					av_image_get_linesize(MB_DECODER_PIX_FMT, inst->width, 0));
-
-				frame->pts = frame_pts;
-				frame->time_base = video_buffersink_ctx->inputs[0]->time_base;
+				ASSERT(video_buffersink_ctx->inputs[0]->time_base.num == inst->fmt_ctx->streams[inst->video_stream_index]->time_base.num);
+				ASSERT(video_buffersink_ctx->inputs[0]->time_base.den == inst->fmt_ctx->streams[inst->video_stream_index]->time_base.den);
 
 				/* add frame to decoded frames queue */
-				while (avbox_queue_put(inst->video_frames_q, frame) == -1) {
+				while (avbox_queue_put(inst->video_frames_q, video_frame_flt) == -1) {
 					if (errno == EAGAIN) {
 						continue;
 					} else if (errno == ESHUTDOWN) {
@@ -1286,12 +1213,15 @@ avbox_player_video_decode(void *arg)
 						LOG_VPRINT_ERROR("Error: avbox_queue_put() failed: %s",
 							strerror(errno));
 					}
+					av_free(video_frame_flt);
+					video_frame_flt = NULL;
 					goto decoder_exit;
 				}
 
 				/* update the video decoder pts */
 				inst->video_decoder_pts = frame_pts;
 				inst->video_decoder_timebase = video_buffersink_ctx->inputs[0]->time_base;
+				video_frame_flt = NULL;
 
 				/* if this is the first frame then set the audio stream
 				 * clock to it's pts. This is needed because not all streams
@@ -1306,8 +1236,6 @@ avbox_player_video_decode(void *arg)
 						pts, frame_pts);
 					video_time_set = 1;
 				}
-
-				av_frame_unref(video_frame_flt);
 			}
 			av_frame_unref(video_frame_nat);
 		}
@@ -1329,32 +1257,26 @@ decoder_exit:
 		}
 
 		while (avbox_queue_count(inst->video_frames_q) > 0) {
-			if ((frame = avbox_queue_get(inst->video_frames_q)) == NULL) {
+			if ((video_frame_flt = avbox_queue_get(inst->video_frames_q)) == NULL) {
 				LOG_VPRINT_ERROR("avbox_queue_get() returned error: %s",
 					strerror(errno));
 			} else {
-				free(frame);
+				av_frame_unref(video_frame_flt);
+				av_free(video_frame_flt);
 			}
 		}
 	}
 
-	if (inst->video_last_frame != NULL) {
-		/* make sure we're not in the middle of a
-		 * repaint */
-		pthread_mutex_lock(&inst->update_lock);
-		free(inst->video_last_frame);
-		inst->video_last_frame = NULL;
-		pthread_mutex_unlock(&inst->update_lock);
+	if (inst->swscale_ctx != NULL) {
+		sws_freeContext(inst->swscale_ctx);
+		inst->swscale_ctx = NULL;
 	}
 
-	/* clear the video frames queue */
-	/* clear the video buffers */
-	for (i = 0; i < (MB_VIDEO_BUFFER_FRAMES + 1); i++) {
-		if (inst->video_buffers[i] != NULL) {
-			free(inst->video_buffers[i]);
-			inst->video_buffers[i] = NULL;
-		}
+	if (inst->video_window != NULL) {
+		avbox_window_destroy(inst->video_window);
+		inst->video_window = NULL;
 	}
+
 	if (video_frame_nat != NULL) {
 		av_free(video_frame_nat);
 	}
@@ -2516,6 +2438,7 @@ avbox_player_new(struct avbox_window *window)
 	}
 
 	inst->window = window;
+	inst->video_window = NULL;
 	inst->audio_packets_q = NULL;
 	inst->video_packets_q = NULL;
 	inst->video_frames_q = NULL;
@@ -2535,8 +2458,7 @@ avbox_player_new(struct avbox_window *window)
 	/* initialize pthreads primitives */
 	if (pthread_mutex_init(&inst->stream_lock, NULL) != 0 ||
 		pthread_cond_init(&inst->stream_signal, NULL) != 0 ||
-		pthread_mutex_init(&inst->top_overlay_lock, NULL) != 0 ||
-		pthread_mutex_init(&inst->update_lock, NULL) != 0) {
+		pthread_mutex_init(&inst->top_overlay_lock, NULL) != 0) {
 		LOG_PRINT_ERROR("Cannot create player instance. Pthreads error");
 		avbox_queue_destroy(inst->video_packets_q);
 		free(inst);
