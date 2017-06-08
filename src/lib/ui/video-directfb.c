@@ -31,6 +31,7 @@ struct mbv_surface
 	DFBRectangle rect;
 	pthread_mutex_t lock;
 	int is_subwindow;
+	void *buf;
 };
 
 
@@ -214,6 +215,7 @@ surface_new(
 	}
 
 	/* initialize window structure */
+	inst->buf = NULL;
 	inst->rect.x = x;
 	inst->rect.y = y;
 	inst->rect.w = w;
@@ -230,11 +232,28 @@ surface_new(
 		if (root == NULL) {
 			DFBCHECK(layer->GetSurface(layer, &inst->surface));
 		} else {
+			int pitch;
 			DFBSurfaceDescription dsc;
-			dsc.flags = DSDESC_CAPS | DSDESC_WIDTH | DSDESC_HEIGHT;
+
+			/* allocate a properly aligned buffer */
+			pitch = ((inst->rect.w * 4) + 15) & ~15;
+			if ((errno = posix_memalign(&inst->buf, 16, pitch * inst->rect.h)) != 0) {
+				LOG_VPRINT_ERROR("Could not allocated memory for surface: %s",
+					strerror(errno));
+				free(inst);
+				return NULL;
+			}
+
+			dsc.flags = DSDESC_CAPS | DSDESC_WIDTH | DSDESC_HEIGHT | DSDESC_PREALLOCATED | DSDESC_PIXELFORMAT;
 			dsc.caps = DSCAPS_PREMULTIPLIED;
 			dsc.width = w;
 			dsc.height = h;
+			dsc.pixelformat = DSPF_RGB32;
+			dsc.preallocated[0].data = inst->buf;
+			dsc.preallocated[0].pitch = pitch;
+			dsc.preallocated[1].data = NULL;
+			dsc.preallocated[1].pitch = 0;
+
 			DFBCHECK(dfb->CreateSurface(dfb, &dsc, &inst->surface));
 		}
 
@@ -326,6 +345,11 @@ surface_destroy(struct mbv_surface *inst)
 
 	/* release window surfaces */
 	inst->surface->Release(inst->surface);
+
+	/* free the surface buffer */
+	if (inst->buf != NULL) {
+		free(inst->buf);
+	}
 
 	/* free window object */
 	free(inst);

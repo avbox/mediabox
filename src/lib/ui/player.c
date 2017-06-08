@@ -74,6 +74,10 @@
 #define MB_VIDEO_BUFFER_PACKETS (1)
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
+#define ALIGNED(addr, bytes) \
+    (((uintptr_t)(const void *)(addr)) % (bytes) == 0)
+
+
 enum avbox_aspect_ratio
 {
 	AVBOX_ASPECT_16_9 = 0,
@@ -507,6 +511,8 @@ avbox_player_video(void *arg)
 			LOG_VPRINT_ERROR("Could not lock video window: %s",
 				strerror(errno));
 		} else {
+			ASSERT(ALIGNED(*frame->data, 16));
+			ASSERT(ALIGNED(buf, 16));
 			buf += pitch * ((inst->height - inst->video_size.h) / 2);
 			sws_scale(inst->swscale_ctx, (uint8_t const * const *) frame->data, &linesize, 0,
 				inst->video_codec_ctx->height, &buf, &pitch);

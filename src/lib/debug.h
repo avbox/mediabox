@@ -54,7 +54,8 @@
 #define ASSERT(expr) \
 do { \
 	if (UNLIKELY(!(expr))) { \
-		DEBUG_VPRINT("ASSERT", "(%s) failed at %s:%s", #expr,  __FILE__, __LINE__ ); \
+		DEBUG_VPRINT("ASSERT", "(%s) failed at %s:%i", #expr,  __FILE__, __LINE__ ); \
+		abort(); \
 	} \
 } while (0)
 #else
