@@ -27,6 +27,9 @@
 #include "video-drm.h"
 #endif
 
+#define ALIGNED(addr, bytes) \
+    (((uintptr_t)(const void *)(addr)) % (bytes) == 0)
+
 
 #define FONT_PADDING 	(3)
 
@@ -167,23 +170,41 @@ __window_cairoend(struct avbox_window *window)
 static void
 __window_clear(struct avbox_window *window, const uint32_t color)
 {
-	cairo_t *context;
+	int pitch;
+	uint8_t *buf;
 
 	if (window->title != NULL) {
 		avbox_window_settitle(window, window->title);
 	}
 
-	if ((context = __window_cairobegin(window)) != NULL) {
-		int w, h;
-		avbox_window_getsize(window, &w, &h);
-		cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(color));
-		cairo_move_to(context, 0, 0);
-		cairo_line_to(context, w, 0);
-		cairo_line_to(context, w, h);
-		cairo_line_to(context, 0, h);
-		cairo_line_to(context, 0, 0);
-		cairo_fill(context);
-		__window_cairoend(window);
+	if ((buf = avbox_window_lock(window, MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
+		LOG_VPRINT_ERROR("Could not lock window: %s",
+			strerror(errno));
+	} else {
+		for (int stride = 0; stride < window->content_window->rect.h; buf += pitch, stride++) {
+			int pix;
+#if UINTPTR_MAX == 0xffffffffffffffff
+			if (ALIGNED(buf, 8)) {
+				uint64_t *pixel64 = (uint64_t*) buf;
+				const uint64_t color64 = (uint64_t) color << 32 | color;
+				for (pix = 0; pix < window->content_window->rect.w - 1; pix += 2) {
+					*pixel64++ = color64;
+				}
+				if (pix < window->content_window->rect.w) {
+					*((uint32_t*) pixel64) = color;
+				}
+			}
+			else
+#endif
+			{
+				uint32_t *pixel = (uint32_t*) buf;
+				ASSERT(ALIGNED(buf, 4));
+				for (pix = 0; pix < window->content_window->rect.w; pix++) {
+					*pixel++ = color;
+				}
+			}
+		}
+		avbox_window_unlock(window);
 	}
 }
 
@@ -390,6 +411,7 @@ avbox_window_blit(struct avbox_window * const dest,
 static int
 avbox_window_paint(struct avbox_window * const window, int update)
 {
+	int blitflags = MBV_BLITFLAGS_NONE;
 	struct avbox_window_node *damaged_window;
 
 	/* DEBUG_VPRINT("video", "avbox_window_paint(\"%s\")",
@@ -397,6 +419,10 @@ avbox_window_paint(struct avbox_window * const window, int update)
 
 	if (!window->visible) {
 		return 0;
+	}
+
+	if (window->flags & AVBOX_WNDFLAGS_ALPHABLEND) {
+		blitflags |= MBV_BLITFLAGS_ALPHABLEND;
 	}
 
 	/* if the window has no repaint handler then
@@ -409,11 +435,11 @@ avbox_window_paint(struct avbox_window * const window, int update)
 		}
 
 		/* blit window */
-		driver.surface_update(window->surface, update);
+		driver.surface_update(window->surface, blitflags, update);
 	} else {
 		/* invoke the user-defined repaint handler */
 		window->paint(window);
-		driver.surface_update(window->surface, update);
+		driver.surface_update(window->surface, blitflags, update);
 	}
 
 	if (window->parent == &root_window) {
@@ -921,6 +947,7 @@ avbox_window_show(struct avbox_window * const window)
 	/* DEBUG_VPRINT("video", "avbox_window_show(0x%p)",
 		window); */
 
+	int blitflags = MBV_BLITFLAGS_NONE;
 	assert(window != &root_window);
 
 	if (window->visible) {
@@ -928,12 +955,15 @@ avbox_window_show(struct avbox_window * const window)
 			window->identifier);
 	}
 
+	if (window->flags & AVBOX_WNDFLAGS_ALPHABLEND) {
+		blitflags |= MBV_BLITFLAGS_ALPHABLEND;
+	}
+
 	/* add to the visible windows stack */
 	LIST_APPEND(&window_stack, &window->stack_node);
-
 	window->visible = 1;
 	avbox_window_paint(window, 1);
-	driver.surface_update(window->surface, 1);
+	driver.surface_update(window->surface, blitflags, 1);
 
 	/* if the window has input grab it */
 	if (window->flags & AVBOX_WNDFLAGS_INPUT) {
@@ -1102,8 +1132,8 @@ avbox_video_init(int argc, char **argv)
 	root_window.rect.w = w;
 	root_window.rect.h = h;
 	root_window.visible = 1;
-	root_window.background_color = 0x000000FF;
-	root_window.foreground_color = 0xFFFFFFFF;
+	root_window.background_color = AVBOX_COLOR(0x000000FF);
+	root_window.foreground_color = AVBOX_COLOR(0xFFFFFFFF);
 	root_window.user_context = NULL;
 	root_window.cairo_context = NULL;
 	root_window.parent = NULL;

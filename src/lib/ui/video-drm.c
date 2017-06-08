@@ -279,12 +279,13 @@ surface_blit(struct mbv_surface * const dst,
 
 static void
 surface_update(struct mbv_surface * const surface,
-	const int update)
+	int blitflags, const int update)
 {
 	/* DEBUG_VPRINT("video-drm", "Entering surface_update(update=%i)",
 		update); */
 
 	assert(surface != NULL);
+	(void) blitflags;
 
 	if (surface->real != surface) {
 		/* DEBUG_PRINT("video-drm", "Not update necessary for subsurfaces!"); */
@@ -496,7 +497,7 @@ mbv_drm_mkfb(struct mbv_drm_dev * const dev,
 	surface_unlock(surface);
 
 	DEBUG_PRINT("video-drm", "Flipping framebuffer");
-	surface_update(surface, 1);
+	surface_update(surface, MBV_BLITFLAGS_NONE, 1);
 
 	DEBUG_PRINT("video-drm", "Framebuffers created");
 	return 0;

@@ -7,13 +7,15 @@
 struct mbv_surface;
 struct mbv_window;
 
-#define MBV_BLITFLAGS_NONE	0
-#define MBV_BLITFLAGS_FRONT	1 
+#define MBV_BLITFLAGS_NONE		(0x0)
+#define MBV_BLITFLAGS_FRONT		(0x1)
+#define MBV_BLITFLAGS_ALPHABLEND	(0x2)
 
 #define MBV_LOCKFLAGS_NONE	0
 #define MBV_LOCKFLAGS_FRONT	1
 #define MBV_LOCKFLAGS_READ	2
 #define MBV_LOCKFLAGS_WRITE	4
+
 
 /**
  * Initialize the video device and return
@@ -66,7 +68,7 @@ typedef int (*mbv_drv_surface_blit)(
  * Update a surface.
  */
 typedef void (*mbv_drv_surface_update)(
-	struct mbv_surface * const surface, int update);
+	struct mbv_surface * const surface, int blitflags, int update);
 
 
 /**

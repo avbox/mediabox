@@ -36,6 +36,7 @@
 static int pw = 0, ph = 0;
 static struct avbox_dispatch_object *dispatch_object = NULL;
 static struct avbox_window *main_window = NULL;
+static struct avbox_window *overlay = NULL;
 static struct avbox_window *progress = NULL;
 static struct avbox_progressview *progressbar = NULL;
 static struct avbox_player *player = NULL;
@@ -43,9 +44,13 @@ static struct avbox_window *volumebar_window = NULL;
 static struct avbox_progressview *volumebar = NULL;
 static struct mbox_mainmenu *mainmenu = NULL;
 static int volumebar_timer_id = -1;
-static int clock_timer_id = 0;
+static int clock_timer_id = -1;
+static int overlay_timer_id = -1;
+static int overlay_dirty = 0;
 static char time_string[256] = "";
 static char date_string[256] = "";
+static char *overlay_text = NULL;
+static enum mbv_alignment overlay_alignment = MBV_ALIGN_CENTER;
 
 
 /**
@@ -132,6 +137,50 @@ mbox_shell_draw(struct avbox_window *window)
 
 
 /**
+ * Draws the overlay window.
+ */
+static int
+mbox_shell_overlay_draw(struct avbox_window *window)
+{
+	int w, h;
+	cairo_t *context;
+	PangoLayout *msg;
+	PangoFontDescription *font_desc;
+
+	if (!overlay_dirty) {
+		return 0;
+	}
+
+	DEBUG_PRINT("shell", "Drawing overlay");
+
+	avbox_window_getcanvassize(window, &w, &h);
+
+	if ((context = avbox_window_cairo_begin(window)) != NULL) {
+		if ((msg = pango_cairo_create_layout(context)) != NULL) {
+			if ((font_desc = pango_font_description_from_string("Sans Bold 24px")) != NULL) {
+				pango_layout_set_font_description(msg, font_desc);
+				pango_layout_set_width(msg, w * PANGO_SCALE);
+				pango_layout_set_alignment(msg, mbv_get_pango_alignment(overlay_alignment));
+				pango_layout_set_text(msg, overlay_text, -1);
+				pango_cairo_update_layout(context, msg);
+				pango_font_description_free(font_desc);
+				cairo_translate(context, 0, 0);
+				cairo_set_source_rgba(context, 1.0, 1.0, 1.0, 1.0);
+				pango_cairo_show_layout(context, msg);
+				g_object_unref(msg);
+			}
+		}
+		avbox_window_cairo_end(window);
+	} else {
+		DEBUG_PRINT("about", "Could not get cairo context");
+	}
+
+	overlay_dirty = 0;
+	return 0;
+}
+
+
+/**
  * Draws the shutdown dialog */
 static int
 mbox_shell_shutdowndraw(struct avbox_window *window)
@@ -167,6 +216,74 @@ mbox_shell_shutdowndraw(struct avbox_window *window)
 	}
 	return 0;
 }
+
+
+/**
+ * Show overlay text
+ */
+static void
+mbox_shell_showoverlaytext(char *text, int duration, enum mbv_alignment alignment)
+{
+	int w, h;
+	struct timespec tv;
+	DEBUG_PRINT("shell", "Showing overlay");
+
+	/* dismiss the overlay if it's visible */
+	if (overlay != NULL) {
+		ASSERT(overlay_timer_id != -1);
+		ASSERT(overlay_text != NULL);
+		avbox_timer_cancel(overlay_timer_id);
+		avbox_window_destroy(overlay);
+		free(overlay_text);
+		overlay_text = NULL;
+		overlay_timer_id = -1;
+		overlay = NULL;
+	}
+
+	/* nothing to show */
+	if (text == NULL || !strcmp(text, "")) {
+		return;
+	}
+
+	if ((overlay_text = strdup(text)) == NULL) {
+		LOG_PRINT_ERROR("Could not duplicate overlay text: Out of memory");
+		return;
+	}
+	overlay_dirty = 1;
+	overlay_alignment = alignment;
+	avbox_window_getcanvassize(
+		avbox_video_getrootwindow(0), &w, &h);
+
+	/* create the overlay window */
+	if ((overlay = avbox_window_new(NULL, "overlay",
+		AVBOX_WNDFLAGS_ALPHABLEND, 80, 70, w - 160, 80, NULL,
+		mbox_shell_overlay_draw, NULL)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create overlay window: %s",
+			strerror(errno));
+		free(overlay_text);
+		overlay_text = NULL;
+		return;
+	}
+	avbox_window_setbgcolor(overlay, AVBOX_COLOR(0xcccccc40));
+	avbox_window_clear(overlay);
+	avbox_window_show(overlay);
+	
+	/* start the timer */
+	tv.tv_sec = duration;
+	tv.tv_nsec = 0;
+	if ((overlay_timer_id = avbox_timer_register(&tv,
+		AVBOX_TIMER_TYPE_AUTORELOAD | AVBOX_TIMER_MESSAGE,
+		dispatch_object, NULL, NULL)) == -1) {
+		LOG_VPRINT_ERROR("Could not register overlay timer: %s",
+			strerror(errno));
+		avbox_window_destroy(overlay);
+		free(overlay_text);
+		overlay_text = NULL;
+		overlay = NULL;
+	}
+}
+
+
 
 /**
  * This is the callback function for the timer
@@ -351,8 +468,7 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 
 		} else if (last_status == MB_PLAYER_STATUS_PAUSED &&
 			status != MB_PLAYER_STATUS_PAUSED) {
-			avbox_player_showoverlaytext(player, "", 1,
-				MBV_ALIGN_LEFT);
+			mbox_shell_showoverlaytext(NULL, 1, MBV_ALIGN_LEFT);
 		}
 
 		/* if we're out of the READY state then cancel the clock
@@ -451,8 +567,7 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 		case MB_PLAYER_STATUS_PAUSED:
 			assert(progress == NULL);
 			DEBUG_PRINT("shell", "Player state changed to PAUSED");
-
-			avbox_player_showoverlaytext(player, "  PAUSED", 1000,
+			mbox_shell_showoverlaytext("  PAUSED", 15,
 				MBV_ALIGN_LEFT);
 			avbox_player_update(inst);
 			break;
@@ -499,6 +614,18 @@ mbox_shell_shutdown(void)
 		avbox_timer_cancel(clock_timer_id);
 	}
 
+	/* dismiss the overlay */
+	if (overlay_timer_id != -1) {
+		ASSERT(overlay != NULL);
+		ASSERT(overlay_text != NULL);
+		avbox_timer_cancel(overlay_timer_id);
+		avbox_window_destroy(overlay);
+		free(overlay_text);
+		overlay_timer_id = -1;
+		overlay_text = NULL;
+		overlay = NULL;
+	}
+
 	/* destroy player */
 	if (player != NULL) {
 		avbox_player_destroy(player);
@@ -531,8 +658,8 @@ mbox_shell_shutdown(void)
 		NULL, &mbox_shell_shutdowndraw, NULL);
 	if (msgwin != NULL) {
 		DEBUG_PRINT("shell", "Showing shutdown message");
-		avbox_window_setbgcolor(msgwin, 0x000000ff);
-		avbox_window_setcolor(msgwin, 0x8080ffff);
+		avbox_window_setbgcolor(msgwin, AVBOX_COLOR(0x000000ff));
+		avbox_window_setcolor(msgwin, AVBOX_COLOR(0x8080ffff));
 		avbox_window_show(msgwin);
 		avbox_window_destroy(msgwin);
 	} else {
@@ -662,7 +789,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 		{
 			char *title = avbox_player_gettitle(player);
 			if (title != NULL) {
-				avbox_player_showoverlaytext(player, title, 15,
+				mbox_shell_showoverlaytext(title, 15,
 					MBV_ALIGN_CENTER);
 				free(title);
 			}
@@ -713,8 +840,21 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			mbox_shell_welcomescreen(timer_data->id, timer_data->data);
 		} else if (timer_data->id == volumebar_timer_id) {
 			mbox_shell_dismissvolumebar(timer_data->id, timer_data->data);
+		} else if (timer_data->id == overlay_timer_id) {
+			if (overlay != NULL) {
+				DEBUG_PRINT("shell", "Dismissing overlay");
+				ASSERT(overlay_timer_id != -1);
+				ASSERT(overlay_text != NULL);
+				avbox_timer_cancel(overlay_timer_id);
+				avbox_window_destroy(overlay);
+				free(overlay_text);
+				overlay_timer_id = -1;
+				overlay_text = NULL;
+				overlay = NULL;
+			}
 		}
 
+		/* free payload */
 		free(timer_data);
 
 		break;
@@ -796,8 +936,8 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 		LOG_PRINT_ERROR("Could not create root window!");
 		return -1;
 	}
-	avbox_window_setbgcolor(main_window, 0x000000ff);
-	avbox_window_setcolor(main_window, 0x8080ffff);
+	avbox_window_setbgcolor(main_window, AVBOX_COLOR(0x000000ff));
+	avbox_window_setcolor(main_window, AVBOX_COLOR(0x8080ffff));
 
 	/* initialize main media player */
 	player = avbox_player_new(NULL);

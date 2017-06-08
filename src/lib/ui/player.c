@@ -80,8 +80,6 @@ enum avbox_aspect_ratio
 	AVBOX_ASPECT_4_3 = 1
 };
 
-/* #define MB_DECODER_PRINT_FPS */
-
 
 struct avbox_size
 {
@@ -100,11 +98,19 @@ struct avbox_player
 	struct avbox_queue *video_packets_q;
 	struct avbox_queue *audio_packets_q;
 	struct avbox_queue *video_frames_q;
+	struct avbox_audiostream *audio_stream;
+	struct avbox_dispatch_object *notify_object;
+	struct SwsContext *swscale_ctx;
 	struct avbox_rational aspect_ratio;
 	struct avbox_size video_size;
+	struct timespec systemreftime;
+	enum avbox_player_status status;
+
+	AVFormatContext *fmt_ctx;
+	AVCodecContext *audio_codec_ctx;
+	AVCodecContext *video_codec_ctx;
 
 	const char *media_file;
-	enum avbox_player_status status;
 	int video_output_quit;
 	int frames_rendered;
 	int width;
@@ -114,54 +120,33 @@ struct avbox_player
 	int have_video;
 	int stream_quit;
 	int stopping;
-	int64_t seek_to;
 	int seek_result;
-	struct timespec systemreftime;
-	int64_t lasttime;
-	int64_t systemtimeoffset;
-	int64_t (*getmastertime)(struct avbox_player *inst);
-	struct avbox_dispatch_object *notify_object;
-
-	AVFormatContext *fmt_ctx;
-	AVCodecContext *audio_codec_ctx;
-	AVCodecContext *video_codec_ctx;
-	struct SwsContext *swscale_ctx;
-
-	struct avbox_audiostream *audio_stream;
-
 	int audio_time_set;
-
 	int audio_stream_index;
-	pthread_t audio_decoder_thread;
-
 	int video_stream_index;
 	int video_paused;
 	int video_playback_running;
 	int video_flush_decoder;
 	int video_flush_output;
-	unsigned int video_skipframes;
-	int64_t video_decoder_pts;
-	int64_t video_renderer_pts;
 	int video_decoder_running;
 	int audio_decoder_running;
-	AVRational video_decoder_timebase;
+	int stream_percent;
+	unsigned int video_skipframes;
+	int64_t video_decoder_pts;
+	int64_t seek_to;
+	int64_t lasttime;
+	int64_t systemtimeoffset;
+	int64_t (*getmastertime)(struct avbox_player *inst);
+	int64_t video_renderer_pts;
 	pthread_t video_decoder_thread;
 	pthread_t video_output_thread;
+	pthread_t audio_decoder_thread;
 	pthread_cond_t stream_signal;
 	pthread_mutex_t stream_lock;
 	pthread_t stream_thread;
 
-
-	int stream_percent;
-
-	/* overlay stuff */
-	int top_overlay_timer_id;
-	char *top_overlay_text;
-	enum mbv_alignment top_overlay_alignment;
-	pthread_mutex_t top_overlay_lock;
-
 	/* playlist stuff */
-	LIST_DECLARE(playlist);
+	LIST playlist;
 	struct avbox_playlist_item *playlist_item;
 };
 
@@ -179,36 +164,41 @@ static pthread_cond_t thread_start_cond = PTHREAD_COND_INITIALIZER;
  */
 static void
 avbox_player_scale2display(
-	struct avbox_rational *ratio,
-	struct avbox_size *screen,
-	struct avbox_size *in,
+	struct avbox_player * const inst,
 	struct avbox_size *out)
 {
-	ASSERT(screen->w >= screen->h);
+	struct avbox_size screen;
+	struct avbox_size in;
+	screen.w = inst->width;
+	screen.h = inst->height;
+	in.w = inst->video_codec_ctx->width;
+	in.h = inst->video_codec_ctx->height;
+
+	ASSERT(screen.w >= screen.h);
 
 #define SCALE (10000)
-	if (in->w > in->h) {
+	if (in.w > in.h) {
 		/* first scale to fit to resolution and then
 		 * adjust to aspect ratio */
-		out->w = screen->w * SCALE;
-		out->h = (((in->h * SCALE) * ((out->w * 100) / (in->w * SCALE))) / 100);
-		out->h += (out->h * ((((screen->h * SCALE) - (((screen->w * SCALE) * ratio->den) / ratio->num)) * 100)
-			/ (screen->h * SCALE))) / 100;
+		out->w = screen.w * SCALE;
+		out->h = (((in.h * SCALE) * ((out->w * 100) / (in.w * SCALE))) / 100);
+		out->h += (out->h * ((((screen.h * SCALE) - (((screen.w * SCALE) * inst->aspect_ratio.den)
+			/ inst->aspect_ratio.num)) * 100) / (screen.h * SCALE))) / 100;
 	} else {
 		/* first scale to fit to resolution and then
 		 * adjust to aspect ratio */
-		out->h = screen->h * SCALE;
-		out->w = (((in->w * SCALE) * ((out->h * 100) / (in->h * SCALE))) / 100);
-		out->w += (out->w * ((((screen->w * SCALE) - (((screen->h * SCALE) * ratio->den) / ratio->num)) * 100)
-			/ (screen->w * SCALE))) / 100;
+		out->h = screen.h * SCALE;
+		out->w = (((in.w * SCALE) * ((out->h * 100) / (in.h * SCALE))) / 100);
+		out->w += (out->w * ((((screen.w * SCALE) - (((screen.h * SCALE) * inst->aspect_ratio.den)
+			/ inst->aspect_ratio.num)) * 100) / (screen.w * SCALE))) / 100;
 	}
 
 	/* scale result */
 	out->w /= SCALE;
 	out->h /= SCALE;
 
-	ASSERT(out->w <= screen->w);
-	ASSERT(out->h <= screen->h);
+	ASSERT(out->w <= screen.w);
+	ASSERT(out->h <= screen.h);
 #undef SCALE
 }
 
@@ -301,40 +291,6 @@ avbox_player_printstatus(const struct avbox_player * const inst, const int fps)
 			audio_frames);
 		fflush(stdout);
 	}
-}
-
-
-/**
- * Renders a text overlay on top of
- * the video image
- */
-static int
-avbox_player_rendertext(struct avbox_player *inst, cairo_t *context, char *text, PangoRectangle *rect)
-{
-	PangoLayout *layout;
-
-	assert(inst != NULL);
-	assert(context != NULL);
-	assert(text != NULL);
-	assert(rect != NULL);
-
-	cairo_translate(context, rect->x, rect->y);
-
-	if ((layout = pango_cairo_create_layout(context)) != NULL) {
-		pango_layout_set_font_description(layout, pango_font_desc);
-		pango_layout_set_width(layout, rect->width * PANGO_SCALE);
-		pango_layout_set_height(layout, 400 * PANGO_SCALE);
-		pango_layout_set_alignment(layout, mbv_get_pango_alignment(inst->top_overlay_alignment));
-		pango_layout_set_text(layout, text, -1);
-
-		cairo_set_source_rgba(context, 1.0, 1.0, 1.0, 1.0);
-		pango_cairo_update_layout(context, layout);
-		pango_cairo_show_layout(context, layout);
-
-		g_object_unref(layout);
-	}
-
-	return 0;
 }
 
 
@@ -457,43 +413,6 @@ avbox_player_getsystemtime(struct avbox_player *inst)
 }
 
 
-static inline void
-avbox_player_postproc(struct avbox_player *inst, void *buf)
-{
-	/* if there is something to display in the top overlay
-	 * then do it */
-	if (UNLIKELY(inst->top_overlay_text != NULL)) {
-		pthread_mutex_lock(&inst->top_overlay_lock);
-		if (LIKELY(inst->top_overlay_text != NULL)) {
-			/* create a cairo context for this frame */
-			cairo_t *context;
-			cairo_surface_t *surface;
-			surface = cairo_image_surface_create_for_data(buf,
-				CAIRO_FORMAT_ARGB32, inst->width, inst->height,
-				cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, inst->width));
-			if (LIKELY(surface != NULL)) {
-				context = cairo_create(surface);
-				cairo_surface_destroy(surface);
-
-				if (LIKELY(context != NULL)) {
-					PangoRectangle rect;
-					rect.x = 15;
-					rect.width = inst->width - 30;
-					rect.y = 50;
-					rect.height = 400;
-
-					avbox_player_rendertext(inst, context,
-						inst->top_overlay_text, &rect);
-
-					cairo_destroy(context);
-				}
-			}
-		}
-		pthread_mutex_unlock(&inst->top_overlay_lock);
-	}
-}
-
-
 /**
  * Update the display from main thread.
  */
@@ -503,7 +422,6 @@ avbox_player_doupdate(void *arg)
 	struct avbox_player * const inst = arg;
 	avbox_window_blit(inst->window, inst->video_window,
 		MBV_BLITFLAGS_NONE, 0, 0);
-	/* avbox_player_postproc(inst, buf); */
 	avbox_window_update(inst->window);
 	return NULL;
 }
@@ -522,11 +440,6 @@ avbox_player_video(void *arg)
 	AVFrame *frame;
 	struct avbox_delegate *del;
 
-#ifdef MB_DECODER_PRINT_FPS
-	struct timespec new_tp, last_tp, elapsed_tp;
-	int frames = 0, fps = 0;
-#endif
-
 	DEBUG_SET_THREAD_NAME("video_playback");
 	DEBUG_PRINT("player", "Video renderer started");
 
@@ -536,11 +449,6 @@ avbox_player_video(void *arg)
 
 	inst->video_playback_running = 1;
 	linesize = av_image_get_linesize(MB_DECODER_PIX_FMT, inst->video_codec_ctx->width, 0);
-
-#ifdef MB_DECODER_PRINT_FPS
-	(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
-	new_tp = last_tp;
-#endif
 
 	if (!inst->have_audio) {
 		/* save the reference timestamp */
@@ -677,20 +585,6 @@ avbox_player_video(void *arg)
 		} else {
 			avbox_delegate_wait(del, NULL);
 		}
-
-#ifdef MB_DECODER_PRINT_FPS
-		/* calculate fps */
-		frames++;
-		(void) clock_gettime(CLOCK_MONOTONIC, &new_tp);
-		elapsed_tp = timediff(&last_tp, &new_tp);
-		if (UNLIKELY(elapsed_tp.tv_sec > 0)) {
-			(void) clock_gettime(CLOCK_MONOTONIC, &last_tp);
-			fps = frames;
-			frames = 0;
-		}
-		avbox_player_printstatus(inst, fps);
-#endif
-
 frame_complete:
 		/* update buffer state and signal decoder */
 		if (avbox_queue_get(inst->video_frames_q) != frame) {
@@ -1063,15 +957,13 @@ avbox_player_video_decode(void *arg)
 		goto decoder_exit;
 	}
 
-	/* calculate the size of each frame and allocate buffer for it */
-
 	/* create an offscreen window for rendering */
 	if ((inst->video_window = avbox_window_new(NULL, "video_surface", 0,
 		0, 0, inst->width, inst->height,
 		NULL, NULL, NULL)) == NULL) {
 		LOG_PRINT_ERROR("Could not create video window!");
 	}
-	avbox_window_setbgcolor(inst->video_window, 0x000000ff);
+	avbox_window_setbgcolor(inst->video_window, AVBOX_COLOR(0x000000ff));
 	avbox_window_clear(inst->video_window);
 
 	/* allocate video frames */
@@ -1081,15 +973,8 @@ avbox_player_video_decode(void *arg)
 		goto decoder_exit;
 	}
 
-	{
-		struct avbox_size screen, in;
-		screen.w = inst->width;
-		screen.h = inst->height;
-		in.w = inst->video_codec_ctx->width;
-		in.h = inst->video_codec_ctx->height;
-		avbox_player_scale2display(&inst->aspect_ratio,
-			&screen, &in, &inst->video_size);
-	}
+	/* calculate how to scale the video */
+	avbox_player_scale2display(inst, &inst->video_size);
 
 	/* initialize the software scaler */
 	if ((inst->swscale_ctx = sws_getContext(
@@ -1099,7 +984,7 @@ avbox_player_video_decode(void *arg)
 		inst->video_size.w,
 		inst->video_size.h,
 		MB_DECODER_PIX_FMT,
-		SWS_PRINT_INFO,
+		SWS_PRINT_INFO | SWS_FAST_BILINEAR,
 		NULL, NULL, NULL)) == NULL) {
 		LOG_PRINT_ERROR("Could not create swscale context!");
 		goto decoder_exit;
@@ -1183,13 +1068,15 @@ avbox_player_video_decode(void *arg)
 
 			/* pull filtered frames from the filtergraph */
 			while (1) {
-				if (video_frame_flt == NULL) {
-					video_frame_flt = av_frame_alloc();
-					ASSERT(video_frame_flt != NULL);
+				if ((video_frame_flt = av_frame_alloc()) == NULL) {
+					LOG_PRINT_ERROR("Cannot allocate AVFrame: Out of memory!");
+					continue;
 				}
 
 				i = av_buffersink_get_frame(video_buffersink_ctx, video_frame_flt);
 				if (UNLIKELY(i == AVERROR(EAGAIN) || i == AVERROR_EOF)) {
+					av_free(video_frame_flt);
+					video_frame_flt = NULL;
 					break;
 				}
 				if (UNLIKELY(i < 0)) {
@@ -1220,7 +1107,6 @@ avbox_player_video_decode(void *arg)
 
 				/* update the video decoder pts */
 				inst->video_decoder_pts = frame_pts;
-				inst->video_decoder_timebase = video_buffersink_ctx->inputs[0]->time_base;
 				video_frame_flt = NULL;
 
 				/* if this is the first frame then set the audio stream
@@ -1280,6 +1166,7 @@ decoder_exit:
 	if (video_frame_nat != NULL) {
 		av_free(video_frame_nat);
 	}
+	ASSERT(video_frame_flt == NULL);
 	if (video_frame_flt != NULL) {
 		av_free(video_frame_flt);
 	}
@@ -2059,72 +1946,6 @@ avbox_player_getmediafile(struct avbox_player *inst)
 
 
 /**
- * Callback function to dismiss
- * overlay text
- */
-static enum avbox_timer_result
-avbox_player_dismiss_top_overlay(int timer_id, void *data)
-{
-	struct avbox_player *inst = (struct avbox_player*) data;
-
-	assert(inst != NULL);
-
-	pthread_mutex_lock(&inst->top_overlay_lock);
-
-	if (inst->top_overlay_timer_id != 0) {
-		DEBUG_VPRINT("player", "Dismissing top overlay for %s",
-			inst->media_file);
-
-		if (inst->top_overlay_text != NULL) {
-			free(inst->top_overlay_text);
-		}
-
-		inst->top_overlay_text = NULL;
-		inst->top_overlay_timer_id = 0;
-	}
-
-	pthread_mutex_unlock(&inst->top_overlay_lock);
-
-	return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE; /* doesn't matter for ONESHOT timers */
-}
-
-
-/**
- * Shows overlay text on the top of the
- * screen.
- */
-void
-avbox_player_showoverlaytext(struct avbox_player *inst,
-	const char *text, int duration, enum mbv_alignment alignment)
-{
-	struct timespec tv;
-
-	pthread_mutex_lock(&inst->top_overlay_lock);
-
-	/* if there's an overlay text being displayed then  dismiss it first */
-	if (inst->top_overlay_timer_id != 0) {
-		DEBUG_PRINT("player", "Cancelling existing overlay");
-		avbox_timer_cancel(inst->top_overlay_timer_id);
-		if (inst->top_overlay_text != NULL) {
-			free(inst->top_overlay_text);
-		}
-		inst->top_overlay_timer_id = 0;
-		inst->top_overlay_text = NULL;
-	}
-
-	/* register the top overlay */
-	tv.tv_sec = duration;
-	tv.tv_nsec = 0;
-	inst->top_overlay_alignment = alignment;
-	inst->top_overlay_text = strdup(text);
-	inst->top_overlay_timer_id = avbox_timer_register(&tv, AVBOX_TIMER_TYPE_ONESHOT,
-		NULL, &avbox_player_dismiss_top_overlay, inst);
-
-	pthread_mutex_unlock(&inst->top_overlay_lock);
-}
-
-
-/**
  * Gets the title of the currently playing
  * media file or NULL if nothing is playing. The result needs to be
  * freed with free().
@@ -2246,14 +2067,6 @@ avbox_player_play(struct avbox_player *inst, const char * const path)
 
 	/* we're done buffering, set state to PLAYING */
 	avbox_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
-
-	/* show title on top overlay */
-	char *title = avbox_player_gettitle(inst);
-	if (title != NULL) {
-		avbox_player_showoverlaytext(inst, title, 15,
-			MBV_ALIGN_CENTER);
-		free(title);
-	}
 
 	DEBUG_PRINT("player", "Firing rendering threads");
 
@@ -2457,8 +2270,7 @@ avbox_player_new(struct avbox_window *window)
 
 	/* initialize pthreads primitives */
 	if (pthread_mutex_init(&inst->stream_lock, NULL) != 0 ||
-		pthread_cond_init(&inst->stream_signal, NULL) != 0 ||
-		pthread_mutex_init(&inst->top_overlay_lock, NULL) != 0) {
+		pthread_cond_init(&inst->stream_signal, NULL) != 0) {
 		LOG_PRINT_ERROR("Cannot create player instance. Pthreads error");
 		avbox_queue_destroy(inst->video_packets_q);
 		free(inst);

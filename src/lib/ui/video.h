@@ -17,20 +17,29 @@
 #define AVBOX_WNDFLAGS_INPUT		(0x1)
 #define AVBOX_WNDFLAGS_SUBWINDOW	(0x2)
 #define AVBOX_WNDFLAGS_DECORATED	(0x4)
+#define AVBOX_WNDFLAGS_ALPHABLEND	(0x8)
 
+#define AVBOX_COLOR_R(x) (((x) >> 24) & 0xFF)
+#define AVBOX_COLOR_G(x) (((x) >> 16) & 0xFF)
+#define AVBOX_COLOR_B(x) (((x) >>  8) & 0xFF)
+#define AVBOX_COLOR_A(x) ((x) & 0xFF)
+
+#define AVBOX_COLOR(color) \
+	(AVBOX_COLOR_A((color)) << 24 | ((AVBOX_COLOR_R((color)) * AVBOX_COLOR_A((color))) / 0XFF) << 16 | \
+	((AVBOX_COLOR_G((color)) * AVBOX_COLOR_A((color))) / 0xFF) <<  8 | \
+	((AVBOX_COLOR_B((color)) * AVBOX_COLOR_A((color))) / 0xFF))
 
 #define MBV_DEFAULT_FONT        ("/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf")
-#define MBV_DEFAULT_FOREGROUND  (0xFFFFFFFF)
-#define MBV_DEFAULT_BACKGROUND  (0x0951AFFF)
+#define MBV_DEFAULT_FOREGROUND  AVBOX_COLOR(0xFFFFFFFF)
+#define MBV_DEFAULT_BACKGROUND  AVBOX_COLOR(0x0951AFFF)
 #define MBV_DEFAULT_OPACITY     (100)
-
 
 /* convenience macros for converting colors to RGBA floating point
  * for cairo */
-#define CAIRO_COLOR_RGBA_R(x) (((double)((x >> 24) & 0xFF)) / 256.0F)
-#define CAIRO_COLOR_RGBA_G(x) (((double)((x >> 16) & 0xFF)) / 256.0F)
-#define CAIRO_COLOR_RGBA_B(x) (((double)((x >>  8) & 0xFF)) / 256.0F)
-#define CAIRO_COLOR_RGBA_A(x) (((double)((x      ) & 0xFF)) / 256.0F)
+#define CAIRO_COLOR_RGBA_A(x) (((double)((x >> 24) & 0xFF)) / 256.0F)
+#define CAIRO_COLOR_RGBA_R(x) (((double)((x >> 16) & 0xFF)) / 256.0F)
+#define CAIRO_COLOR_RGBA_G(x) (((double)((x >>  8) & 0xFF)) / 256.0F)
+#define CAIRO_COLOR_RGBA_B(x) (((double)((x      ) & 0xFF)) / 256.0F)
 #define CAIRO_COLOR_RGBA(color) \
 	CAIRO_COLOR_RGBA_R(color), \
 	CAIRO_COLOR_RGBA_G(color), \

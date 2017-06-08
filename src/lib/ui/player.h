@@ -63,15 +63,6 @@ avbox_player_getstatus(struct avbox_player* inst);
 
 
 /**
- * Shows overlay text on the top of the
- * screen.
- */
-void
-avbox_player_showoverlaytext(struct avbox_player *inst,
-	const char *text, int duration, enum mbv_alignment alignment);
-
-
-/**
  * Get the last played file
  */
 const char *

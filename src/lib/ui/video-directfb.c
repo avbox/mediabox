@@ -38,6 +38,8 @@ IDirectFB *dfb = NULL; /* global so input-directfb.c can see it */
 static IDirectFBDisplayLayer *layer = NULL;
 static struct mbv_surface *root = NULL;
 
+#define ALIGNED(addr, bytes) \
+    (((uintptr_t)(const void *)(addr)) % (bytes) == 0)
 
 #define DFBCHECK(x)                                         \
 {                                                            \
@@ -45,7 +47,7 @@ static struct mbv_surface *root = NULL;
          \
 	if (err != DFB_OK)                                         \
 	{                                                        \
-		fprintf( stderr, "%s <%d>:\n\t", __FILE__, __LINE__ ); \
+		LOG_VPRINT_ERROR("%s <%d>:\n\t", __FILE__, __LINE__ ); \
 		DirectFBErrorFatal( #x, err );                         \
 	}                                                        \
 }
@@ -102,6 +104,13 @@ surface_lock(struct mbv_surface * const inst,
 	}
 	pthread_mutex_lock(&inst->lock);
 	DFBCHECK(inst->surface->Lock(inst->surface, lockflags, &buf, pitch));
+
+	if (!ALIGNED(buf, 4)) {
+		DEBUG_PRINT("video-dfb", "Buffer not 32-bit aligned!");
+	} else if (!ALIGNED(buf, 8)) {
+		DEBUG_PRINT("video-dfb", "Buffer not 64-bit aligned!");
+	}
+
 	return buf;
 }
 
@@ -247,7 +256,7 @@ surface_new(
  */
 static void
 surface_update(struct mbv_surface * const inst,
-	int update)
+	int blitflags, int update)
 {
 	/* DEBUG_VPRINT("video-dfb", "surface_update(0x%p)",
 		inst); */
@@ -271,12 +280,21 @@ surface_update(struct mbv_surface * const inst,
 		window_rect.y = 0;
 		window_rect.w = inst->rect.w;
 		window_rect.h = inst->rect.h;
+		if (blitflags & MBV_BLITFLAGS_ALPHABLEND) {
+			DFBCHECK(root->surface->SetBlittingFlags(root->surface,
+				DSBLIT_BLEND_ALPHACHANNEL));
+		}
 		DFBCHECK(root->surface->Blit(
 			root->surface,
 			inst->surface,
 			&window_rect,
 			inst->rect.x,
 			inst->rect.y));
+		if (blitflags & MBV_BLITFLAGS_ALPHABLEND) {
+			DFBCHECK(root->surface->SetBlittingFlags(root->surface,
+				DSBLIT_NOFX));
+		}
+
 
 		/* now blit the window to the front buffer. It would
 		 * be nice if we could blit directly to the front buffer
@@ -370,7 +388,11 @@ init(int argc, char **argv, int * const w, int * const h)
 		LOG_PRINT_ERROR("Could not create root surface for layer 0!");
 		abort();
 	}
-	surface_update(root, 1);
+	surface_update(root, MBV_BLITFLAGS_NONE, 1);
+
+	DFBCHECK(root->surface->SetPorterDuff(root->surface, DSPD_SRC_OVER));
+	DFBCHECK(root->surface->SetSrcBlendFunction(root->surface, DSBF_SRCALPHA));
+	DFBCHECK(root->surface->SetDstBlendFunction(root->surface, DSBF_DESTALPHA));
 
 	/* print the pixel format of the root window */
 	DFBSurfacePixelFormat pix_fmt;

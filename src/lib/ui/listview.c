@@ -100,8 +100,8 @@ avbox_listitem_paint(struct avbox_window * const window)
 		&canvas_width, &canvas_height);
 
 	if (inst->selected == item) {
-		avbox_window_setbgcolor(item->window, 0xffffffff);
-		avbox_window_setcolor(item->window, 0x000000ff);
+		avbox_window_setbgcolor(item->window, AVBOX_COLOR(0xffffffff));
+		avbox_window_setcolor(item->window, AVBOX_COLOR(0x000000ff));
 	} else {
 		avbox_window_setbgcolor(item->window, MBV_DEFAULT_BACKGROUND);
 		avbox_window_setcolor(item->window, MBV_DEFAULT_FOREGROUND);
