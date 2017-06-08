@@ -87,11 +87,17 @@ avbox_timers_thread(void *arg)
 				}
 				if (tmr->flags & AVBOX_TIMER_MESSAGE) {
 					if (tmr->message_object != NULL) {
-						if (avbox_dispatch_sendmsg(-1, &tmr->message_object,
-							AVBOX_MESSAGETYPE_TIMER, AVBOX_DISPATCH_UNICAST,
-							&tmr->public) == NULL) {
-							LOG_VPRINT_ERROR("Could not send notification message: %s",
-								strerror(errno));
+						struct avbox_timer_data *payload;
+						if ((payload = malloc(sizeof(struct avbox_timer_data))) == NULL) {
+							LOG_PRINT_ERROR("Could not send TIMER message: Out of memory");
+						} else {
+							memcpy(payload, &tmr->public, sizeof(struct avbox_timer_data));
+							if (avbox_dispatch_sendmsg(-1, &tmr->message_object,
+								AVBOX_MESSAGETYPE_TIMER, AVBOX_DISPATCH_UNICAST, payload) == NULL) {
+								LOG_VPRINT_ERROR("Could not send notification message: %s",
+									strerror(errno));
+								free(payload);
+							}
 						}
 					}
 				}

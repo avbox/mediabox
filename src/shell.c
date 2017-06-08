@@ -714,6 +714,9 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 		} else if (timer_data->id == volumebar_timer_id) {
 			mbox_shell_dismissvolumebar(timer_data->id, timer_data->data);
 		}
+
+		free(timer_data);
+
 		break;
 	} 
 	case AVBOX_MESSAGETYPE_VOLUME:

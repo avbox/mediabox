@@ -28,8 +28,8 @@
 #include "lib/linkedlist.h"
 
 #ifdef ENABLE_IONICE
-#include "ionice.h"
-#include "su.h"
+#include "lib/ionice.h"
+#include "lib/su.h"
 #endif
 
 #define DELUGE_BIN "/usr/bin/deluge-console"
@@ -474,6 +474,7 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 		struct avbox_timer_data * const timer_data =
 			avbox_dispatch_getmsgpayload(msg);
 		mbox_downloads_populatelist(timer_data->id, timer_data->data);
+		free(timer_data);
 		break;
 	}
 	case AVBOX_MESSAGETYPE_DELEGATE:

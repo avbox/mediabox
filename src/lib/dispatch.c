@@ -505,6 +505,7 @@ void
 avbox_dispatch_shutdown(void)
 {
 	struct avbox_dispatch_queue *q;
+	struct avbox_message *msg;
 
 #ifndef NDEBUG
 	if (!initialized) {
@@ -518,6 +519,15 @@ avbox_dispatch_shutdown(void)
 		LOG_PRINT_ERROR("Queue not initialized!");
 		abort();
 	}
+
+	/* flush and destroy the thread's queue */
+	/* TODO: Implement a message destructor for freeing
+	 * the payload of flushed messages */
+	avbox_queue_close(q->queue);
+	while ((msg = avbox_queue_get(q->queue)) != NULL) {
+		avbox_dispatch_freemsg(msg);
+	}
+	avbox_queue_destroy(q->queue);
 
 	/* remove queue from list and free it */
 	pthread_mutex_lock(&queue_lock);
