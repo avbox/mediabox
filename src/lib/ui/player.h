@@ -47,6 +47,21 @@ struct avbox_player_status_data
 typedef void (*avbox_player_status_callback)(struct avbox_player *inst,
 	enum avbox_player_status status, enum avbox_player_status last_status);
 
+/**
+ * Subscribe to receive player notifications.
+ */
+int
+avbox_player_subscribe(struct avbox_player * const inst,
+	struct avbox_dispatch_object * const object);
+
+
+/**
+ * Unsubscribe from player events.
+ */
+int
+avbox_player_unsubscribe(struct avbox_player * const inst,
+	struct avbox_dispatch_object * const object);
+
 
 /**
  * Plays a list of items
@@ -79,18 +94,24 @@ avbox_player_gettitle(struct avbox_player *inst);
 
 
 /**
+ * Get the media duration.
+ */
+void
+avbox_player_getduration(struct avbox_player * const inst, int64_t *duration);
+
+
+/**
+ * Get the media position in microseconds.
+ */
+void
+avbox_player_gettime(struct avbox_player * const inst, int64_t *time);
+
+
+/**
  * Get the state of the stream buffer
  */
 unsigned int
 avbox_player_bufferstate(struct avbox_player *inst);
-
-
-/**
- * Register a queue for status notifications.
- */
-int
-avbox_player_registernotificationqueue(struct avbox_player *inst,
-	struct avbox_dispatch_object *notify_object);
 
 
 /**

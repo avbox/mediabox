@@ -28,6 +28,7 @@
 #include "discovery.h"
 #include "downloads-backend.h"
 #include "library-backend.h"
+#include "overlay.h"
 
 
 #define MEDIA_FILE "/mov.mp4"
@@ -36,21 +37,17 @@
 static int pw = 0, ph = 0;
 static struct avbox_dispatch_object *dispatch_object = NULL;
 static struct avbox_window *main_window = NULL;
-static struct avbox_window *overlay = NULL;
 static struct avbox_window *progress = NULL;
 static struct avbox_progressview *progressbar = NULL;
 static struct avbox_player *player = NULL;
 static struct avbox_window *volumebar_window = NULL;
 static struct avbox_progressview *volumebar = NULL;
 static struct mbox_mainmenu *mainmenu = NULL;
+static struct mbox_overlay *overlay = NULL;
 static int volumebar_timer_id = -1;
 static int clock_timer_id = -1;
-static int overlay_timer_id = -1;
-static int overlay_dirty = 0;
 static char time_string[256] = "";
 static char date_string[256] = "";
-static char *overlay_text = NULL;
-static enum mbv_alignment overlay_alignment = MBV_ALIGN_CENTER;
 
 
 /**
@@ -137,50 +134,6 @@ mbox_shell_draw(struct avbox_window *window)
 
 
 /**
- * Draws the overlay window.
- */
-static int
-mbox_shell_overlay_draw(struct avbox_window *window)
-{
-	int w, h;
-	cairo_t *context;
-	PangoLayout *msg;
-	PangoFontDescription *font_desc;
-
-	if (!overlay_dirty) {
-		return 0;
-	}
-
-	DEBUG_PRINT("shell", "Drawing overlay");
-
-	avbox_window_getcanvassize(window, &w, &h);
-
-	if ((context = avbox_window_cairo_begin(window)) != NULL) {
-		if ((msg = pango_cairo_create_layout(context)) != NULL) {
-			if ((font_desc = pango_font_description_from_string("Sans Bold 24px")) != NULL) {
-				pango_layout_set_font_description(msg, font_desc);
-				pango_layout_set_width(msg, w * PANGO_SCALE);
-				pango_layout_set_alignment(msg, mbv_get_pango_alignment(overlay_alignment));
-				pango_layout_set_text(msg, overlay_text, -1);
-				pango_cairo_update_layout(context, msg);
-				pango_font_description_free(font_desc);
-				cairo_translate(context, 0, 0);
-				cairo_set_source_rgba(context, 1.0, 1.0, 1.0, 1.0);
-				pango_cairo_show_layout(context, msg);
-				g_object_unref(msg);
-			}
-		}
-		avbox_window_cairo_end(window);
-	} else {
-		DEBUG_PRINT("about", "Could not get cairo context");
-	}
-
-	overlay_dirty = 0;
-	return 0;
-}
-
-
-/**
  * Draws the shutdown dialog */
 static int
 mbox_shell_shutdowndraw(struct avbox_window *window)
@@ -216,73 +169,6 @@ mbox_shell_shutdowndraw(struct avbox_window *window)
 	}
 	return 0;
 }
-
-
-/**
- * Show overlay text
- */
-static void
-mbox_shell_showoverlaytext(char *text, int duration, enum mbv_alignment alignment)
-{
-	int w, h;
-	struct timespec tv;
-	DEBUG_PRINT("shell", "Showing overlay");
-
-	/* dismiss the overlay if it's visible */
-	if (overlay != NULL) {
-		ASSERT(overlay_timer_id != -1);
-		ASSERT(overlay_text != NULL);
-		avbox_timer_cancel(overlay_timer_id);
-		avbox_window_destroy(overlay);
-		free(overlay_text);
-		overlay_text = NULL;
-		overlay_timer_id = -1;
-		overlay = NULL;
-	}
-
-	/* nothing to show */
-	if (text == NULL || !strcmp(text, "")) {
-		return;
-	}
-
-	if ((overlay_text = strdup(text)) == NULL) {
-		LOG_PRINT_ERROR("Could not duplicate overlay text: Out of memory");
-		return;
-	}
-	overlay_dirty = 1;
-	overlay_alignment = alignment;
-	avbox_window_getcanvassize(
-		avbox_video_getrootwindow(0), &w, &h);
-
-	/* create the overlay window */
-	if ((overlay = avbox_window_new(NULL, "overlay",
-		AVBOX_WNDFLAGS_ALPHABLEND, 80, 70, w - 160, 80, NULL,
-		mbox_shell_overlay_draw, NULL)) == NULL) {
-		LOG_VPRINT_ERROR("Could not create overlay window: %s",
-			strerror(errno));
-		free(overlay_text);
-		overlay_text = NULL;
-		return;
-	}
-	avbox_window_setbgcolor(overlay, AVBOX_COLOR(0xcccccc40));
-	avbox_window_clear(overlay);
-	avbox_window_show(overlay);
-	
-	/* start the timer */
-	tv.tv_sec = duration;
-	tv.tv_nsec = 0;
-	if ((overlay_timer_id = avbox_timer_register(&tv,
-		AVBOX_TIMER_TYPE_AUTORELOAD | AVBOX_TIMER_MESSAGE,
-		dispatch_object, NULL, NULL)) == -1) {
-		LOG_VPRINT_ERROR("Could not register overlay timer: %s",
-			strerror(errno));
-		avbox_window_destroy(overlay);
-		free(overlay_text);
-		overlay_text = NULL;
-		overlay = NULL;
-	}
-}
-
 
 
 /**
@@ -466,9 +352,6 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 				progress = NULL;
 			}
 
-		} else if (last_status == MB_PLAYER_STATUS_PAUSED &&
-			status != MB_PLAYER_STATUS_PAUSED) {
-			mbox_shell_showoverlaytext(NULL, 1, MBV_ALIGN_LEFT);
 		}
 
 		/* if we're out of the READY state then cancel the clock
@@ -501,10 +384,6 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 			break;
 
 		case MB_PLAYER_STATUS_BUFFERING:
-			if (last_status != MB_PLAYER_STATUS_BUFFERING) {
-				DEBUG_PRINT("shell", "Player state changed to BUFFERING");
-			}
-
 			/* We null test progress here instead of (last_status != MB_PLAYER_STATUS_BUFFERING)
 			 * because if for any reason this block bails out early we'll want it to run again
 			 * next time */
@@ -560,15 +439,14 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 			break;
 
 		case MB_PLAYER_STATUS_PLAYING:
+		{
 			assert(progress == NULL);
 			DEBUG_PRINT("shell", "Player state changed to PLAYING");
 			break;
-
+		}
 		case MB_PLAYER_STATUS_PAUSED:
 			assert(progress == NULL);
 			DEBUG_PRINT("shell", "Player state changed to PAUSED");
-			mbox_shell_showoverlaytext("  PAUSED", 15,
-				MBV_ALIGN_LEFT);
 			avbox_player_update(inst);
 			break;
 		}
@@ -606,6 +484,9 @@ mbox_shell_shutdown(void)
 
 	DEBUG_PRINT("shell", "Shutting down");
 
+	/* release input */
+	avbox_input_release(dispatch_object);
+
 	/* cancel all timers */
 	if (volumebar_timer_id != -1) {
 		avbox_timer_cancel(volumebar_timer_id);
@@ -615,19 +496,14 @@ mbox_shell_shutdown(void)
 	}
 
 	/* dismiss the overlay */
-	if (overlay_timer_id != -1) {
-		ASSERT(overlay != NULL);
-		ASSERT(overlay_text != NULL);
-		avbox_timer_cancel(overlay_timer_id);
-		avbox_window_destroy(overlay);
-		free(overlay_text);
-		overlay_timer_id = -1;
-		overlay_text = NULL;
-		overlay = NULL;
-	}
+	mbox_overlay_destroy(overlay);
 
 	/* destroy player */
 	if (player != NULL) {
+		if (avbox_player_unsubscribe(player, dispatch_object) == -1) {
+			LOG_VPRINT_ERROR("Could not unsubscribe from player events: %s",
+				strerror(errno));
+		}
 		avbox_player_destroy(player);
 	}
 
@@ -787,12 +663,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 		case MBI_EVENT_KBD_I:
 		case MBI_EVENT_INFO:
 		{
-			char *title = avbox_player_gettitle(player);
-			if (title != NULL) {
-				mbox_shell_showoverlaytext(title, 15,
-					MBV_ALIGN_CENTER);
-				free(title);
-			}
+			mbox_overlay_show(overlay, 15);
 			break;
 		}
 		case MBI_EVENT_VOLUME_UP:
@@ -840,18 +711,6 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			mbox_shell_welcomescreen(timer_data->id, timer_data->data);
 		} else if (timer_data->id == volumebar_timer_id) {
 			mbox_shell_dismissvolumebar(timer_data->id, timer_data->data);
-		} else if (timer_data->id == overlay_timer_id) {
-			if (overlay != NULL) {
-				DEBUG_PRINT("shell", "Dismissing overlay");
-				ASSERT(overlay_timer_id != -1);
-				ASSERT(overlay_text != NULL);
-				avbox_timer_cancel(overlay_timer_id);
-				avbox_window_destroy(overlay);
-				free(overlay_text);
-				overlay_timer_id = -1;
-				overlay_text = NULL;
-				overlay = NULL;
-			}
 		}
 
 		/* free payload */
@@ -947,6 +806,14 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 		return -1;
 	}
 
+	/* create the overlay */
+	if ((overlay = mbox_overlay_new(player)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create overlay: %s",
+			strerror(errno));
+		avbox_window_destroy(main_window);
+		return -1;
+	}
+
 	/* create dispatch object */
 	if ((dispatch_object = avbox_dispatch_createobject(mbox_shell_handler, 0, NULL)) == NULL) {
 		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
@@ -965,15 +832,16 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 		return -1;
 	}
 
-	/* register our queue as the player's notification queue */
-	if (avbox_player_registernotificationqueue(mbox_shell_getactiveplayer(), dispatch_object) == -1) {
-		LOG_PRINT_ERROR("Could not reqister notification queue");
+	/* subscribe to player notifications */
+	if (avbox_player_subscribe(player, dispatch_object) == -1) {
+		LOG_PRINT_ERROR("Could not reqister notification object");
 		avbox_dispatch_destroyobject(dispatch_object);
 		avbox_player_destroy(player);
 		avbox_window_destroy(main_window);
 		return -1;
 	}
 
+	/* subscribe to application notifications */
 	if (avbox_application_subscribe(mbox_shell_appevent, NULL) == -1) {
 		LOG_VPRINT_ERROR("Could not subscribe to app events: %s",
 			strerror(errno));

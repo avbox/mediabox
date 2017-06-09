@@ -248,7 +248,7 @@ surface_new(
 			dsc.caps = DSCAPS_PREMULTIPLIED;
 			dsc.width = w;
 			dsc.height = h;
-			dsc.pixelformat = DSPF_RGB32;
+			dsc.pixelformat = DSPF_ARGB;
 			dsc.preallocated[0].data = inst->buf;
 			dsc.preallocated[0].pitch = pitch;
 			dsc.preallocated[1].data = NULL;
@@ -414,9 +414,9 @@ init(int argc, char **argv, int * const w, int * const h)
 	}
 	surface_update(root, MBV_BLITFLAGS_NONE, 1);
 
-	DFBCHECK(root->surface->SetPorterDuff(root->surface, DSPD_SRC_OVER));
+	//DFBCHECK(root->surface->SetPorterDuff(root->surface, DSPD_SRC_OVER));
 	DFBCHECK(root->surface->SetSrcBlendFunction(root->surface, DSBF_SRCALPHA));
-	DFBCHECK(root->surface->SetDstBlendFunction(root->surface, DSBF_DESTALPHA));
+	DFBCHECK(root->surface->SetDstBlendFunction(root->surface, DSBF_INVSRCALPHA));
 
 	/* print the pixel format of the root window */
 	DFBSurfacePixelFormat pix_fmt;

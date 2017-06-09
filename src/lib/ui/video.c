@@ -10,6 +10,7 @@
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
+#include <math.h>
 #include <pango/pangocairo.h>
 
 #define LOG_MODULE "video"
@@ -35,18 +36,6 @@
 
 
 struct avbox_window;
-
-/**
- * Represents a rectangle.
- */
-struct avbox_rect
-{
-	int x;
-	int y;
-	int w;
-	int h;
-};
-
 
 LISTABLE_STRUCT(avbox_window_node,
 	struct avbox_window *window;
@@ -369,6 +358,54 @@ avbox_window_fillrectangle(struct avbox_window *window, int x, int y, int w, int
 	}
 }
 
+
+/**
+ * Draw a round rectangle
+ */
+int
+avbox_window_roundrectangle(struct avbox_window * window, struct avbox_rect *rect, int border_width)
+{
+	cairo_t *cr;
+
+	/* a custom shape that could be wrapped in a function */
+	double x, y, w, h, aspect, corner_radius, radius;
+
+	double degrees = M_PI / 180.0;
+
+	/* get cairo context */
+	if ((cr = avbox_window_cairo_begin(window)) == NULL) {
+		LOG_VPRINT_ERROR("Could not get cairo context: %s",
+			strerror(errno));
+		return -1;
+	}
+
+	x = (double) rect->x;
+	y = (double) rect->y;
+	w = (double) rect->w;
+	h = (double) rect->h;
+
+	aspect = 1.0;
+	corner_radius = h / 10.0;
+	radius = corner_radius / aspect;
+
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+	cairo_new_sub_path(cr);
+	cairo_arc(cr, x + w - radius, y + radius, radius, -90 * degrees, 0 * degrees);
+	cairo_arc(cr, x + w - radius, y + h - radius, radius, 0 * degrees, 90 * degrees);
+	cairo_arc(cr, x + radius, y + h - radius, radius, 90 * degrees, 180 * degrees);
+	cairo_arc(cr, x + radius, y + radius, radius, 180 * degrees, 270 * degrees);
+	cairo_close_path(cr);
+
+	cairo_set_source_rgba(cr, CAIRO_COLOR_RGBA(window->background_color));
+	cairo_fill_preserve(cr);
+	cairo_set_source_rgba(cr, CAIRO_COLOR_RGBA(window->foreground_color));
+	cairo_set_line_width(cr, (double) border_width);
+	cairo_stroke(cr);
+
+	avbox_window_cairo_end(window);
+
+	return 0;
+}
 
 int
 mbv_getdefaultfontheight(void)

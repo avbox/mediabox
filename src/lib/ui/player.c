@@ -92,6 +92,11 @@ struct avbox_size
 };
 
 
+LISTABLE_STRUCT(avbox_player_subscriber,
+	struct avbox_dispatch_object *object;
+);
+
+
 /**
  * Player structure.
  */
@@ -103,7 +108,6 @@ struct avbox_player
 	struct avbox_queue *audio_packets_q;
 	struct avbox_queue *video_frames_q;
 	struct avbox_audiostream *audio_stream;
-	struct avbox_dispatch_object *notify_object;
 	struct SwsContext *swscale_ctx;
 	struct avbox_rational aspect_ratio;
 	struct avbox_size video_size;
@@ -147,7 +151,9 @@ struct avbox_player
 	pthread_t audio_decoder_thread;
 	pthread_cond_t stream_signal;
 	pthread_mutex_t stream_lock;
+	pthread_mutex_t state_lock;
 	pthread_t stream_thread;
+	LIST subscribers;
 
 	/* playlist stuff */
 	LIST playlist;
@@ -232,6 +238,63 @@ avbox_player_freeplaylist(struct avbox_player* inst)
 }
 
 
+static struct avbox_dispatch_object **
+avbox_player_subscribers(struct avbox_player * const inst)
+{
+	int cnt = 0;
+	struct avbox_player_subscriber *subscriber;
+	struct avbox_dispatch_object **out, **pout;
+	LIST_FOREACH(struct avbox_player_subscriber*, subscriber, &inst->subscribers) {
+		cnt++;
+	}
+	if (cnt == 0) {
+		return NULL;
+	}
+	if ((pout = out = malloc((cnt + 1) * sizeof(struct avbox_dispatch_object*))) == NULL) {
+		ASSERT(errno == ENOMEM);
+		return NULL;
+	}
+	LIST_FOREACH(struct avbox_player_subscriber*, subscriber, &inst->subscribers) {
+		*pout++ = subscriber->object;
+	}
+	*pout = NULL;
+	return out;
+}
+
+
+/**
+ * Send a message to all subscribers.
+ */
+static int
+avbox_player_sendmsg(struct avbox_player * const inst,
+	enum avbox_player_status status, enum avbox_player_status last_status)
+{
+	struct avbox_player_status_data *data;
+	struct avbox_dispatch_object **subscribers;
+	if ((subscribers = avbox_player_subscribers(inst)) == NULL) {
+		return 0;
+	}
+	if ((data = malloc(sizeof(struct avbox_player_status_data))) == NULL) {
+		ASSERT(errno == ENOMEM);
+		free(subscribers);
+		return -1;
+	}
+	data->sender = inst;
+	data->status = status;
+	data->last_status = last_status;
+	if (avbox_dispatch_sendmsg(-1, subscribers, AVBOX_MESSAGETYPE_PLAYER,
+		AVBOX_DISPATCH_ANYCAST, data) == NULL) {
+		LOG_VPRINT_ERROR("Could not send status notification: %s",
+			strerror(errno));
+		free(subscribers);
+		free(data);
+		return -1;
+	}
+	free(subscribers);
+	return 0;
+}
+
+
 /**
  * Updates the player status and
  * calls any registered callbacks
@@ -247,28 +310,9 @@ avbox_player_updatestatus(struct avbox_player *inst, enum avbox_player_status st
 	inst->status = status;
 
 	/* send status notification */
-	if (inst->notify_object != NULL) {
-		struct avbox_player_status_data *status_data;
-
-		/* allocate memory for status message */
-		if ((status_data = malloc(sizeof(struct avbox_player_status_data))) == NULL) {
-			LOG_VPRINT_ERROR("Could not send status notification: %s",
-				strerror(errno));
-			return;
-		}
-
-		/* initialize it */
-		status_data->sender = inst;
-		status_data->last_status = last_status;
-		status_data->status = status;
-
-		/* send it */
-		if (avbox_dispatch_sendmsg(-1, &inst->notify_object, AVBOX_MESSAGETYPE_PLAYER,
-			AVBOX_DISPATCH_UNICAST, status_data) == NULL) {
-			LOG_VPRINT_ERROR("Could not send status notification: %s",
-				strerror(errno));
-			free(status_data);
-		}
+	if (avbox_player_sendmsg(inst, status, last_status) == -1) {
+		LOG_VPRINT_ERROR("Could not send notification: %s",
+			strerror(errno));
 	}
 }
 
@@ -1691,6 +1735,8 @@ avbox_player_stream_parse(void *arg)
 decoder_exit:
 	DEBUG_PRINT("player", "Stream parser exiting");
 
+	pthread_mutex_lock(&inst->state_lock);
+
 	/* clean video stuff */
 	if (inst->have_video) {
 		/* close the decoded frames queue */
@@ -1797,6 +1843,7 @@ decoder_exit:
 	pthread_mutex_lock(&inst->stream_lock);
 	pthread_cond_signal(&inst->stream_signal);
 	pthread_mutex_unlock(&inst->stream_lock);
+	pthread_mutex_unlock(&inst->state_lock);
 
 	DEBUG_PRINT("player", "Stream parser thread bailing out");
 
@@ -1811,21 +1858,6 @@ enum avbox_player_status
 avbox_player_getstatus(struct avbox_player *inst)
 {
 	return inst->status;
-}
-
-
-/**
- * Register a queue for status notifications.
- */
-int
-avbox_player_registernotificationqueue(struct avbox_player *inst,
-	struct avbox_dispatch_object *notify_object)
-{
-	if (inst->notify_object != NULL) {
-		abort();
-	}
-	inst->notify_object = notify_object;
-	return 0;
 }
 
 
@@ -1959,19 +1991,23 @@ avbox_player_getmediafile(struct avbox_player *inst)
 char *
 avbox_player_gettitle(struct avbox_player *inst)
 {
+	char *ret = NULL;
 	AVDictionaryEntry *title_entry;
-
+	ASSERT(inst != NULL);
+	pthread_mutex_lock(&inst->state_lock);
 	if (inst == NULL || inst->fmt_ctx == NULL || inst->fmt_ctx->metadata == NULL) {
-		return NULL;
+		goto end;
 	}
-
 	if ((title_entry = av_dict_get(inst->fmt_ctx->metadata, "title", NULL, 0)) != NULL) {
 		if (title_entry->value != NULL) {
-			return strdup(title_entry->value);
+			ret = strdup(title_entry->value);
+			goto end;
 		}
 	}
-
-	return strdup(inst->media_file);
+	ret = strdup(inst->media_file);
+end:
+	pthread_mutex_unlock(&inst->state_lock);
+	return ret;
 }
 
 
@@ -2218,6 +2254,97 @@ avbox_player_stop(struct avbox_player* inst)
 }
 
 
+static struct avbox_player_subscriber*
+avbox_player_findsubscriber(const struct avbox_player * const inst,
+	const struct avbox_dispatch_object * const object)
+{
+	struct avbox_player_subscriber *subscriber;
+	LIST_FOREACH(struct avbox_player_subscriber*, subscriber, &inst->subscribers) {
+		if (subscriber->object == object) {
+			return subscriber;
+		}
+	}
+	return NULL;
+}
+
+
+/**
+ * Subscribe to receive player notifications.
+ */
+int
+avbox_player_subscribe(struct avbox_player * const inst,
+	struct avbox_dispatch_object * const object)
+{
+	struct avbox_player_subscriber *subscriber;
+	if ((subscriber = avbox_player_findsubscriber(inst, object)) != NULL) {
+		errno = EEXIST;
+		return -1;
+	}
+	if ((subscriber = malloc(sizeof(struct avbox_player_subscriber))) == NULL) {
+		ASSERT(errno == ENOMEM);
+		return -1;
+	}
+	subscriber->object = object;
+	LIST_APPEND(&inst->subscribers, subscriber);
+	return 0;
+}
+
+
+/**
+ * Unsubscribe from player events.
+ */
+int
+avbox_player_unsubscribe(struct avbox_player * const inst,
+	struct avbox_dispatch_object * const object)
+{
+	struct avbox_player_subscriber *subscriber;
+	if ((subscriber = avbox_player_findsubscriber(inst, object)) == NULL) {
+		errno = ENOENT;
+		return -1;
+	}
+	LIST_REMOVE(subscriber);
+	free(subscriber);
+	return 0;
+}
+
+
+/**
+ * Get the media duration.
+ */
+void
+avbox_player_getduration(struct avbox_player * const inst, int64_t *duration)
+{
+	ASSERT(inst != NULL);
+	ASSERT(duration != NULL);
+	pthread_mutex_lock(&inst->state_lock);
+	if (inst->fmt_ctx != NULL) {
+		*duration = inst->fmt_ctx->duration;
+	} else {
+		*duration = 0;
+	}
+	pthread_mutex_unlock(&inst->state_lock);
+}
+
+
+/**
+ * Get the media position in microseconds.
+ */
+void
+avbox_player_gettime(struct avbox_player * const inst, int64_t *time)
+{
+	ASSERT(inst != NULL);
+	ASSERT(time != NULL);
+	pthread_mutex_lock(&inst->state_lock);
+	if (inst->getmastertime != NULL) {
+		*time = inst->getmastertime(inst);
+	} else {
+		*time = 0;
+	}
+	pthread_mutex_unlock(&inst->state_lock);
+
+}
+
+
 /**
  * Create a new player object.
  */
@@ -2263,19 +2390,20 @@ avbox_player_new(struct avbox_window *window)
 	inst->video_frames_q = NULL;
 	inst->video_stream_index = -1;
 	inst->status = MB_PLAYER_STATUS_READY;
-	inst->notify_object = NULL;
 	inst->video_decoder_running = 0;
 	inst->audio_decoder_running = 0;
 	inst->aspect_ratio.num = 16;
 	inst->aspect_ratio.den = 9;
 
 	LIST_INIT(&inst->playlist);
+	LIST_INIT(&inst->subscribers);
 
 	/* get the size of the window */
 	avbox_window_getcanvassize(inst->window, &inst->width, &inst->height);
 
 	/* initialize pthreads primitives */
 	if (pthread_mutex_init(&inst->stream_lock, NULL) != 0 ||
+		pthread_mutex_init(&inst->state_lock, NULL) != 0 ||
 		pthread_cond_init(&inst->stream_signal, NULL) != 0) {
 		LOG_PRINT_ERROR("Cannot create player instance. Pthreads error");
 		avbox_queue_destroy(inst->video_packets_q);
@@ -2297,6 +2425,16 @@ avbox_player_destroy(struct avbox_player *inst)
 
 	DEBUG_PRINT("player", "Destroying object");
 
+	/* display a warning if there are any subscribers left */
+#ifndef NDEBUG
+	int cnt;
+	LIST_COUNT(&inst->subscribers, cnt);
+	if (cnt > 0) {
+		DEBUG_VPRINT("player", "LEAK: There are still %d subscribers!",
+			cnt);
+	}
+#endif
+
 	/* this just fails if we're not playing */
 	(void) avbox_player_stop(inst);
 
@@ -2305,6 +2443,7 @@ avbox_player_destroy(struct avbox_player *inst)
 	if (inst->media_file != NULL) {
 		free((void*) inst->media_file);
 	}
+
 	free(inst);
 }
 

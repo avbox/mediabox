@@ -77,6 +77,7 @@ mediabox_SOURCES = \
 	discovery.c \
 	library-backend.c \
 	library.c \
+	overlay.c \
 	main.c
 
 if ENABLE_BLUETOOTH

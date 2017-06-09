@@ -36,10 +36,10 @@
 
 /* convenience macros for converting colors to RGBA floating point
  * for cairo */
-#define CAIRO_COLOR_RGBA_A(x) (((double)((x >> 24) & 0xFF)) / 256.0F)
-#define CAIRO_COLOR_RGBA_R(x) (((double)((x >> 16) & 0xFF)) / 256.0F)
-#define CAIRO_COLOR_RGBA_G(x) (((double)((x >>  8) & 0xFF)) / 256.0F)
-#define CAIRO_COLOR_RGBA_B(x) (((double)((x      ) & 0xFF)) / 256.0F)
+#define CAIRO_COLOR_RGBA_A(x) (((double)((x >> 24) & 0xFF)) / 255.0F)
+#define CAIRO_COLOR_RGBA_R(x) (((double)((x >> 16) & 0xFF)) / 255.0F)
+#define CAIRO_COLOR_RGBA_G(x) (((double)((x >>  8) & 0xFF)) / 255.0F)
+#define CAIRO_COLOR_RGBA_B(x) (((double)((x      ) & 0xFF)) / 255.0F)
 #define CAIRO_COLOR_RGBA(color) \
 	CAIRO_COLOR_RGBA_R(color), \
 	CAIRO_COLOR_RGBA_G(color), \
@@ -56,6 +56,17 @@ struct mbv_font;
  */
 typedef int (*avbox_video_draw_fn)(
 	struct avbox_window * const window);
+
+/**
+ * Represents a rectangle.
+ */
+struct avbox_rect
+{
+	int x;
+	int y;
+	int w;
+	int h;
+};
 
 
 enum mbv_alignment
@@ -151,6 +162,13 @@ avbox_window_getsize(struct avbox_window *window, int *width, int *height);
 
 void
 avbox_window_fillrectangle(struct avbox_window *window, int x, int y, int w, int h);
+
+
+/**
+ * Draw a round rectangle
+ */
+int
+avbox_window_roundrectangle(struct avbox_window * window, struct avbox_rect *rect, int border_width);
 
 
 int
