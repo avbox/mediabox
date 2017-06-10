@@ -1435,7 +1435,7 @@ end:
 static void*
 avbox_player_stream_parse(void *arg)
 {
-	int i;
+	int i, res;
 	AVPacket packet, *ppacket;
 	AVDictionary *stream_opts = NULL;
 	struct avbox_player *inst = (struct avbox_player*) arg;
@@ -1588,7 +1588,13 @@ avbox_player_stream_parse(void *arg)
 	assert(avbox_queue_count(inst->video_frames_q) == 0);
 
 	/* start decoding */
-	while (LIKELY(!inst->stream_quit && av_read_frame(inst->fmt_ctx, &packet) >= 0)) {
+	while (LIKELY(!inst->stream_quit)) {
+		if (UNLIKELY((res = av_read_frame(inst->fmt_ctx, &packet)) < 0)) {
+			char buf[256];
+			av_strerror(res, buf, sizeof(buf));
+			LOG_VPRINT_ERROR("Could not read frame: %s", buf);
+			break;
+		}
 		if (packet.stream_index == inst->video_stream_index) {
 			if ((ppacket = malloc(sizeof(AVPacket))) == NULL) {
 				LOG_PRINT_ERROR("Could not allocate memory for packet!");
