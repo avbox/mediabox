@@ -23,6 +23,8 @@
 #include "../linkedlist.h"
 #include "../log.h"
 #include "../dispatch.h"
+#include "../delegate.h"
+
 
 #ifdef ENABLE_LIBDRM
 #include "video-drm.h"
@@ -53,6 +55,7 @@ struct avbox_window
 	struct avbox_window_node *node;
 	struct avbox_window_node stack_node;
 	avbox_video_draw_fn paint;
+	avbox_message_handler handler;
 	cairo_t *cairo_context;
 	const char *title;
 	const char *identifier; /* used for debugging purposes */
@@ -565,6 +568,61 @@ avbox_window_paintdecor(struct avbox_window * const window)
 
 
 /**
+ * Handle window messages.
+ */
+static int
+avbox_window_handler(void *context, struct avbox_message * const msg)
+{
+	struct avbox_window * const window = context;
+	switch (avbox_dispatch_getmsgtype(msg)) {
+	case AVBOX_MESSAGETYPE_DELEGATE:
+	{
+		struct avbox_delegate * const del =
+			avbox_dispatch_getmsgpayload(msg);
+		avbox_delegate_execute(del);
+		return AVBOX_DISPATCH_OK;
+	}
+	default:
+		return window->handler(window->user_context, msg);
+	}
+}
+
+
+/**
+ * Delegate a function call to the main thread under the
+ * window's context.
+ */
+struct avbox_delegate *
+avbox_window_delegate(struct avbox_window * const window,
+	avbox_delegate_fn func, void *arg)
+{
+	struct avbox_delegate *del;
+
+	if (window->handler == NULL) {
+		errno = EINVAL;
+		return NULL;
+	}
+
+	/* create delegate */
+	if ((del = avbox_delegate_new(func, arg)) == NULL) {
+		assert(errno == ENOMEM);
+		return NULL;
+	}
+
+	/* send delegate to the main thread */
+	if (avbox_dispatch_sendmsg(-1, &window->object,
+		AVBOX_MESSAGETYPE_DELEGATE, AVBOX_DISPATCH_UNICAST, del) == NULL) {
+		LOG_VPRINT_ERROR("Could not delegate to window: %s",
+			strerror(errno));
+		avbox_delegate_destroy(del);
+		return NULL;
+	}
+
+	return del;
+}
+
+
+/**
  * Gets a child window
  */
 static struct avbox_window*
@@ -617,6 +675,7 @@ avbox_window_subwindow(struct avbox_window * const window,
 	}
 
 	new_window->object = NULL;
+	new_window->handler = msghandler;
 	new_window->flags = flags;
 	new_window->content_window = new_window;
 	new_window->node = window_node;
@@ -650,7 +709,7 @@ avbox_window_subwindow(struct avbox_window * const window,
 	 * object for it */
 	if (msghandler != NULL) {
 		if ((window->object = avbox_dispatch_createobject(
-			msghandler, 0, window)) == NULL) {
+			avbox_window_handler, 0, window)) == NULL) {
 			LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 				strerror(errno));
 			free(window_node);
@@ -723,6 +782,7 @@ avbox_window_new(
 	}
 
 	window->object = NULL;
+	window->handler = msghandler;
 	window->flags = flags;
 	window->content_window = window;
 	window->node = window_node;
@@ -753,7 +813,7 @@ avbox_window_new(
 	 * object for it */
 	if (msghandler != NULL) {
 		if ((window->object = avbox_dispatch_createobject(
-			msghandler, 0, context)) == NULL) {
+			avbox_window_handler, 0, window)) == NULL) {
 			LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 				strerror(errno));
 			free(window_node);

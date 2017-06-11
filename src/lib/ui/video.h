@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <pango/pangocairo.h>
 #include "../dispatch.h"
+#include "../delegate.h"
 #include "video-drv.h"
 
 /**
@@ -87,6 +88,15 @@ mbv_get_pango_alignment(enum mbv_alignment alignment)
 	default: return PANGO_ALIGN_CENTER;
 	}
 }
+
+
+/**
+ * Delegate a function call to the main thread under the
+ * window's context.
+ */
+struct avbox_delegate *
+avbox_window_delegate(struct avbox_window * const window,
+	avbox_delegate_fn func, void *arg);
 
 
 cairo_t *

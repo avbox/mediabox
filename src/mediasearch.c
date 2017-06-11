@@ -458,6 +458,7 @@ mbox_mediasearch_msghandler(void *context, struct avbox_message *msg)
 				selected);
 
 			/* hide the window */
+			avbox_listview_releasefocus(inst->menu);
 			avbox_window_hide(inst->window);
 
 			/* reset state */

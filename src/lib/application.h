@@ -21,7 +21,7 @@ typedef int (*avbox_application_eventhandler)(void *context, int event);
  * Delegate a function call to the application's thread.
  */
 struct avbox_delegate*
-avbox_application_delegate(avbox_delegate_func func, void *arg);
+avbox_application_delegate(avbox_delegate_fn func, void *arg);
 
 
 /**

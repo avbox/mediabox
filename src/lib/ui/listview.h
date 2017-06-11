@@ -16,6 +16,12 @@ typedef int (*avbox_listview_enumitems_fn)(void *item, void *data);
 typedef int (*avbox_listview_eol_fn)(struct avbox_listview *inst, void * context);
 
 
+/**
+ * Release focus
+ */
+void
+avbox_listview_releasefocus(struct avbox_listview * const inst);
+
 
 int
 avbox_listview_seteolcallback(struct avbox_listview *inst, avbox_listview_eol_fn callback, void *context);

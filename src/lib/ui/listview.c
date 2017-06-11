@@ -357,6 +357,18 @@ avbox_listview_focus(struct avbox_listview *inst)
 
 
 /**
+ * Release focus
+ */
+void
+avbox_listview_releasefocus(struct avbox_listview * const inst)
+{
+	ASSERT(inst != NULL);
+	ASSERT(inst->dispatch_object != NULL);
+	avbox_input_release(inst->dispatch_object);
+}
+
+
+/**
  * Handles incoming messages.
  */
 static int

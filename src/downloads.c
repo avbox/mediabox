@@ -53,7 +53,6 @@ struct mbox_downloads
 {
 	struct avbox_window *window;
 	struct avbox_listview *menu;
-	struct avbox_dispatch_object *dispatch_object;
 	struct avbox_dispatch_object *parent_object;
 	struct avbox_delegate *worker;
 	int update_timer_id;
@@ -111,31 +110,6 @@ mbox_downloads_updateitem(void *arg)
 
 
 /**
- * A function to delegate to the main thread to this window's
- * dispatch object.
- * TODO: Move that to the compositor.
- */
-static struct avbox_delegate*
-mbox_downloads_delegate(struct mbox_downloads *inst,
-	avbox_delegate_func func, void *arg)
-{
-	struct avbox_delegate *del;
-
-	/* create delegate */
-	if ((del = avbox_delegate_new(func, arg)) == NULL) {
-		assert(errno == ENOMEM);
-		return NULL;
-	}
-
-	/* send delegate to the main thread */
-	if (avbox_dispatch_sendmsg(-1, &inst->dispatch_object,
-		AVBOX_MESSAGETYPE_DELEGATE, AVBOX_DISPATCH_UNICAST, del) == NULL) {
-	}
-
-	return del;
-}
-
-/**
  * Updates the window from the main thread.
  */
 static void *
@@ -183,7 +157,7 @@ mbox_downloads_updateentry(struct mbox_downloads *inst, char *id, char *name)
 		ctx.list = inst->menu;
 		ctx.id = dl->id;
 		ctx.name = name;
-		if ((del = mbox_downloads_delegate(inst,
+		if ((del = avbox_window_delegate(inst->window,
 			mbox_downloads_updateitem, &ctx)) == NULL) {
 			LOG_VPRINT_ERROR("Could not update item: %s",
 				strerror(errno));
@@ -217,7 +191,7 @@ mbox_downloads_updateentry(struct mbox_downloads *inst, char *id, char *name)
 		ctx.list = inst->menu;
 		ctx.name = dl->name;
 		ctx.id = dl->id;
-		if ((del = mbox_downloads_delegate(inst,
+		if ((del = avbox_window_delegate(inst->window,
 			mbox_downloads_additem, &ctx)) == NULL) {
 			LOG_VPRINT_ERROR("Could not update entry: %s",
 				strerror(errno));
@@ -362,7 +336,7 @@ mbox_downloads_populatelistasync(void *data)
 				struct mbox_downloads_update_context ctx;
 				ctx.list = inst->menu;
 				ctx.id = dl->id;
-				if ((del = mbox_downloads_delegate(inst,
+				if ((del = avbox_window_delegate(inst->window,
 					mbox_downloads_removeitem, &ctx)) == NULL) {
 					LOG_VPRINT_ERROR("Could not remove entry: %s",
 						strerror(errno));
@@ -380,7 +354,7 @@ mbox_downloads_populatelistasync(void *data)
 	}
 
 	/* update the window from the main thread */
-	if ((del = mbox_downloads_delegate(inst,
+	if ((del = avbox_window_delegate(inst->window,
 		mbox_downloads_updatewindow, inst->window)) == NULL) {
 		LOG_VPRINT_ERROR("Could not update window: %s",
 			strerror(errno));
@@ -456,8 +430,8 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 			avbox_timer_cancel(inst->update_timer_id);
 		}
 
-		/* hide the mainmenu window */
-		avbox_input_release(inst->dispatch_object);
+		/* hide the downloads window */
+		avbox_listview_releasefocus(inst->menu);
 		avbox_window_hide(inst->window);
 
 		/* send DISMISSED message */
@@ -475,13 +449,6 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 			avbox_dispatch_getmsgpayload(msg);
 		mbox_downloads_populatelist(timer_data->id, timer_data->data);
 		free(timer_data);
-		break;
-	}
-	case AVBOX_MESSAGETYPE_DELEGATE:
-	{
-		struct avbox_delegate * const del =
-			avbox_dispatch_getmsgpayload(msg);
-		avbox_delegate_execute(del);
 		break;
 	}
 	default:
@@ -530,7 +497,7 @@ mbox_downloads_new(struct avbox_dispatch_object *parent)
 		AVBOX_WNDFLAGS_DECORATED,
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
-		window_width, window_height, NULL, NULL, NULL);
+		window_width, window_height, mbox_downloads_messagehandler, NULL, inst);
 	if (inst->window == NULL) {
 		LOG_PRINT_ERROR("Could not create window!");
 		free(inst);
@@ -541,20 +508,10 @@ mbox_downloads_new(struct avbox_dispatch_object *parent)
 			strerror(errno));
 	}
 
-	if ((inst->dispatch_object = avbox_dispatch_createobject(
-		mbox_downloads_messagehandler, 0, inst)) == NULL) {
-		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
-			strerror(errno));
-		avbox_window_destroy(inst->window);
-		free(inst);
-		return NULL;
-	}
-
 	/* create a new menu widget inside main window */
-	inst->menu = avbox_listview_new(inst->window, inst->dispatch_object);
+	inst->menu = avbox_listview_new(inst->window, avbox_window_getobject(inst->window));
 	if (inst->menu == NULL) {
 		LOG_PRINT_ERROR("Could not create listview!");
-		avbox_dispatch_destroyobject(inst->dispatch_object);
 		avbox_window_destroy(inst->window);
 		free(inst);
 		return NULL;
@@ -583,7 +540,8 @@ mbox_downloads_show(struct mbox_downloads * const inst)
 	tv.tv_sec = 2;
 	tv.tv_nsec = 0;
 	inst->update_timer_id = avbox_timer_register(&tv,
-		AVBOX_TIMER_TYPE_AUTORELOAD | AVBOX_TIMER_MESSAGE, inst->dispatch_object, NULL, inst);
+		AVBOX_TIMER_TYPE_AUTORELOAD | AVBOX_TIMER_MESSAGE,
+		avbox_window_getobject(inst->window), NULL, inst);
 	if (inst->update_timer_id == -1) {
 		avbox_window_hide(inst->window);
 		return -1;
@@ -591,6 +549,7 @@ mbox_downloads_show(struct mbox_downloads * const inst)
 
 	/* show the menu widget and run it's input loop */
 	if (avbox_listview_focus(inst->menu) == -1) {
+		avbox_listview_releasefocus(inst->menu);
 		avbox_window_hide(inst->window);
 		return -1;
 	}
@@ -617,7 +576,7 @@ mbox_downloads_destroy(struct mbox_downloads * const inst)
 	}
 
 	if (avbox_window_isvisible(inst->window)) {
-		avbox_input_release(inst->dispatch_object);
+		avbox_listview_releasefocus(inst->menu);
 		avbox_window_hide(inst->window);
 	}
 	avbox_listview_enumitems(inst->menu, mbox_downloads_freeitems, NULL);

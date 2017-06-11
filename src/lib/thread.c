@@ -252,7 +252,7 @@ avbox_thread_pick(void)
  * Delegate a function call to a thread.
  */
 struct avbox_delegate *
-avbox_thread_delegate(avbox_delegate_func func, void * arg)
+avbox_thread_delegate(avbox_delegate_fn func, void * arg)
 {
 	struct avbox_delegate *del;
 	struct avbox_thread *thread = NULL;

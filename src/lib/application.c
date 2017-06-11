@@ -190,7 +190,7 @@ free_kernel_args(int argc, char **argv)
  * This function is thread safe.
  */
 struct avbox_delegate*
-avbox_application_delegate(avbox_delegate_func func, void *arg)
+avbox_application_delegate(avbox_delegate_fn func, void *arg)
 {
 	struct avbox_delegate *del;
 

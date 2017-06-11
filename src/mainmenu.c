@@ -48,6 +48,7 @@ struct mbox_mainmenu
 static void
 mbox_mainmenu_dismiss(struct mbox_mainmenu *inst)
 {
+	avbox_listview_releasefocus(inst->menu);
 	avbox_window_hide(inst->window);
 
 	/* send dismissed message to parent */

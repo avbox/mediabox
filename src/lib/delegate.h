@@ -2,10 +2,18 @@
 #define __AVBOX_DELEGATE_H__
 
 
-typedef void* (*avbox_delegate_func)(void *args);
+typedef void* (*avbox_delegate_fn)(void *args);
 
 
 struct avbox_delegate;
+
+
+/**
+ * Free a delegate. This only needs to be called when you need
+ * to destroy a delegate before it is executed.
+ */
+void
+avbox_delegate_destroy(struct avbox_delegate * const delegate);
 
 
 /**
@@ -34,7 +42,7 @@ avbox_delegate_wait(struct avbox_delegate *delegate, void **result);
  * Create new delegate.
  */
 struct avbox_delegate *
-avbox_delegate_new(avbox_delegate_func func, void *arg);
+avbox_delegate_new(avbox_delegate_fn func, void *arg);
 
 
 /**

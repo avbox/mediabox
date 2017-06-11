@@ -507,6 +507,7 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 				DEBUG_PRINT("library", "Play succeeded. Closing");
 
 				/* hide window */
+				avbox_listview_releasefocus(inst->menu);
 				avbox_window_hide(inst->window);
 
 				/* send dismissed message */
@@ -534,6 +535,7 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 			mbox_library_loadlist(inst, inst->dotdot);
 		} else {
 			/* hide window */
+			avbox_listview_releasefocus(inst->menu);
 			avbox_window_hide(inst->window);
 
 			DEBUG_PRINT("library", "Sending DISMISSED message");
@@ -656,7 +658,6 @@ mbox_library_destroy(struct mbox_library * const inst)
 	}
 
 	if (avbox_window_isvisible(inst->window)) {
-		avbox_input_release(inst->dispatch_object);
 		avbox_window_hide(inst->window);
 	}
 

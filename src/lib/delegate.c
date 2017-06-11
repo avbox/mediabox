@@ -11,7 +11,7 @@ struct avbox_delegate
 {
 	pthread_mutex_t lock;
 	pthread_cond_t cond;
-	avbox_delegate_func func;
+	avbox_delegate_fn func;
 	void *arg;
 	void *result;
 	int finished;
@@ -72,10 +72,21 @@ avbox_delegate_wait(struct avbox_delegate *delegate, void **result)
 
 
 /**
+ * Free a delegate. This only needs to be called when you need
+ * to destroy a delegate before it is executed.
+ */
+void
+avbox_delegate_destroy(struct avbox_delegate * const delegate)
+{
+	free(delegate);
+}
+
+
+/**
  * Dispatch a function call to the main thread.
  */
 struct avbox_delegate*
-avbox_delegate_new(avbox_delegate_func func, void *arg)
+avbox_delegate_new(avbox_delegate_fn func, void *arg)
 {
 	struct avbox_delegate * del;
 
