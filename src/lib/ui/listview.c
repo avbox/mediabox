@@ -397,13 +397,13 @@ avbox_listview_messagehandler(void *context, struct avbox_message *msg)
 		}
 		case MBI_EVENT_ENTER:
 		{
-			DEBUG_PRINT("listview", "Sending SELECTED message");
-
-			/* send SELECTED message to parent */
-			if (avbox_dispatch_sendmsg(-1, &inst->notify_object,
-				AVBOX_MESSAGETYPE_SELECTED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
-				LOG_VPRINT_ERROR("Could not send selected message: %s",
-					strerror(errno));
+			if (inst->selected != NULL) {
+				/* send SELECTED message to parent */
+				if (avbox_dispatch_sendmsg(-1, &inst->notify_object,
+					AVBOX_MESSAGETYPE_SELECTED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
+					LOG_VPRINT_ERROR("Could not send selected message: %s",
+						strerror(errno));
+				}
 			}
 			break;
 		}
