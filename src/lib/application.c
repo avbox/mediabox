@@ -39,10 +39,9 @@ LISTABLE_STRUCT(avbox_application_subscriber,
 );
 
 
-static int quit = 0;
 static int pid1 = 0;
 static int result = 0;
-static struct avbox_dispatch_object *dispatch_object;
+static struct avbox_object *dispatch_object;
 static LIST subscribers;
 
 
@@ -201,7 +200,7 @@ avbox_application_delegate(avbox_delegate_fn func, void *arg)
 	}
 
 	/* send delegate to the main thread */
-	if (avbox_dispatch_sendmsg(-1, &dispatch_object,
+	if (avbox_object_sendmsg(&dispatch_object,
 		AVBOX_MESSAGETYPE_DELEGATE, AVBOX_DISPATCH_UNICAST, del) == NULL) {
 	}
 
@@ -230,7 +229,7 @@ avbox_application_msghandler(void *context, struct avbox_message *msg)
 		avbox_delegate_execute(del);
 		break;
 	}
-	case AVBOX_MESSAGETYPE_QUIT:
+	case AVBOX_MESSAGETYPE_DESTROY:
 	{
 		struct avbox_application_subscriber *subscriber;
 
@@ -241,7 +240,11 @@ avbox_application_msghandler(void *context, struct avbox_message *msg)
 		LIST_FOREACH_SAFE(struct avbox_application_subscriber*, subscriber, &subscribers, {
 			subscriber->handler(subscriber->context, AVBOX_APPEVENT_QUIT);
 		});
-		quit = 1;
+		break;
+	}
+	case AVBOX_MESSAGETYPE_CLEANUP:
+	{
+		avbox_dispatch_close();
 		break;
 	}
 	default:
@@ -451,11 +454,13 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 int
 avbox_application_run(void)
 {
+	int quit = 0;
+
 	DEBUG_PRINT("application", "Running application");
 
 	/* create dispatch object */
-	if ((dispatch_object = avbox_dispatch_createobject(
-		avbox_application_msghandler, 0, NULL)) == NULL) {
+	if ((dispatch_object = avbox_object_new(
+		avbox_application_msghandler, NULL)) == NULL) {
 		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 			strerror(errno));
 		return -1;
@@ -466,7 +471,7 @@ avbox_application_run(void)
 		signal(SIGHUP, signal_handler) == SIG_ERR ||
 		signal(SIGINT, signal_handler) == SIG_ERR) {
 		LOG_PRINT_ERROR("Could not set signal handlers");
-		avbox_dispatch_destroyobject(dispatch_object);
+		avbox_object_destroy(dispatch_object);
 		dispatch_object = NULL;
 		return -1;
 	}
@@ -478,6 +483,7 @@ avbox_application_run(void)
 		if ((msg = avbox_dispatch_getmsg()) == NULL) {
 			switch (errno) {
 			case EAGAIN: continue;
+			case ESHUTDOWN: quit = 1; continue;
 			default:
 				DEBUG_VABORT("application", "Unexpected error: %s (%i)",
 					strerror(errno), errno);
@@ -494,10 +500,6 @@ avbox_application_run(void)
 		signal(SIGINT, SIG_DFL) == SIG_ERR) {
 		LOG_PRINT_ERROR("Could not uninstall signal handlers");
 	}
-
-	/* destroy dispatch object */
-	avbox_dispatch_destroyobject(dispatch_object);
-	dispatch_object = NULL;
 
 	/* cleanup */
 	avbox_audiostream_shutdown();
@@ -551,11 +553,6 @@ int
 avbox_application_quit(int status)
 {
 	result = status;
-	if (avbox_dispatch_sendmsg(-1, &dispatch_object, AVBOX_MESSAGETYPE_QUIT,
-		AVBOX_DISPATCH_UNICAST, NULL) == NULL) {
-		LOG_VPRINT_ERROR("Could not send QUIT message: %s",
-			strerror(errno));
-		return -1;
-	}
+	avbox_object_destroy(dispatch_object);
 	return 0;
 }

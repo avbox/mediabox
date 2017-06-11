@@ -95,15 +95,15 @@ mbox_overlay_draw(struct avbox_window *window)
 	avbox_window_clear(window);
 	avbox_window_setcolor(window, AVBOX_COLOR(0xffffffff));
 	avbox_window_setbgcolor(window, AVBOX_COLOR(0x0000ffbf));
-	avbox_window_roundrectangle(window, &rect, 2);
+	avbox_window_roundrectangle(window, &rect, 2, 5);
 
 	/* draw the bar */
-	avbox_window_roundrectangle(window, &bar_rect, 2);
+	avbox_window_roundrectangle(window, &bar_rect, 2, 10);
 	if (inst->position > 0 && inst->duration > 0) {
 		bar_rect.w = (bar_rect.w * ((inst->position * 100) /
 			inst->duration)) / 100;
 		avbox_window_setbgcolor(window, AVBOX_COLOR(0xffffffff));
-		avbox_window_roundrectangle(window, &bar_rect, 2);
+		avbox_window_roundrectangle(window, &bar_rect, 2, 10);
 	}
 
 	if ((context = avbox_window_cairo_begin(window)) != NULL) {
@@ -114,6 +114,15 @@ mbox_overlay_draw(struct avbox_window *window)
 		/* draw the icon */
 		switch (inst->state) {
 		case MBOX_OVERLAY_STATE_READY:
+		{
+			cairo_move_to(context, 10, 10);
+			cairo_line_to(context, 10, rect.h - 15);
+			cairo_line_to(context, 40, rect.h - 15);
+			cairo_line_to(context, 40, 10);
+			cairo_line_to(context, 10, 10);
+			cairo_fill(context);
+			break;
+		}
 		case MBOX_OVERLAY_STATE_PLAYING:
 		{
 			cairo_move_to(context, 10, 10);
@@ -269,6 +278,9 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 			if (inst->duration_timer != -1) {
 				avbox_timer_cancel(inst->duration_timer);
 				inst->duration_timer = -1;
+				if (avbox_window_isvisible(inst->window)) {
+					avbox_window_hide(inst->window);
+				}
 			}
 			mbox_overlay_setstate(inst, MBOX_OVERLAY_STATE_READY);
 			break;
@@ -350,6 +362,27 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 		free(data);
 		break;
 	}
+	case AVBOX_MESSAGETYPE_DESTROY:
+		if (inst->dismiss_timer != -1) {
+			avbox_timer_cancel(inst->dismiss_timer);
+			inst->dismiss_timer = -1;
+		}
+		if (inst->duration_timer != -1) {
+			avbox_timer_cancel(inst->duration_timer);
+			inst->duration_timer = -1;
+		}
+		if (inst->player != NULL) {
+			if (avbox_player_unsubscribe(inst->player,
+				avbox_window_getobject(inst->window)) == -1) {
+				LOG_VPRINT_ERROR("Could not unsubscribe from player events: %s",
+					strerror(errno));
+			}
+		}
+		free(inst->title);
+		break;
+	case AVBOX_MESSAGETYPE_CLEANUP:
+		free(inst);
+		break;
 	default:
 		DEBUG_VPRINT("overlay", "Invalid message type: %d",
 			msgtype);
@@ -437,6 +470,7 @@ mbox_overlay_new(struct avbox_player *player)
 	inst->player = player;
 	inst->duration = 0;
 	inst->position = 0;
+	inst->state = MBOX_OVERLAY_STATE_READY;
 
 	return inst;
 }
@@ -448,23 +482,5 @@ mbox_overlay_new(struct avbox_player *player)
 void
 mbox_overlay_destroy(struct mbox_overlay * const inst)
 {
-	DEBUG_PRINT("overlay", "Destroying overlay");
-	if (inst->dismiss_timer != -1) {
-		avbox_timer_cancel(inst->dismiss_timer);
-		inst->dismiss_timer = -1;
-	}
-	if (inst->duration_timer != -1) {
-		avbox_timer_cancel(inst->duration_timer);
-		inst->duration_timer = -1;
-	}
-	if (inst->player != NULL) {
-		if (avbox_player_unsubscribe(inst->player, 
-			avbox_window_getobject(inst->window)) == -1) {
-			LOG_VPRINT_ERROR("Could not unsubscribe from player events: %s",
-				strerror(errno));
-		}
-	}
 	avbox_window_destroy(inst->window);
-	free(inst->title);
-	free(inst);
 }

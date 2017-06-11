@@ -9,7 +9,7 @@ struct mbox_mediasearch;
  * Initialize the MediaBox "Find Media" dialog.
  */
 struct mbox_mediasearch*
-mbox_mediasearch_new(struct avbox_dispatch_object *parent);
+mbox_mediasearch_new(struct avbox_object *parent);
 
 
 int

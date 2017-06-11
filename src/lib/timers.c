@@ -33,7 +33,7 @@ LISTABLE_STRUCT(avbox_timer_state,
 	struct timespec interval;
 	struct timespec value;
 	enum avbox_timer_flags flags;
-	struct avbox_dispatch_object *message_object;
+	struct avbox_object *message_object;
 	avbox_timer_callback callback;
 );
 
@@ -92,7 +92,7 @@ avbox_timers_thread(void *arg)
 							LOG_PRINT_ERROR("Could not send TIMER message: Out of memory");
 						} else {
 							memcpy(payload, &tmr->public, sizeof(struct avbox_timer_data));
-							if (avbox_dispatch_sendmsg(-1, &tmr->message_object,
+							if (avbox_object_sendmsg(&tmr->message_object,
 								AVBOX_MESSAGETYPE_TIMER, AVBOX_DISPATCH_UNICAST, payload) == NULL) {
 								LOG_VPRINT_ERROR("Could not send notification message: %s",
 									strerror(errno));
@@ -179,7 +179,7 @@ avbox_timer_cancel(int timer_id)
  */
 int
 avbox_timer_register(struct timespec *interval,
-	enum avbox_timer_flags flags, struct avbox_dispatch_object *msgobj, avbox_timer_callback func, void *data)
+	enum avbox_timer_flags flags, struct avbox_object *msgobj, avbox_timer_callback func, void *data)
 {
 	struct avbox_timer_state *timer;
 

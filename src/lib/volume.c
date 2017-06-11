@@ -21,7 +21,7 @@
 #include "dispatch.h"
 
 
-static struct avbox_dispatch_object *msgobj;
+static struct avbox_object *msgobj;
 static const char *card = "default";
 static const char *selem_name = "Master";
 
@@ -145,7 +145,7 @@ avbox_volume_set(int volume)
 
 	if (msgobj != NULL) {
 		vol = volume;
-		if (avbox_dispatch_sendmsg(-1, &msgobj, AVBOX_MESSAGETYPE_VOLUME,
+		if (avbox_object_sendmsg(&msgobj, AVBOX_MESSAGETYPE_VOLUME,
 			AVBOX_DISPATCH_UNICAST, &vol) == NULL) {
 			LOG_VPRINT_ERROR("Could not send volume changed message: %s",
 				strerror(errno));
@@ -164,7 +164,7 @@ end:
 
 
 int
-avbox_volume_init(struct avbox_dispatch_object *obj)
+avbox_volume_init(struct avbox_object *obj)
 {
 	assert(msgobj == NULL);
 

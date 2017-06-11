@@ -17,7 +17,7 @@ avbox_volume_set(int volume);
 
 
 int
-avbox_volume_init(struct avbox_dispatch_object *msgobj);
+avbox_volume_init(struct avbox_object *msgobj);
 
 
 void

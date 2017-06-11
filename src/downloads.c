@@ -53,7 +53,7 @@ struct mbox_downloads
 {
 	struct avbox_window *window;
 	struct avbox_listview *menu;
-	struct avbox_dispatch_object *parent_object;
+	struct avbox_object *parent_object;
 	struct avbox_delegate *worker;
 	int update_timer_id;
 	LIST downloads;
@@ -435,7 +435,7 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 		avbox_window_hide(inst->window);
 
 		/* send DISMISSED message */
-		if (avbox_dispatch_sendmsg(-1, &inst->parent_object,
+		if (avbox_object_sendmsg(&inst->parent_object,
 			AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
 			LOG_VPRINT_ERROR("Could not send DISMISSED message: %s",
 				strerror(errno));
@@ -451,6 +451,35 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 		free(timer_data);
 		break;
 	}
+	case AVBOX_MESSAGETYPE_DESTROY:
+	{
+		if (inst->update_timer_id != -1) {
+			DEBUG_PRINT("downloads", "Cancelling update timer");
+			avbox_timer_cancel(inst->update_timer_id);
+		}
+
+		/* if the worker is still running wait for it
+		 * to exit */
+		if (inst->worker != NULL) {
+			DEBUG_PRINT("downloads", "Waiting for worker");
+			avbox_delegate_wait(inst->worker, NULL);
+		}
+
+		if (avbox_window_isvisible(inst->window)) {
+			avbox_listview_releasefocus(inst->menu);
+			avbox_window_hide(inst->window);
+		}
+		if (inst->menu != NULL) {
+			avbox_listview_enumitems(inst->menu, mbox_downloads_freeitems, NULL);
+			avbox_listview_destroy(inst->menu);
+		}
+		break;
+	}
+	case AVBOX_MESSAGETYPE_CLEANUP:
+	{
+		free(inst);
+		break;
+	}
 	default:
 		return AVBOX_DISPATCH_CONTINUE;
 	}
@@ -462,7 +491,7 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
  * Initialize the MediaBox downloads list
  */
 struct mbox_downloads*
-mbox_downloads_new(struct avbox_dispatch_object *parent)
+mbox_downloads_new(struct avbox_object *parent)
 {
 	int xres, yres;
 	int font_height;
@@ -476,6 +505,7 @@ mbox_downloads_new(struct avbox_dispatch_object *parent)
 		return NULL;
 	}
 
+	memset(inst, 0, sizeof(struct mbox_downloads));
 	LIST_INIT(&inst->downloads);
 
 	/* set height according to font size */
@@ -561,26 +591,5 @@ mbox_downloads_show(struct mbox_downloads * const inst)
 void
 mbox_downloads_destroy(struct mbox_downloads * const inst)
 {
-	DEBUG_PRINT("downloads", "Destroying downloads dialog");
-
-	if (inst->update_timer_id != -1) {
-		DEBUG_PRINT("downloads", "Cancelling update timer");
-		avbox_timer_cancel(inst->update_timer_id);
-	}
-
-	/* if the worker is still running wait for it
-	 * to exit */
-	if (inst->worker != NULL) {
-		DEBUG_PRINT("downloads", "Waiting for worker");
-		avbox_delegate_wait(inst->worker, NULL);
-	}
-
-	if (avbox_window_isvisible(inst->window)) {
-		avbox_listview_releasefocus(inst->menu);
-		avbox_window_hide(inst->window);
-	}
-	avbox_listview_enumitems(inst->menu, mbox_downloads_freeitems, NULL);
-	avbox_listview_destroy(inst->menu);
 	avbox_window_destroy(inst->window);
-	free(inst);
 }

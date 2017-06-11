@@ -30,8 +30,8 @@ struct mbox_mediasearch
 {
 	struct avbox_window *window;
 	struct avbox_listview *menu;
-	struct avbox_dispatch_object *dispatch_object;
-	struct avbox_dispatch_object *parent_object;
+	struct avbox_object *dispatch_object;
+	struct avbox_object *parent_object;
 	int state;
 	char *terms;
 	char *last_terms;
@@ -470,7 +470,7 @@ mbox_mediasearch_msghandler(void *context, struct avbox_message *msg)
 			avbox_window_update(inst->window);
 
 			/* send DISMISSED message */
-			if (avbox_dispatch_sendmsg(-1, &inst->parent_object,
+			if (avbox_object_sendmsg(&inst->parent_object,
 				AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
 				LOG_PRINT_ERROR("Could not send DISMISSED message!");
 			}
@@ -492,7 +492,7 @@ mbox_mediasearch_msghandler(void *context, struct avbox_message *msg)
  * Initialize the MediaBox mediasearch tool.
  */
 struct mbox_mediasearch*
-mbox_mediasearch_new(struct avbox_dispatch_object *parent)
+mbox_mediasearch_new(struct avbox_object *parent)
 {
 	int xres, yres;
 	int font_height;
@@ -553,8 +553,8 @@ mbox_mediasearch_new(struct avbox_dispatch_object *parent)
 	}
 
 	/* create dispatch object */
-	if ((inst->dispatch_object = avbox_dispatch_createobject(
-		mbox_mediasearch_msghandler, 0, inst)) == NULL) {
+	if ((inst->dispatch_object = avbox_object_new(
+		mbox_mediasearch_msghandler, inst)) == NULL) {
 		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 			strerror(errno));
 		avbox_window_destroy(inst->window);

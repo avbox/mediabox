@@ -178,7 +178,7 @@ avbox_window_fillrectangle(struct avbox_window *window, int x, int y, int w, int
  * Draw a round rectangle
  */
 int
-avbox_window_roundrectangle(struct avbox_window * window, struct avbox_rect *rect, int border_width);
+avbox_window_roundrectangle(struct avbox_window * window, struct avbox_rect *rect, int border_width, int rad);
 
 
 int
@@ -188,7 +188,7 @@ avbox_window_settitle(struct avbox_window *window, const char *title);
 /**
  * Gets the window's dispatch object.
  */
-struct avbox_dispatch_object*
+struct avbox_object*
 avbox_window_getobject(struct avbox_window * const window);
 
 

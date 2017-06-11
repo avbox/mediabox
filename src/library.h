@@ -15,7 +15,7 @@ struct mbox_library;
  *Initialize the MediaBox menu
  */
 struct mbox_library*
-mbox_library_new(struct avbox_dispatch_object *parent);
+mbox_library_new(struct avbox_object *parent);
 
 
 int

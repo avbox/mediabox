@@ -10,7 +10,7 @@ struct mbox_about;
  * Initialize the MediaBox about box.
  */
 struct mbox_about*
-mbox_about_new(struct avbox_dispatch_object *parent);
+mbox_about_new(struct avbox_object *parent);
 
 
 int

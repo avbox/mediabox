@@ -33,7 +33,7 @@ LISTABLE_STRUCT(avbox_dispatch_queue,
 /**
  * Represents a dispatch object.
  */
-LISTABLE_STRUCT(avbox_dispatch_object,
+LISTABLE_STRUCT(avbox_object,
 	pthread_mutex_t lock;
 	unsigned int refs;
 	int destroyed;
@@ -48,7 +48,7 @@ LISTABLE_STRUCT(avbox_dispatch_object,
  */
 struct avbox_message
 {
-	struct avbox_dispatch_object** dest;
+	struct avbox_object** dest;
 	int flags;
 	int type;
 	void *payload;
@@ -98,8 +98,8 @@ avbox_dispatch_getqueue(const pid_t tid)
 /**
  * Reference a dispatch object.
  */
-static struct avbox_dispatch_object*
-avbox_dispatch_refobject(struct avbox_dispatch_object *obj)
+static struct avbox_object*
+avbox_object_ref(struct avbox_object *obj)
 {
 	assert(obj != NULL);
 	ATOMIC_INC(&obj->refs);
@@ -111,7 +111,7 @@ avbox_dispatch_refobject(struct avbox_dispatch_object *obj)
  * Unreference a dispatch object.
  */
 static void
-avbox_dispatch_unrefobject(struct avbox_dispatch_object *obj)
+avbox_object_unref(struct avbox_object *obj)
 {
 	ATOMIC_DEC(&obj->refs);
 	if (obj->refs == 0) {
@@ -137,9 +137,9 @@ avbox_dispatch_freemsg(struct avbox_message *msg)
 {
 	assert(msg != NULL);
 	if (msg->dest != NULL) {
-		struct avbox_dispatch_object **dest = msg->dest;
+		struct avbox_object **dest = msg->dest;
 		while (*dest != NULL) {
-			avbox_dispatch_unrefobject(*dest++);
+			avbox_object_unref(*dest++);
 		}
 		free(msg->dest);
 	}
@@ -148,11 +148,47 @@ avbox_dispatch_freemsg(struct avbox_message *msg)
 
 
 /**
+ * Message handler
+ */
+static int
+avbox_object_handler(struct avbox_object *object, struct avbox_message * const msg)
+{
+	switch (msg->type) {
+	case AVBOX_MESSAGETYPE_DESTROY:
+	{
+		ASSERT(object != NULL);
+		(void) object->handler(object->context, msg);
+
+		if (avbox_object_sendmsg(&object,
+			AVBOX_MESSAGETYPE_CLEANUP, AVBOX_DISPATCH_UNICAST, NULL) == NULL) {
+			LOG_VPRINT_ERROR("Could not send CLEANUP message: %s",
+				strerror(errno));
+		}
+		return AVBOX_DISPATCH_OK;
+	}
+	case AVBOX_MESSAGETYPE_CLEANUP:
+	{
+		ASSERT(object != NULL);
+		(void) object->handler(object->context, msg);
+		pthread_mutex_lock(&lock);
+		object->destroyed = 1;
+		LIST_REMOVE(object);
+		pthread_mutex_unlock(&lock);
+		avbox_object_unref(object);
+		return AVBOX_DISPATCH_OK;
+	}
+	default:
+		return object->handler(object->context, msg);
+	}
+}
+
+
+/**
  * Swap two endpoints.
  */
 void
-avbox_dispatch_swapobject(struct avbox_dispatch_object *a,
-	struct avbox_dispatch_object *b)
+avbox_dispatch_swapobject(struct avbox_object *a,
+	struct avbox_object *b)
 {
 	pthread_mutex_lock(&lock);
 	LIST_SWAP(a, b);
@@ -248,40 +284,14 @@ avbox_dispatch_peekmsg(void)
 
 
 /**
- * Copy destination list.
- */
-#if 0
-static struct avbox_dispatch_object **
-avbox_dispatch_destall()
-{
-	int i = 0;
-	struct avbox_dispatch_object **out = NULL, *obj;
-	pthread_mutex_lock(&lock);
-	if ((out = malloc((LIST_SIZE(&objects) + 1) *
-		sizeof(struct avbox_dispatch_object*))) == NULL) {
-		assert(errno == ENOMEM);
-		goto end;
-	}
-	LIST_FOREACH(struct avbox_dispatch_object*, obj, &objects) {
-		out[i++] = obj;
-	}
-	out[i] = NULL;
-end:
-	pthread_mutex_unlock(&lock);
-	return out;
-}
-#endif
-
-
-/**
  * Clones the list of destination object and reference
  * each object on the list.
  */
-static struct avbox_dispatch_object **
-avbox_dispatch_destdup(struct avbox_dispatch_object **dest)
+static struct avbox_object **
+avbox_dispatch_destdup(struct avbox_object **dest)
 {
 	int c = 0;
-	struct avbox_dispatch_object **pdest = dest, **out;
+	struct avbox_object **pdest = dest, **out;
 	assert(dest != NULL);
 	assert(*dest != NULL);
 
@@ -292,7 +302,7 @@ avbox_dispatch_destdup(struct avbox_dispatch_object **dest)
 	}
 
 	/* allocate memory */
-	if ((out = malloc(++c * sizeof(struct avbox_dispatch_object*))) == NULL) {
+	if ((out = malloc(++c * sizeof(struct avbox_object*))) == NULL) {
 		assert(errno == ENOMEM);
 		return NULL;
 	}
@@ -300,7 +310,7 @@ avbox_dispatch_destdup(struct avbox_dispatch_object **dest)
 	c = 0;
 	pdest = dest;
 	while (*pdest != NULL) {
-		out[c++] = avbox_dispatch_refobject(*pdest++);
+		out[c++] = avbox_object_ref(*pdest++);
 	}
 	out[c] = NULL;
 	return out;
@@ -311,8 +321,8 @@ avbox_dispatch_destdup(struct avbox_dispatch_object **dest)
  * Sends a message.
  */
 struct avbox_message*
-avbox_dispatch_sendmsg(const int tid, struct avbox_dispatch_object **dest,
-	int type, int flags, void *payload)
+avbox_object_sendmsg(struct avbox_object **dest,
+	int type, int flags, void * const payload)
 {
 	int cast;
 	struct avbox_message *msg;
@@ -337,20 +347,20 @@ avbox_dispatch_sendmsg(const int tid, struct avbox_dispatch_object **dest,
 	switch (cast) {
 	case AVBOX_DISPATCH_UNICAST:
 	{
-		if ((msg->dest = malloc(sizeof(struct avbox_dispatch_object*) * 2)) == NULL) {
+		if ((msg->dest = malloc(sizeof(struct avbox_object*) * 2)) == NULL) {
 			assert(errno == ENOMEM);
 			free(msg);
 			return NULL;
 		}
-		msg->dest[0] = avbox_dispatch_refobject(*dest);
+		msg->dest[0] = avbox_object_ref(*dest);
 		msg->dest[1] = NULL;
 		q = (*dest)->q;
 		break;
 	}
 	case AVBOX_DISPATCH_ANYCAST:
 	case AVBOX_DISPATCH_MULTICAST:
-		assert(dest != NULL);
-		assert(tid == -1);
+	{
+		ASSERT(dest != NULL);
 		if ((msg->dest = avbox_dispatch_destdup(dest)) == NULL) {
 			assert(errno == ENOMEM);
 			free(msg);
@@ -358,19 +368,6 @@ avbox_dispatch_sendmsg(const int tid, struct avbox_dispatch_object **dest,
 		}
 		assert(*msg->dest != NULL);
 		q = (*msg->dest)->q;
-		break;
-	case AVBOX_DISPATCH_BROADCAST:
-	{
-		assert(dest == NULL);
-		assert(tid != -1);
-
-		/* get the queue for the target thread */
-		if ((q = avbox_dispatch_getqueue(tid)) == NULL) {
-			assert(errno == ENOENT);
-			free(msg);
-			return NULL;
-		}
-
 		break;
 	}
 	default:
@@ -399,19 +396,19 @@ avbox_dispatch_sendmsg(const int tid, struct avbox_dispatch_object **dest,
  * EINVAL - The queue for this thread has not been initialized.
  * ENOMEM - Out of memory.
  */
-struct avbox_dispatch_object*
-avbox_dispatch_createobject(avbox_message_handler handler, int flags, void *context)
+struct avbox_object*
+avbox_object_new(avbox_message_handler handler, void *context)
 {
-	struct avbox_dispatch_object *obj;
+	struct avbox_object *obj;
 	struct avbox_dispatch_queue *q;
 	pthread_mutexattr_t lockattr;
 
 	if ((q = avbox_dispatch_getqueue(gettid())) == NULL) {
-		assert(errno == EINVAL);
+		assert(errno == ENOENT);
 		return NULL;
 	}
 
-	if ((obj = malloc(sizeof(struct avbox_dispatch_object))) == NULL) {
+	if ((obj = malloc(sizeof(struct avbox_object))) == NULL) {
 		assert(errno == ENOMEM);
 		return NULL;
 	}
@@ -444,14 +441,14 @@ avbox_dispatch_createobject(avbox_message_handler handler, int flags, void *cont
  * Destroy a dispatch object.
  */
 void
-avbox_dispatch_destroyobject(struct avbox_dispatch_object *obj)
+avbox_object_destroy(struct avbox_object * object)
 {
-	assert(obj != NULL);
-	pthread_mutex_lock(&lock);
-	obj->destroyed = 1;
-	LIST_REMOVE(obj);
-	pthread_mutex_unlock(&lock);
-	avbox_dispatch_unrefobject(obj);
+	ASSERT(object != NULL);
+	if (avbox_object_sendmsg(&object,
+		AVBOX_MESSAGETYPE_DESTROY, AVBOX_DISPATCH_UNICAST, NULL) == NULL) {
+		LOG_VPRINT_ERROR("Could not send DESTROY message: %s",
+			strerror(errno));
+	}
 }
 
 
@@ -499,6 +496,22 @@ avbox_dispatch_init()
 
 
 /**
+ * Close the dispatch queue.
+ */
+void
+avbox_dispatch_close(void)
+{
+	struct avbox_dispatch_queue *q;
+	/* get the thread's queue */
+	if ((q = avbox_dispatch_getqueue(gettid())) == NULL) {
+		LOG_PRINT_ERROR("Queue not initialized!");
+		abort();
+	}
+	avbox_queue_close(q->queue);
+}
+
+
+/**
  * Destroys the queue for the current thread.
  */
 void
@@ -525,6 +538,8 @@ avbox_dispatch_shutdown(void)
 	 * the payload of flushed messages */
 	avbox_queue_close(q->queue);
 	while ((msg = avbox_queue_get(q->queue)) != NULL) {
+		DEBUG_VPRINT("dispatch", "LEAK: Leftover message (type=%i)",
+			msg->type);
 		avbox_dispatch_freemsg(msg);
 	}
 	avbox_queue_destroy(q->queue);
@@ -553,7 +568,7 @@ avbox_dispatch_dispatchmsg(struct avbox_message *msg)
 	switch (cast) {
 	case AVBOX_DISPATCH_ANYCAST:
 	{
-		struct avbox_dispatch_object **dest = msg->dest;
+		struct avbox_object **dest = msg->dest;
 		assert(dest != NULL);
 		while (*dest != NULL) {
 			int res;
@@ -563,7 +578,7 @@ avbox_dispatch_dispatchmsg(struct avbox_message *msg)
 
 			pthread_mutex_lock(&(*dest)->lock);
 			if (!(*dest)->destroyed) {
-				if ((res = (*dest)->handler((*dest)->context, msg)) == AVBOX_DISPATCH_OK) {
+				if ((res = avbox_object_handler(*dest, msg)) == AVBOX_DISPATCH_OK) {
 					pthread_mutex_unlock(&(*dest)->lock);
 					break;
 				}
@@ -584,7 +599,7 @@ avbox_dispatch_dispatchmsg(struct avbox_message *msg)
 		assert(*msg->dest != NULL);
 		pthread_mutex_lock(&(*msg->dest)->lock);
 		if (!(*msg->dest)->destroyed) {
-			(void) (*msg->dest)->handler((*msg->dest)->context, msg);
+			(void) avbox_object_handler(*msg->dest, msg);
 		} else {
 			DEBUG_PRINT("dispatch", "Target has been destroyed!");
 		}
@@ -594,34 +609,17 @@ avbox_dispatch_dispatchmsg(struct avbox_message *msg)
 	}
 	case AVBOX_DISPATCH_MULTICAST:
 	{
-		struct avbox_dispatch_object **dest = msg->dest;
+		struct avbox_object **dest = msg->dest;
 		while (*dest != NULL) {
 			pthread_mutex_lock(&(*dest)->lock);
 			if (!(*dest)->destroyed) {
-				(void) (*dest)->handler((*dest)->context, msg);
+				(void) avbox_object_handler(*dest, msg);
 			} else {
 				DEBUG_PRINT("dispatch", "Target has been destroyed!");
 			}
 			pthread_mutex_unlock(&(*dest)->lock);
 			dest++;
 		}
-		avbox_dispatch_freemsg(msg);
-		break;
-	}
-	case AVBOX_DISPATCH_BROADCAST:
-	{
-		const pid_t tid = gettid();
-		struct avbox_dispatch_object *obj;
-		assert(msg->dest == NULL);
-		assert((msg->flags & AVBOX_DISPATCH_BROADCAST) == 0);
-		pthread_mutex_lock(&lock);
-		LIST_FOREACH(struct avbox_dispatch_object*, obj, &objects) {
-			DEBUG_VASSERT("dispatch", obj->q->tid == tid,
-				"Received message for thread %i on thread %i",
-				obj->q->tid, tid);
-			(void) obj->handler(obj->context, msg);
-		}
-		pthread_mutex_unlock(&lock);
 		avbox_dispatch_freemsg(msg);
 		break;
 	}

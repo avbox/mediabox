@@ -49,7 +49,7 @@ LISTABLE_STRUCT(avbox_window_node,
 struct avbox_window
 {
 	struct mbv_surface *surface;
-	struct avbox_dispatch_object *object;
+	struct avbox_object *object;
 	struct avbox_window *content_window;
 	struct avbox_window *parent;
 	struct avbox_window_node *node;
@@ -299,7 +299,7 @@ avbox_window_isvisible(struct avbox_window *window)
 /**
  * Gets the window's dispatch object.
  */
-struct avbox_dispatch_object*
+struct avbox_object*
 avbox_window_getobject(struct avbox_window * const window)
 {
 	assert(window != NULL);
@@ -366,7 +366,8 @@ avbox_window_fillrectangle(struct avbox_window *window, int x, int y, int w, int
  * Draw a round rectangle
  */
 int
-avbox_window_roundrectangle(struct avbox_window * window, struct avbox_rect *rect, int border_width)
+avbox_window_roundrectangle(struct avbox_window * window, struct avbox_rect *rect,
+	int border_width, int rad)
 {
 	cairo_t *cr;
 
@@ -388,7 +389,7 @@ avbox_window_roundrectangle(struct avbox_window * window, struct avbox_rect *rec
 	h = (double) rect->h;
 
 	aspect = 1.0;
-	corner_radius = h / 10.0;
+	corner_radius = h / rad;
 	radius = corner_radius / aspect;
 
 	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
@@ -567,6 +568,48 @@ avbox_window_paintdecor(struct avbox_window * const window)
 }
 
 
+static void
+__avbox_window_cleanup(struct avbox_window * const window)
+{
+	DEBUG_VPRINT("video", "Cleanup for window: %s",
+		window->identifier);
+	ASSERT(window != NULL);
+	ASSERT(window->surface != NULL);
+	ASSERT(window->content_window != NULL);
+	ASSERT(window != &root_window);
+
+	/* if the window is visible hide it before
+	 * destroying it */
+	if (window->visible && window->parent == &root_window) {
+		avbox_window_hide(window);
+	}
+
+	LIST_REMOVE(window->node);
+	free(window->node);
+
+	if (window->title != NULL) {
+		free((void*)window->title);
+	}
+	if (window->content_window != window) {
+		avbox_window_destroy(window->content_window);
+	}
+}
+
+
+static void
+__avbox_window_destroy(struct avbox_window * const window)
+{
+	/* remove the window from the parent's children list */
+	DEBUG_VPRINT("video", "Destroying window: %s",
+		window->identifier);
+	if (window->identifier) {
+		free((void*) window->identifier);
+	}
+	driver.surface_destroy(window->surface);
+	free(window);
+}
+
+
 /**
  * Handle window messages.
  */
@@ -582,8 +625,32 @@ avbox_window_handler(void *context, struct avbox_message * const msg)
 		avbox_delegate_execute(del);
 		return AVBOX_DISPATCH_OK;
 	}
+	case AVBOX_MESSAGETYPE_DESTROY:
+	{
+		DEBUG_VPRINT("video", "Destroying window %s", window->identifier);
+		/* call the user defined destructor */
+		if (window->handler != NULL) {
+			(void) window->handler(window->user_context, msg);
+		}
+		__avbox_window_cleanup(window);
+		return AVBOX_DISPATCH_OK;
+	}
+	case AVBOX_MESSAGETYPE_CLEANUP:
+		DEBUG_VPRINT("video", "Cleanup for window %s",
+			window->identifier);
+		/* call the user defined destructor */
+		if (window->handler != NULL) {
+			(void) window->handler(window->user_context, msg);
+		}
+		__avbox_window_destroy(window);
+		return AVBOX_DISPATCH_OK;
 	default:
-		return window->handler(window->user_context, msg);
+		if (window->handler != NULL) {
+			return window->handler(window->user_context, msg);
+		} else {
+			DEBUG_VABORT("video", "Invalid message %d and no handler!!",
+				avbox_dispatch_getmsgtype(msg));
+		}
 	}
 }
 
@@ -610,7 +677,7 @@ avbox_window_delegate(struct avbox_window * const window,
 	}
 
 	/* send delegate to the main thread */
-	if (avbox_dispatch_sendmsg(-1, &window->object,
+	if (avbox_object_sendmsg(&window->object,
 		AVBOX_MESSAGETYPE_DELEGATE, AVBOX_DISPATCH_UNICAST, del) == NULL) {
 		LOG_VPRINT_ERROR("Could not delegate to window: %s",
 			strerror(errno));
@@ -706,14 +773,16 @@ avbox_window_subwindow(struct avbox_window * const window,
 	}
 
 	/* if a message handler was provided create a dispatch
-	 * object for it */
-	if (msghandler != NULL) {
-		if ((window->object = avbox_dispatch_createobject(
-			avbox_window_handler, 0, window)) == NULL) {
+	 * object for it. We also need a message handler if the
+	 * parent window has it in order to keep the destructor
+	 * semantics the same for windows and subwindows */
+	if (msghandler != NULL || window->object != NULL) {
+		if ((new_window->object = avbox_object_new(
+			avbox_window_handler, new_window)) == NULL) {
 			LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 				strerror(errno));
 			free(window_node);
-			free(window);
+			free(new_window);
 			return NULL;
 		}
 	}
@@ -745,10 +814,6 @@ avbox_window_new(
 
 	/* DEBUG_VPRINT("video", "avbox_window_new(\"%s\")",
 		identifier); */
-
-	DEBUG_ASSERT("video", (msghandler == NULL ||
-		(flags & AVBOX_WNDFLAGS_INPUT) == 0),
-		"Invalid arguments!");
 
 	/* if this is a subwindow invoke a separate
 	 * function for now */
@@ -812,8 +877,8 @@ avbox_window_new(
 	/* if a message handler was provided create a dispatch
 	 * object for it */
 	if (msghandler != NULL) {
-		if ((window->object = avbox_dispatch_createobject(
-			avbox_window_handler, 0, window)) == NULL) {
+		if ((window->object = avbox_object_new(
+			avbox_window_handler, window)) == NULL) {
 			LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 				strerror(errno));
 			free(window_node);
@@ -1129,43 +1194,16 @@ avbox_window_tofront(struct avbox_window *window)
 void
 avbox_window_destroy(struct avbox_window * const window)
 {
-	/* DEBUG_VPRINT("video", "avbox_window_destroy(\"%s\")",
-		window->identifier); */
-
-	assert(window != NULL);
-	assert(window->surface != NULL);
-	assert(window->content_window != NULL);
-	assert(window != &root_window);
-
-	/* if the window is visible hide it before
-	 * destroying it */
-	if (window->visible && window->parent == &root_window) {
-		avbox_window_hide(window);
-	}
-
-	/* remove the window from the parent's children list */
-	LIST_REMOVE(window->node);
-	free(window->node);
-
-	/* destroy the window's dispatch object */
 	if (window->object != NULL) {
-		avbox_dispatch_destroyobject(window->object);
+		DEBUG_VPRINT("video", "Sending DESTROY message for window %s",
+			window->identifier);
+		avbox_object_destroy(window->object);
+	} else {
+		DEBUG_VPRINT("video", "Destroying window %s right away",
+			window->identifier);
+		__avbox_window_cleanup(window);
+		__avbox_window_destroy(window);
 	}
-
-	if (window->title != NULL) {
-		free((void*)window->title);
-	}
-
-	if (window->content_window != window) {
-		avbox_window_destroy(window->content_window);
-	}
-
-	if (window->identifier) {
-		free((void*) window->identifier);
-	}
-
-	driver.surface_destroy(window->surface);
-	free(window);
 }
 
 

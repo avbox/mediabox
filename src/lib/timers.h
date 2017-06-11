@@ -63,7 +63,7 @@ avbox_timer_cancel(int timer_id);
  */
 int
 avbox_timer_register(struct timespec *interval,
-	enum avbox_timer_flags flags, struct avbox_dispatch_object *obj, avbox_timer_callback func, void *data);
+	enum avbox_timer_flags flags, struct avbox_object *obj, avbox_timer_callback func, void *data);
 
 
 /**

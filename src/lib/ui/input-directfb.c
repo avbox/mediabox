@@ -47,8 +47,6 @@ mbi_directfb_event_loop(void *arg)
 			}
 			switch (e.type) {
 			case DIET_KEYPRESS:
-				DEBUG_VPRINT("input-directfb", "Keypress: symbol=%i",
-					e.key_symbol);
 				switch (e.key_symbol) {
 				case DIKS_ESCAPE:       avbox_input_sendevent(MBI_EVENT_BACK); break;
 				case DIKS_RETURN:       avbox_input_sendevent(MBI_EVENT_ENTER); break;

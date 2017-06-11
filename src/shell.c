@@ -35,7 +35,7 @@
 
 
 static int pw = 0, ph = 0;
-static struct avbox_dispatch_object *dispatch_object = NULL;
+static struct avbox_object *dispatch_object = NULL;
 static struct avbox_window *main_window = NULL;
 static struct avbox_window *progress = NULL;
 static struct avbox_progressview *progressbar = NULL;
@@ -63,7 +63,7 @@ mbox_shell_getactiveplayer(void)
 /**
  * Gets the shell's message queue fd.
  */
-struct avbox_dispatch_object *
+struct avbox_object *
 mbox_shell_getqueue(void)
 {
 	return dispatch_object;
@@ -514,7 +514,7 @@ mbox_shell_shutdown(void)
 	}
 
 	avbox_volume_shutdown();
-	avbox_dispatch_destroyobject(dispatch_object);
+	avbox_object_destroy(dispatch_object);
 
 	/* destroy the main window */
 	avbox_window_destroy(main_window);
@@ -744,6 +744,11 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 		}
 		break;
 	}
+	case AVBOX_MESSAGETYPE_DESTROY:
+	case AVBOX_MESSAGETYPE_CLEANUP:
+	{
+		break;
+	}
 	default:
 		DEBUG_VPRINT("shell", "Invalid message type: %i",
 			avbox_dispatch_getmsgtype(msg));
@@ -815,7 +820,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	}
 
 	/* create dispatch object */
-	if ((dispatch_object = avbox_dispatch_createobject(mbox_shell_handler, 0, NULL)) == NULL) {
+	if ((dispatch_object = avbox_object_new(mbox_shell_handler, NULL)) == NULL) {
 		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 			strerror(errno));
 		avbox_player_destroy(player);
@@ -826,7 +831,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	/* initialize the volume control */
 	if (avbox_volume_init(dispatch_object) != 0) {
 		LOG_PRINT_ERROR("Could not initialize volume control!");
-		avbox_dispatch_destroyobject(dispatch_object);
+		avbox_object_destroy(dispatch_object);
 		avbox_player_destroy(player);
 		avbox_window_destroy(main_window);
 		return -1;
@@ -835,7 +840,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	/* subscribe to player notifications */
 	if (avbox_player_subscribe(player, dispatch_object) == -1) {
 		LOG_PRINT_ERROR("Could not reqister notification object");
-		avbox_dispatch_destroyobject(dispatch_object);
+		avbox_object_destroy(dispatch_object);
 		avbox_player_destroy(player);
 		avbox_window_destroy(main_window);
 		return -1;
@@ -845,7 +850,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	if (avbox_application_subscribe(mbox_shell_appevent, NULL) == -1) {
 		LOG_VPRINT_ERROR("Could not subscribe to app events: %s",
 			strerror(errno));
-		avbox_dispatch_destroyobject(dispatch_object);
+		avbox_object_destroy(dispatch_object);
 		avbox_player_destroy(player);
 		avbox_window_destroy(main_window);
 		return -1;
@@ -881,7 +886,7 @@ mbox_shell_reboot(void)
 {
 	if (avbox_gainroot() == 0) {
 		avbox_input_release(dispatch_object);
-		avbox_dispatch_destroyobject(dispatch_object);
+		avbox_object_destroy(dispatch_object);
 		if (system("systemctl stop avmount") != 0) {
 			fprintf(stderr, "shell: systemctl stop avmount failed\n");
 			return;

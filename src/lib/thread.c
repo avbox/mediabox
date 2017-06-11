@@ -23,7 +23,7 @@
 
 
 LISTABLE_STRUCT(avbox_thread,
-	int quit;
+	int running;
 	int busy;
 #ifndef NDEBUG
 	int no;
@@ -32,7 +32,7 @@ LISTABLE_STRUCT(avbox_thread,
 	pthread_t thread;
 	struct timespec start_time;
 	struct timespec stop_time;
-	struct avbox_dispatch_object *object;
+	struct avbox_object *object;
 );
 
 
@@ -64,11 +64,13 @@ avbox_thread_msghandler(void * const context, struct avbox_message *msg)
 
 		break;
 	}
-	case AVBOX_MESSAGETYPE_QUIT:
+	case AVBOX_MESSAGETYPE_DESTROY:
 	{
-		struct avbox_thread * const thread =
-			avbox_dispatch_getmsgpayload(msg);
-		thread->quit = 1;
+		break;
+	}
+	case AVBOX_MESSAGETYPE_CLEANUP:
+	{
+		avbox_dispatch_close();
 		break;
 	}
 	default:
@@ -84,6 +86,7 @@ avbox_thread_msghandler(void * const context, struct avbox_message *msg)
 static void*
 avbox_thread_run(void *arg)
 {
+	int quit = 0;
 	struct avbox_thread * const thread = (struct avbox_thread*) arg;
 	struct avbox_message * msg;
 
@@ -98,8 +101,8 @@ avbox_thread_run(void *arg)
 	}
 
 	/* create dispatch object */
-	if ((thread->object = avbox_dispatch_createobject(
-		avbox_thread_msghandler, 0, thread)) == NULL) {
+	if ((thread->object = avbox_object_new(
+		avbox_thread_msghandler, thread)) == NULL) {
 		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 			strerror(errno));
 		avbox_dispatch_shutdown();
@@ -112,15 +115,18 @@ avbox_thread_run(void *arg)
 
 	/* signal that we're up and running */
 	pthread_mutex_lock(&lock);
-	thread->quit = 0;
+	thread->running = 1;
 	pthread_cond_signal(&cond);
 	pthread_mutex_unlock(&lock);
 
 	/* run the message loop */
-	while (!thread->quit) {
+	while (!quit) {
 		if ((msg = avbox_dispatch_getmsg()) == NULL) {
 			switch (errno) {
 			case EAGAIN: continue;
+			case ESHUTDOWN:
+				quit = 1;
+				continue;
 			default:
 				DEBUG_VABORT("thread", "avbox_dispatch_getmsg() returned an unexpected error: %s (%i)",
 					strerror(errno), errno);
@@ -130,7 +136,6 @@ avbox_thread_run(void *arg)
 	}
 
 	/* cleanup */
-	avbox_dispatch_destroyobject(thread->object);
 	avbox_dispatch_shutdown();
 
 	DEBUG_VPRINT("thread", "Thread #%i exited after %li jobs",
@@ -139,7 +144,6 @@ avbox_thread_run(void *arg)
 end:
 	/* signal that we've exited */
 	pthread_mutex_lock(&lock);
-	assert(thread->quit == 1);
 	pthread_cond_signal(&cond);
 	pthread_mutex_unlock(&lock);
 
@@ -169,7 +173,7 @@ avbox_thread_new(void)
 #ifndef NDEBUG
 	thread->no = thread_no++;
 #endif
-	thread->quit = 1;
+	thread->running = 0;
 	if (pthread_create(&thread->thread, NULL, avbox_thread_run, thread) != 0) {
 		free(thread);
 		return NULL;
@@ -178,7 +182,7 @@ avbox_thread_new(void)
 	pthread_mutex_unlock(&lock);
 
 	/* check that the thread started successfully */
-	if (thread->quit) {
+	if (!thread->running) {
 		free(thread);
 		thread = NULL;
 	} else {
@@ -204,14 +208,10 @@ avbox_thread_destroy(struct avbox_thread * const thread)
 
 	LIST_REMOVE(thread);
 
-	/* Send the QUIT message to the thread */
-	if (avbox_dispatch_sendmsg(-1, &thread->object,
-		AVBOX_MESSAGETYPE_QUIT, AVBOX_DISPATCH_UNICAST, thread) == NULL) {
-		LOG_PRINT_ERROR("Could not send QUIT message");
-	}
-
+	/* Destroy the thread object and wait for it
+	 * to exit */
+	avbox_object_destroy(thread->object);
 	pthread_join(thread->thread, NULL);
-
 	free(thread);
 }
 
@@ -272,7 +272,7 @@ avbox_thread_delegate(avbox_delegate_fn func, void * arg)
 	}
 
 	/* dispatch it to the chosen thread */
-	if (avbox_dispatch_sendmsg(-1, &thread->object,
+	if (avbox_object_sendmsg(&thread->object,
 		AVBOX_MESSAGETYPE_DELEGATE, AVBOX_DISPATCH_UNICAST, del) == NULL) {
 		free(del);
 		del = NULL;

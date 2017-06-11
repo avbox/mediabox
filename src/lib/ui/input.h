@@ -87,11 +87,11 @@ avbox_input_sendevent(enum avbox_input_event e);
  * is called again
  */
 int
-avbox_input_grab(struct avbox_dispatch_object *obj);
+avbox_input_grab(struct avbox_object *obj);
 
 
 void
-avbox_input_release(struct avbox_dispatch_object *obj);
+avbox_input_release(struct avbox_object *obj);
 
 
 void

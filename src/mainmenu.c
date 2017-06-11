@@ -35,8 +35,7 @@
 struct mbox_mainmenu
 {
 	struct avbox_window *window;
-	struct avbox_dispatch_object *dispatch_object;
-	struct avbox_dispatch_object *notify_object;
+	struct avbox_object *notify_object;
 	struct avbox_listview *menu;
 	struct mbox_library *library;
 	struct mbox_about *about;
@@ -52,7 +51,7 @@ mbox_mainmenu_dismiss(struct mbox_mainmenu *inst)
 	avbox_window_hide(inst->window);
 
 	/* send dismissed message to parent */
-	if (avbox_dispatch_sendmsg(-1, &inst->notify_object,
+	if (avbox_object_sendmsg(&inst->notify_object,
 		AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
 		LOG_VPRINT_ERROR("Could not send dismissed message: %s",
 			strerror(errno));
@@ -82,7 +81,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 			assert(selected != NULL);
 
 			if (!memcmp("LIB", selected, 4)) {
-				if ((inst->library = mbox_library_new(inst->dispatch_object)) == NULL) {
+				if ((inst->library = mbox_library_new(avbox_window_getobject(inst->window))) == NULL) {
 					LOG_PRINT_ERROR("Could not initialize library!");
 				} else {
 					if (mbox_library_show(inst->library) == -1) {
@@ -98,7 +97,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 				if (inst->about != NULL) {
 					DEBUG_PRINT("mainmenu", "About dialog already visible!");
 				} else {
-					if ((inst->about = mbox_about_new(inst->dispatch_object)) == NULL) {
+					if ((inst->about = mbox_about_new(avbox_window_getobject(inst->window))) == NULL) {
 						LOG_PRINT_ERROR("Could not create about box!");
 					} else {
 						if (mbox_about_show(inst->about) == -1) {
@@ -112,7 +111,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 				if (inst->downloads != NULL) {
 					DEBUG_PRINT("mainmenu", "Downloads already visible!");
 				} else {
-					if ((inst->downloads = mbox_downloads_new(inst->dispatch_object)) == NULL) {
+					if ((inst->downloads = mbox_downloads_new(avbox_window_getobject(inst->window))) == NULL) {
 						LOG_PRINT_ERROR("Could not create downloads window!");
 					} else {
 						if (mbox_downloads_show(inst->downloads) == -1) {
@@ -126,7 +125,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 				if (inst->search != NULL) {
 					DEBUG_PRINT("mainmenu", "Search already visible!");
 				} else {
-					if ((inst->search = mbox_mediasearch_new(inst->dispatch_object)) == NULL) {
+					if ((inst->search = mbox_mediasearch_new(avbox_window_getobject(inst->window))) == NULL) {
 						LOG_PRINT_ERROR("Could not create search window!");
 					} else {
 						if (mbox_mediasearch_show(inst->search) == -1) {
@@ -190,7 +189,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 
 #if 0
 			/* send dismissed message to parent */
-			if (avbox_dispatch_sendmsg(-1, &inst->notify_object,
+			if (avbox_object_sendmsg(&inst->notify_object,
 				AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
 				LOG_VPRINT_ERROR("Could not send dismissed message: %s",
 					strerror(errno));
@@ -198,6 +197,32 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 #endif
 		}
 		break;
+	}
+	case AVBOX_MESSAGETYPE_DESTROY:
+	{
+		DEBUG_PRINT("mainmenu", "Destroying mainmenu");
+		if (inst->library != NULL) {
+			mbox_library_destroy(inst->library);
+		}
+		if (inst->search != NULL) {
+			mbox_mediasearch_destroy(inst->search);
+		}
+		if (inst->downloads != NULL) {
+			mbox_downloads_destroy(inst->downloads);
+		}
+		if (inst->about != NULL) {
+			mbox_about_destroy(inst->about);
+		}
+		if (inst->menu != NULL) {
+			avbox_listview_destroy(inst->menu);
+		}
+		break;
+	}
+	case AVBOX_MESSAGETYPE_CLEANUP:
+	{
+		DEBUG_PRINT("mainmenu", "Cleaning up mainmenu");
+		free(inst);
+		return AVBOX_DISPATCH_OK;
 	}
 	default:
 		return AVBOX_DISPATCH_CONTINUE;
@@ -210,7 +235,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
  * Initialize the MediaBox menu
  */
 struct mbox_mainmenu *
-mbox_mainmenu_new(struct avbox_dispatch_object *notify_object)
+mbox_mainmenu_new(struct avbox_object *notify_object)
 {
 	struct mbox_mainmenu *inst;
 	int xres, yres;
@@ -251,7 +276,7 @@ mbox_mainmenu_new(struct avbox_dispatch_object *notify_object)
 		AVBOX_WNDFLAGS_DECORATED,
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
-		window_width, window_height, NULL, NULL, NULL);
+		window_width, window_height, mbox_mainmenu_messagehandler, NULL, inst);
 	if (inst->window == NULL) {
 		LOG_PRINT_ERROR("Could not create new window!");
 		free(inst);
@@ -261,26 +286,14 @@ mbox_mainmenu_new(struct avbox_dispatch_object *notify_object)
 		LOG_VPRINT_ERROR("Could not set window title: %s",
 			strerror(errno));
 		avbox_window_destroy(inst->window);
-		free(inst);
-	}
-
-	/* create dispatch object */
-	if ((inst->dispatch_object = avbox_dispatch_createobject(
-		mbox_mainmenu_messagehandler, 0, inst)) == NULL) {
-		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
-			strerror(errno));
-		avbox_window_destroy(inst->window);
-		free(inst);
 		return NULL;
 	}
 
 	/* create a new menu widget inside main window */
-	if ((inst->menu = avbox_listview_new(inst->window, inst->dispatch_object)) == NULL) {
+	if ((inst->menu = avbox_listview_new(inst->window, avbox_window_getobject(inst->window))) == NULL) {
 		LOG_VPRINT_ERROR("Could not create menu widget (errno=%i)",
 			errno);
-		avbox_dispatch_destroyobject(inst->dispatch_object);
 		avbox_window_destroy(inst->window);
-		free(inst);
 		return NULL;
 	}
 
@@ -301,10 +314,7 @@ mbox_mainmenu_new(struct avbox_dispatch_object *notify_object)
 		avbox_listview_additem(inst->menu, "SETTINGS", "SETTINGS") == -1 ||
 		avbox_listview_additem(inst->menu, "ABOUT MEDIABOX", "ABOUT") == -1) {
 		LOG_PRINT_ERROR("Could not populate list!");
-		avbox_listview_destroy(inst->menu);
-		avbox_dispatch_destroyobject(inst->dispatch_object);
 		avbox_window_destroy(inst->window);
-		free(inst);
 		return NULL;
 	}
 
@@ -343,23 +353,6 @@ mbox_mainmenu_show(struct mbox_mainmenu * const inst)
 void
 mbox_mainmenu_destroy(struct mbox_mainmenu * const inst)
 {
-	DEBUG_PRINT("mainmenu", "Destroying object");
-
-	if (inst->library != NULL) {
-		mbox_library_destroy(inst->library);
-	}
-	if (inst->search != NULL) {
-		mbox_mediasearch_destroy(inst->search);
-	}
-	if (inst->downloads != NULL) {
-		mbox_downloads_destroy(inst->downloads);
-	}
-	if (inst->about != NULL) {
-		mbox_about_destroy(inst->about);
-	}
-
-	avbox_listview_destroy(inst->menu);
-	avbox_dispatch_destroyobject(inst->dispatch_object);
+	DEBUG_PRINT("mainmenu", "Destructor for main menu called");
 	avbox_window_destroy(inst->window);
-	free(inst);
 }

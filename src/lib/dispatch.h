@@ -25,14 +25,15 @@
 #define AVBOX_MESSAGETYPE_VOLUME	(0x08)
 #define AVBOX_MESSAGETYPE_SELECTED	(0x09)
 #define AVBOX_MESSAGETYPE_DISMISSED	(0x0A)
-#define AVBOX_MESSAGETYPE_QUIT		(0x0B)
+#define AVBOX_MESSAGETYPE_DESTROY	(0x0C)
+#define AVBOX_MESSAGETYPE_CLEANUP	(0x0D)
 #define AVBOX_MESSAGETYPE_USER		(0xFF)
 
 #define AVBOX_DISPATCH_OK		(0)
 #define AVBOX_DISPATCH_CONTINUE		(1)
 
 
-struct avbox_dispatch_object;
+struct avbox_object;
 struct avbox_message;
 
 
@@ -46,8 +47,8 @@ typedef int (*avbox_message_handler)(void *context, struct avbox_message *msg);
  * Swap two endpoints.
  */
 void
-avbox_dispatch_swapep(struct avbox_dispatch_object *a,
-	struct avbox_dispatch_object *b);
+avbox_dispatch_swapep(struct avbox_object *a,
+	struct avbox_object *b);
 
 
 /**
@@ -55,6 +56,13 @@ avbox_dispatch_swapep(struct avbox_dispatch_object *a,
  */
 int
 avbox_dispatch_getmsgtype(struct avbox_message *msg);
+
+
+/**
+ * Close the dispatch queue.
+ */
+void
+avbox_dispatch_close(void);
 
 
 /**
@@ -82,22 +90,22 @@ avbox_dispatch_peekmsg(void);
  * Sends a message.
  */
 struct avbox_message*
-avbox_dispatch_sendmsg(const int tid, struct avbox_dispatch_object **dest,
-	int type, int flags, void *payload);
+avbox_object_sendmsg(struct avbox_object **dest,
+	int type, int flags, void * const payload);
 
 
 /**
  * Create a dispatch object.
  */
-struct avbox_dispatch_object*
-avbox_dispatch_createobject(avbox_message_handler handler, int flags, void *context);
+struct avbox_object*
+avbox_object_new(avbox_message_handler handler, void *context);
 
 
 /**
  * Destroy dispatch object.
  */
 void
-avbox_dispatch_destroyobject(struct avbox_dispatch_object *obj);
+avbox_object_destroy(struct avbox_object *obj);
 
 
 /**

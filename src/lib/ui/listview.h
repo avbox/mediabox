@@ -56,7 +56,7 @@ avbox_listview_focus(struct avbox_listview *inst);
 
 struct avbox_listview*
 avbox_listview_new(struct avbox_window *window,
-	struct avbox_dispatch_object *notify_object);
+	struct avbox_object *notify_object);
 
 
 void

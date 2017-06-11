@@ -29,7 +29,7 @@
 
 
 LISTABLE_STRUCT(avbox_input_endpoint,
-	struct avbox_dispatch_object *object;
+	struct avbox_object *object;
 );
 
 
@@ -67,18 +67,18 @@ realloc_safe(void *buf, size_t sz)
 #endif
 
 
-static struct avbox_dispatch_object**
+static struct avbox_object**
 avbox_input_getendpoints()
 {
 	int i = 0;
-	struct avbox_dispatch_object** objlist = NULL;
+	struct avbox_object** objlist = NULL;
 	struct avbox_input_endpoint *ep;
 
 	pthread_mutex_lock(&endpoints_lock);
 
 	/* allocate memory for endpoints array */
 	if ((objlist = malloc((LIST_SIZE(&endpoints) + 1) *
-		sizeof(struct avbox_dispatch_object*))) == NULL) {
+		sizeof(struct avbox_object*))) == NULL) {
 		assert(errno == ENOMEM);
 		goto end;
 	}
@@ -95,7 +95,7 @@ end:
 
 
 static struct avbox_input_endpoint*
-avbox_input_getendpoint(struct avbox_dispatch_object *obj)
+avbox_input_getendpoint(struct avbox_object *obj)
 {
 	struct avbox_input_endpoint *endpoint, *out = NULL;
 	pthread_mutex_lock(&endpoints_lock);
@@ -125,7 +125,7 @@ avbox_input_eventfree(struct avbox_input_message *msg)
  * is called again
  */
 int
-avbox_input_grab(struct avbox_dispatch_object *obj)
+avbox_input_grab(struct avbox_object *obj)
 {
 	struct avbox_input_endpoint *input_endpoint;
 
@@ -159,7 +159,7 @@ avbox_input_grab(struct avbox_dispatch_object *obj)
  * Release input.
  */
 void
-avbox_input_release(struct avbox_dispatch_object *obj)
+avbox_input_release(struct avbox_object *obj)
 {
 	struct avbox_input_endpoint *endpoint;
 #ifndef NDEBUG
@@ -192,7 +192,7 @@ void
 avbox_input_sendevent(enum avbox_input_event e)
 {
 	struct avbox_input_message *ev;
-	struct avbox_dispatch_object **dest = NULL;
+	struct avbox_object **dest = NULL;
 
 	/* allocate memory for event */
 	if ((ev = malloc(sizeof(struct avbox_input_message))) == NULL) {
@@ -209,7 +209,7 @@ avbox_input_sendevent(enum avbox_input_event e)
 	ev->payload = NULL;
 
 	/* send the event */
-	if (avbox_dispatch_sendmsg(-1, dest, AVBOX_MESSAGETYPE_INPUT,
+	if (avbox_object_sendmsg(dest, AVBOX_MESSAGETYPE_INPUT,
 		AVBOX_DISPATCH_ANYCAST, ev) == NULL) {
 		abort();
 	}

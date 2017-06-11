@@ -15,7 +15,7 @@ struct mbox_downloads;
  * Initialize the MediaBox downloads list
  */
 struct mbox_downloads*
-mbox_downloads_new(struct avbox_dispatch_object *parent);
+mbox_downloads_new(struct avbox_object *parent);
 
 
 int

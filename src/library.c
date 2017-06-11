@@ -45,8 +45,7 @@ struct mbox_library
 	LIST playlist;
 	struct avbox_window *window;
 	struct avbox_listview *menu;
-	struct avbox_dispatch_object *dispatch_object;
-	struct avbox_dispatch_object *parent_obj;
+	struct avbox_object *parent_obj;
 	char *dotdot;
 };
 
@@ -511,7 +510,7 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 				avbox_window_hide(inst->window);
 
 				/* send dismissed message */
-				if (avbox_dispatch_sendmsg(-1, &inst->parent_obj,
+				if (avbox_object_sendmsg(&inst->parent_obj,
 					AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
 					LOG_VPRINT_ERROR("Could not send DISMISSED message: %s",
 						strerror(errno));
@@ -541,7 +540,7 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 			DEBUG_PRINT("library", "Sending DISMISSED message");
 
 			/* send DISMISSED message */
-			if (avbox_dispatch_sendmsg(-1, &inst->parent_obj,
+			if (avbox_object_sendmsg(&inst->parent_obj,
 				AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
 				LOG_VPRINT_ERROR("Could not send DISMISSED message: %s",
 					strerror(errno));
@@ -550,6 +549,29 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 
 		break;
 	}
+	case AVBOX_MESSAGETYPE_DESTROY:
+	{
+		DEBUG_PRINT("library", "Shutdown library");
+
+		if (inst->dotdot != NULL) {
+			free(inst->dotdot);
+			inst->dotdot = NULL;
+		}
+
+		if (avbox_window_isvisible(inst->window)) {
+			avbox_window_hide(inst->window);
+		}
+
+		mbox_library_freeplaylist(inst);
+		if (inst->menu != NULL) {
+			avbox_listview_enumitems(inst->menu, mbox_library_freeitems, NULL);
+			avbox_listview_destroy(inst->menu);
+		}
+		return AVBOX_DISPATCH_OK;
+	}
+	case AVBOX_MESSAGETYPE_CLEANUP:
+		free(inst);
+		break;
 	default:
 		abort();
 	}
@@ -561,7 +583,7 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
  * Initialize the MediaBox menu
  */
 struct mbox_library *
-mbox_library_new(struct avbox_dispatch_object *parent)
+mbox_library_new(struct avbox_object *parent)
 {
 	int resx, resy, width;
 	const int height = 450;
@@ -573,6 +595,7 @@ mbox_library_new(struct avbox_dispatch_object *parent)
 		return NULL;
 	}
 
+	memset(inst, 0, sizeof(struct mbox_library));
 	LIST_INIT(&inst->playlist);
 
 	avbox_window_getcanvassize(avbox_video_getrootwindow(0), &resx, &resy);
@@ -591,7 +614,8 @@ mbox_library_new(struct avbox_dispatch_object *parent)
 		AVBOX_WNDFLAGS_DECORATED,
 		(resx / 2) - (width / 2),
 		(resy / 2) - (height / 2),
-		width, height, NULL, NULL, NULL);
+		width, height,
+		mbox_library_messagehandler, NULL, inst);
 	if (inst->window == NULL) {
 		LOG_PRINT_ERROR("Could not create library window!");
 		free(inst);
@@ -600,21 +624,15 @@ mbox_library_new(struct avbox_dispatch_object *parent)
 	if (avbox_window_settitle(inst->window, "MEDIA LIBRARY") == -1) {
 		assert(errno == ENOMEM);
 		LOG_PRINT_ERROR("Could not set window title");
-	}
-
-	if ((inst->dispatch_object = avbox_dispatch_createobject(
-		mbox_library_messagehandler, 0, inst)) == NULL) {
-		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
-			strerror(errno));
 		avbox_window_destroy(inst->window);
-		free(inst);
 		return NULL;
 	}
 
 	/* create a new menu widget inside main window */
-	inst->menu = avbox_listview_new(inst->window, inst->dispatch_object);
+	inst->menu = avbox_listview_new(inst->window, avbox_window_getobject(inst->window));
 	if (inst->menu == NULL) {
 		LOG_PRINT_ERROR("Could not create menu widget!");
+		avbox_window_destroy(inst->window);
 		return NULL;
 	}
 
@@ -650,21 +668,5 @@ mbox_library_show(struct mbox_library * const inst)
 void
 mbox_library_destroy(struct mbox_library * const inst)
 {
-	DEBUG_PRINT("library", "Shutdown library");
-
-	if (inst->dotdot != NULL) {
-		free(inst->dotdot);
-		inst->dotdot = NULL;
-	}
-
-	if (avbox_window_isvisible(inst->window)) {
-		avbox_window_hide(inst->window);
-	}
-
-	avbox_dispatch_destroyobject(inst->dispatch_object);
-	mbox_library_freeplaylist(inst);
-	avbox_listview_enumitems(inst->menu, mbox_library_freeitems, NULL);
-	avbox_listview_destroy(inst->menu);
 	avbox_window_destroy(inst->window);
-	free(inst);
 }

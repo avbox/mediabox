@@ -40,8 +40,8 @@ struct avbox_listview
 {
 	struct avbox_window *window;
 	struct avbox_window **item_windows;
-	struct avbox_dispatch_object *notify_object;
-	struct avbox_dispatch_object *dispatch_object;
+	struct avbox_object *notify_object;
+	struct avbox_object *dispatch_object;
 	struct avbox_listitem *selected;
 	int visible_items;
 	int visible_window_offset;
@@ -77,11 +77,11 @@ avbox_listview_getwindowitem(struct avbox_listview *inst, struct avbox_window *w
 static int
 avbox_listitem_paint(struct avbox_window * const window)
 {
-	int canvas_width, canvas_height;
 	struct avbox_listview * const inst = (struct avbox_listview*)
 		avbox_window_getusercontext(window);
 	struct avbox_listitem * const item = (struct avbox_listitem*)
 		avbox_listview_getwindowitem(inst, window);
+	struct avbox_rect rect;
 
 	assert(inst != NULL);
 
@@ -96,20 +96,23 @@ avbox_listitem_paint(struct avbox_window * const window)
 		window); */
 
 	/* get canvas size */
+	rect.x = 0;
+	rect.y = 0;
 	avbox_window_getcanvassize(item->window,
-		&canvas_width, &canvas_height);
+		&rect.w, &rect.h);
+	avbox_window_setbgcolor(item->window, MBV_DEFAULT_BACKGROUND);
+	avbox_window_clear(item->window);
 
 	if (inst->selected == item) {
 		avbox_window_setbgcolor(item->window, AVBOX_COLOR(0xffffffff));
+		avbox_window_roundrectangle(item->window, &rect, 0, 2);
 		avbox_window_setcolor(item->window, AVBOX_COLOR(0x000000ff));
 	} else {
-		avbox_window_setbgcolor(item->window, MBV_DEFAULT_BACKGROUND);
 		avbox_window_setcolor(item->window, MBV_DEFAULT_FOREGROUND);
 	}
 
 	/* paint the item and clear the dirty flag */
-	avbox_window_clear(item->window);
-	avbox_window_drawstring(item->window, item->name, canvas_width / 2, 5);
+	avbox_window_drawstring(item->window, item->name, rect.w / 2, 5);
 	item->dirty = 0;
 	return 1;
 }
@@ -388,7 +391,7 @@ avbox_listview_messagehandler(void *context, struct avbox_message *msg)
 			DEBUG_PRINT("listview", "Sending DISMISSED message");
 
 			/* send dismiss message to parent */
-			if (avbox_dispatch_sendmsg(-1, &inst->notify_object,
+			if (avbox_object_sendmsg(&inst->notify_object,
 				AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
 				LOG_VPRINT_ERROR("Could not send dismiss message: %s",
 					strerror(errno));
@@ -399,7 +402,7 @@ avbox_listview_messagehandler(void *context, struct avbox_message *msg)
 		{
 			if (inst->selected != NULL) {
 				/* send SELECTED message to parent */
-				if (avbox_dispatch_sendmsg(-1, &inst->notify_object,
+				if (avbox_object_sendmsg(&inst->notify_object,
 					AVBOX_MESSAGETYPE_SELECTED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
 					LOG_VPRINT_ERROR("Could not send selected message: %s",
 						strerror(errno));
@@ -461,10 +464,29 @@ start:
 		default:
 			return AVBOX_DISPATCH_CONTINUE;
 		}
-		break;
-
 		avbox_input_eventfree(ev);
+		break;
 	}
+	case AVBOX_MESSAGETYPE_DESTROY:
+	{
+		DEBUG_VPRINT("ui-menu", "Destroying listview %p", inst);
+		ASSERT(inst != NULL);
+
+		avbox_input_release(inst->dispatch_object);
+		avbox_listview_clearitems(inst);
+
+		DEBUG_VPRINT("ui-menu", "Destroying %i visible windows",
+			inst->visible_items);
+		for (int i = 0; i < inst->visible_items; i++) {
+			avbox_window_destroy(inst->item_windows[i]);
+		}
+		break;
+	}
+	case AVBOX_MESSAGETYPE_CLEANUP:
+		DEBUG_VPRINT("ui-menu", "Cleaning up listview %p", inst);
+		free(inst->item_windows);
+		free(inst);
+		break;
 	default:
 		/* if it's an anycast message don't process it */
 		return AVBOX_DISPATCH_CONTINUE;
@@ -476,7 +498,7 @@ start:
  * Create a new instance of the menu widget.
  */
 struct avbox_listview*
-avbox_listview_new(struct avbox_window *window, struct avbox_dispatch_object *notify_object)
+avbox_listview_new(struct avbox_window *window, struct avbox_object *notify_object)
 {
 	int i, width, height;
 	struct avbox_listview *inst;
@@ -492,8 +514,8 @@ avbox_listview_new(struct avbox_window *window, struct avbox_dispatch_object *no
 	}
 
 	/* create a dispatch object */
-	if ((inst->dispatch_object = avbox_dispatch_createobject(
-		avbox_listview_messagehandler, 0, inst)) == NULL) {
+	if ((inst->dispatch_object = avbox_object_new(
+		avbox_listview_messagehandler, inst)) == NULL) {
 		LOG_PRINT_ERROR("Could not create dispatch object!");
 		free(inst);
 		return NULL;
@@ -535,8 +557,10 @@ avbox_listview_new(struct avbox_window *window, struct avbox_dispatch_object *no
 	DEBUG_VPRINT("ui-menu", "Creating %i child windows",
 		inst->visible_items);
 	for (i = 0; i < inst->visible_items; i++) {
+		char windowid[16];
+		snprintf(windowid, sizeof(windowid), "menuitem_%d", i + 1);
 		inst->item_windows[i] = avbox_window_new(inst->window,
-			"menuitem", AVBOX_WNDFLAGS_SUBWINDOW, 0,
+			windowid, AVBOX_WNDFLAGS_SUBWINDOW, 0,
 			itemheight * i, -1, itemheight,
 			NULL, &avbox_listitem_paint, inst);
 		if (inst->item_windows[i] == NULL) {
@@ -580,24 +604,6 @@ avbox_listview_seteolcallback(struct avbox_listview *inst, avbox_listview_eol_fn
 void
 avbox_listview_destroy(struct avbox_listview *inst)
 {
-	int i;
-
-	DEBUG_VPRINT("ui-menu", "Destroying menu %p", inst);
-
-	assert(inst != NULL);
-
-	avbox_input_release(inst->dispatch_object);
-	avbox_dispatch_destroyobject(inst->dispatch_object);
-
-	avbox_listview_clearitems(inst);
-
-	DEBUG_VPRINT("ui-menu", "Destroying %i visible windows",
-		inst->visible_items);
-	for (i = 0; i < inst->visible_items; i++) {
-		avbox_window_destroy(inst->item_windows[i]);
-	}
-
-	free(inst->item_windows);
-	free(inst);
+	DEBUG_PRINT("listview", "Listview destructor called.");
+	avbox_object_destroy(inst->dispatch_object);
 }
-

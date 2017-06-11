@@ -26,8 +26,7 @@
 struct mbox_about
 {
 	struct avbox_window *window;
-	struct avbox_dispatch_object *dispatch_object;
-	struct avbox_dispatch_object *parent_object;
+	struct avbox_object *parent_object;
 	int w;
 	int h;
 	int dirty;
@@ -97,11 +96,10 @@ mbox_about_msghandler(void *context, struct avbox_message *msg)
 		DEBUG_PRINT("about", "Hiding window");
 
 		/* hide the window */
-		avbox_input_release(inst->dispatch_object);
 		avbox_window_hide(inst->window);
 
 		/* send DISMISSED message */
-		if (avbox_dispatch_sendmsg(-1, &inst->parent_object,
+		if (avbox_object_sendmsg(&inst->parent_object,
 			AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
 			LOG_VPRINT_ERROR("Could not send dismissed message: %s",
 				strerror(errno));
@@ -111,6 +109,14 @@ mbox_about_msghandler(void *context, struct avbox_message *msg)
 		avbox_input_eventfree(ev);
 		break;
 	}
+	case AVBOX_MESSAGETYPE_DESTROY:
+		if (avbox_window_isvisible(inst->window)) {
+			avbox_window_hide(inst->window);
+		}
+		break;
+	case AVBOX_MESSAGETYPE_CLEANUP:
+		free(inst);
+		break;
 	default:
 		DEBUG_PRINT("about", "Unexpected message!");
 		return AVBOX_DISPATCH_CONTINUE;
@@ -123,7 +129,7 @@ mbox_about_msghandler(void *context, struct avbox_message *msg)
  * Initialize the MediaBox about box.
  */
 struct mbox_about*
-mbox_about_new(struct avbox_dispatch_object *parent)
+mbox_about_new(struct avbox_object *parent)
 {
 	int xres, yres;
 	int font_height;
@@ -152,22 +158,16 @@ mbox_about_new(struct avbox_dispatch_object *parent)
 
 	/* create a new window for the menu dialog */
 	inst->window = avbox_window_new(NULL, "about",
-		AVBOX_WNDFLAGS_NONE,
+		AVBOX_WNDFLAGS_INPUT,
 		(xres / 2) - (inst->w / 2),
 		(yres / 2) - (inst->h / 2),
-		inst->w, inst->h, NULL, &mbox_about_draw, inst);
+		inst->w,
+		inst->h,
+		mbox_about_msghandler,
+		mbox_about_draw,
+		inst);
 	if (inst->window == NULL) {
 		LOG_PRINT_ERROR("Could not create window!");
-		free(inst);
-		return NULL;
-	}
-
-	/* create a dispatch object */
-	if ((inst->dispatch_object = avbox_dispatch_createobject(
-		mbox_about_msghandler, 0, inst)) == NULL) {
-		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
-			strerror(errno));
-		avbox_window_destroy(inst->window);
 		free(inst);
 		return NULL;
 	}
@@ -184,13 +184,6 @@ mbox_about_show(struct mbox_about * const inst)
 {
 	/* show the window */
         avbox_window_show(inst->window);
-
-	/* grab focus */
-	if (avbox_input_grab(inst->dispatch_object) == -1) {
-		LOG_PRINT_ERROR("avbox_input_grab() failed!");
-		return -1;
-	}
-
 	return 0;
 }
 
@@ -201,11 +194,5 @@ mbox_about_show(struct mbox_about * const inst)
 void
 mbox_about_destroy(struct mbox_about * const inst)
 {
-	if (avbox_window_isvisible(inst->window)) {
-		avbox_input_release(inst->dispatch_object);
-		avbox_window_hide(inst->window);
-	}
-	avbox_dispatch_destroyobject(inst->dispatch_object);
 	avbox_window_destroy(inst->window);
-	free(inst);
 }

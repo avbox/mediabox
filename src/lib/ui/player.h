@@ -52,7 +52,7 @@ typedef void (*avbox_player_status_callback)(struct avbox_player *inst,
  */
 int
 avbox_player_subscribe(struct avbox_player * const inst,
-	struct avbox_dispatch_object * const object);
+	struct avbox_object * const object);
 
 
 /**
@@ -60,7 +60,7 @@ avbox_player_subscribe(struct avbox_player * const inst,
  */
 int
 avbox_player_unsubscribe(struct avbox_player * const inst,
-	struct avbox_dispatch_object * const object);
+	struct avbox_object * const object);
 
 
 /**
