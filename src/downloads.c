@@ -539,7 +539,7 @@ mbox_downloads_new(struct avbox_object *parent)
 	}
 
 	/* create a new menu widget inside main window */
-	inst->menu = avbox_listview_new(inst->window, avbox_window_getobject(inst->window));
+	inst->menu = avbox_listview_new(inst->window, avbox_window_object(inst->window));
 	if (inst->menu == NULL) {
 		LOG_PRINT_ERROR("Could not create listview!");
 		avbox_window_destroy(inst->window);
@@ -571,7 +571,7 @@ mbox_downloads_show(struct mbox_downloads * const inst)
 	tv.tv_nsec = 0;
 	inst->update_timer_id = avbox_timer_register(&tv,
 		AVBOX_TIMER_TYPE_AUTORELOAD | AVBOX_TIMER_MESSAGE,
-		avbox_window_getobject(inst->window), NULL, inst);
+		avbox_window_object(inst->window), NULL, inst);
 	if (inst->update_timer_id == -1) {
 		avbox_window_hide(inst->window);
 		return -1;

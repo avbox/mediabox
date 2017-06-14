@@ -189,7 +189,7 @@ avbox_window_settitle(struct avbox_window *window, const char *title);
  * Gets the window's dispatch object.
  */
 struct avbox_object*
-avbox_window_getobject(struct avbox_window * const window);
+avbox_window_object(struct avbox_window * const window);
 
 
 int

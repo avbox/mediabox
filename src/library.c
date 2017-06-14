@@ -469,13 +469,11 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 	switch (avbox_dispatch_getmsgtype(msg)) {
 	case AVBOX_MESSAGETYPE_SELECTED:
 	{
-		DEBUG_PRINT("library", "Received SELECTED message");
-
-		assert(avbox_dispatch_getmsgpayload(msg) == inst->menu);
+		ASSERT(avbox_dispatch_getmsgpayload(msg) == inst->menu);
 		struct mbox_library_playlist_item *selected =
 			avbox_listview_getselected(inst->menu);
 
-		assert(selected != NULL);
+		ASSERT(selected != NULL);
 
 		if (selected->isdir) {
 			DEBUG_VPRINT("library", "Selected directory: %s",
@@ -485,15 +483,10 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 			struct avbox_player *player;
 			struct avbox_playlist_item *playlist_item;
 
-			DEBUG_PRINT("library", "Selected item");
-
 			playlist_item = selected->data.playlist_item;
-			assert(selected->data.playlist_item != NULL);
 
-			DEBUG_VPRINT("library", "Selected %s",
-				selected->data.playlist_item->filepath);
-
-			assert(LIST_SIZE(&inst->playlist) > 0);
+			ASSERT(selected->data.playlist_item != NULL);
+			ASSERT(LIST_SIZE(&inst->playlist) > 0);
 
 			/* get the active player instance */
 			player = mbox_shell_getactiveplayer();
@@ -526,7 +519,6 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 	}
 	case AVBOX_MESSAGETYPE_DISMISSED:
 	{
-		DEBUG_PRINT("library", "Received DISMISSED message");
 		DEBUG_ASSERT("library", avbox_dispatch_getmsgpayload(msg) == inst->menu,
 			"Invalid message payload!");
 
@@ -536,8 +528,6 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 			/* hide window */
 			avbox_listview_releasefocus(inst->menu);
 			avbox_window_hide(inst->window);
-
-			DEBUG_PRINT("library", "Sending DISMISSED message");
 
 			/* send DISMISSED message */
 			if (avbox_object_sendmsg(&inst->parent_obj,
@@ -629,7 +619,7 @@ mbox_library_new(struct avbox_object *parent)
 	}
 
 	/* create a new menu widget inside main window */
-	inst->menu = avbox_listview_new(inst->window, avbox_window_getobject(inst->window));
+	inst->menu = avbox_listview_new(inst->window, avbox_window_object(inst->window));
 	if (inst->menu == NULL) {
 		LOG_PRINT_ERROR("Could not create menu widget!");
 		avbox_window_destroy(inst->window);

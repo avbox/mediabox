@@ -266,7 +266,7 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 			tv.tv_nsec = 0;
 			if ((inst->duration_timer = avbox_timer_register(&tv,
 				AVBOX_TIMER_TYPE_AUTORELOAD | AVBOX_TIMER_MESSAGE,
-				avbox_window_getobject(inst->window), NULL, NULL)) == -1) {
+				avbox_window_object(inst->window), NULL, NULL)) == -1) {
 				LOG_VPRINT_ERROR("Could not register overlay timer: %s",
 					strerror(errno));
 				avbox_window_hide(inst->window);
@@ -373,7 +373,7 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 		}
 		if (inst->player != NULL) {
 			if (avbox_player_unsubscribe(inst->player,
-				avbox_window_getobject(inst->window)) == -1) {
+				avbox_window_object(inst->window)) == -1) {
 				LOG_VPRINT_ERROR("Could not unsubscribe from player events: %s",
 					strerror(errno));
 			}
@@ -417,7 +417,7 @@ mbox_overlay_show(struct mbox_overlay * const inst, int secs)
 	tv.tv_nsec = 0;
 	if ((inst->dismiss_timer = avbox_timer_register(&tv,
 		AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
-		avbox_window_getobject(inst->window), NULL, NULL)) == -1) {
+		avbox_window_object(inst->window), NULL, NULL)) == -1) {
 		LOG_VPRINT_ERROR("Could not register overlay timer: %s",
 			strerror(errno));
 		avbox_window_hide(inst->window);
@@ -454,7 +454,7 @@ mbox_overlay_new(struct avbox_player *player)
 	}
 
 	/* subscribe to player events */
-	if (avbox_player_subscribe(player, avbox_window_getobject(inst->window)) == -1) {
+	if (avbox_player_subscribe(player, avbox_window_object(inst->window)) == -1) {
 		LOG_VPRINT_ERROR("Could not subscribe to player events: %s",
 			strerror(errno));
 		avbox_window_destroy(inst->window);

@@ -81,7 +81,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 			assert(selected != NULL);
 
 			if (!memcmp("LIB", selected, 4)) {
-				if ((inst->library = mbox_library_new(avbox_window_getobject(inst->window))) == NULL) {
+				if ((inst->library = mbox_library_new(avbox_window_object(inst->window))) == NULL) {
 					LOG_PRINT_ERROR("Could not initialize library!");
 				} else {
 					if (mbox_library_show(inst->library) == -1) {
@@ -97,7 +97,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 				if (inst->about != NULL) {
 					DEBUG_PRINT("mainmenu", "About dialog already visible!");
 				} else {
-					if ((inst->about = mbox_about_new(avbox_window_getobject(inst->window))) == NULL) {
+					if ((inst->about = mbox_about_new(avbox_window_object(inst->window))) == NULL) {
 						LOG_PRINT_ERROR("Could not create about box!");
 					} else {
 						if (mbox_about_show(inst->about) == -1) {
@@ -111,7 +111,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 				if (inst->downloads != NULL) {
 					DEBUG_PRINT("mainmenu", "Downloads already visible!");
 				} else {
-					if ((inst->downloads = mbox_downloads_new(avbox_window_getobject(inst->window))) == NULL) {
+					if ((inst->downloads = mbox_downloads_new(avbox_window_object(inst->window))) == NULL) {
 						LOG_PRINT_ERROR("Could not create downloads window!");
 					} else {
 						if (mbox_downloads_show(inst->downloads) == -1) {
@@ -125,7 +125,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 				if (inst->search != NULL) {
 					DEBUG_PRINT("mainmenu", "Search already visible!");
 				} else {
-					if ((inst->search = mbox_mediasearch_new(avbox_window_getobject(inst->window))) == NULL) {
+					if ((inst->search = mbox_mediasearch_new(avbox_window_object(inst->window))) == NULL) {
 						LOG_PRINT_ERROR("Could not create search window!");
 					} else {
 						if (mbox_mediasearch_show(inst->search) == -1) {
@@ -290,7 +290,7 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	}
 
 	/* create a new menu widget inside main window */
-	if ((inst->menu = avbox_listview_new(inst->window, avbox_window_getobject(inst->window))) == NULL) {
+	if ((inst->menu = avbox_listview_new(inst->window, avbox_window_object(inst->window))) == NULL) {
 		LOG_VPRINT_ERROR("Could not create menu widget (errno=%i)",
 			errno);
 		avbox_window_destroy(inst->window);

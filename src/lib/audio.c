@@ -701,6 +701,7 @@ avbox_audiostream_setclock(struct avbox_audiostream * const stream, const int64_
 		goto end;
 	}
 
+	/* stream->clock_start = clock - ((18096 * 1000L * 1000L) / 48000); */
 	stream->clock_start = clock;
 	stream->clock_offset = 0;
 	stream->frames = ret = 0;

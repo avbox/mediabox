@@ -300,7 +300,7 @@ avbox_window_isvisible(struct avbox_window *window)
  * Gets the window's dispatch object.
  */
 struct avbox_object*
-avbox_window_getobject(struct avbox_window * const window)
+avbox_window_object(struct avbox_window * const window)
 {
 	assert(window != NULL);
 	return window->object;
@@ -569,10 +569,8 @@ avbox_window_paintdecor(struct avbox_window * const window)
 
 
 static void
-__avbox_window_cleanup(struct avbox_window * const window)
+__avbox_window_destroy(struct avbox_window * const window)
 {
-	DEBUG_VPRINT("video", "Cleanup for window: %s",
-		window->identifier);
 	ASSERT(window != NULL);
 	ASSERT(window->surface != NULL);
 	ASSERT(window->content_window != NULL);
@@ -597,11 +595,8 @@ __avbox_window_cleanup(struct avbox_window * const window)
 
 
 static void
-__avbox_window_destroy(struct avbox_window * const window)
+__avbox_window_cleanup(struct avbox_window * const window)
 {
-	/* remove the window from the parent's children list */
-	DEBUG_VPRINT("video", "Destroying window: %s",
-		window->identifier);
 	if (window->identifier) {
 		free((void*) window->identifier);
 	}
@@ -627,22 +622,19 @@ avbox_window_handler(void *context, struct avbox_message * const msg)
 	}
 	case AVBOX_MESSAGETYPE_DESTROY:
 	{
-		DEBUG_VPRINT("video", "Destroying window %s", window->identifier);
-		/* call the user defined destructor */
-		if (window->handler != NULL) {
-			(void) window->handler(window->user_context, msg);
-		}
-		__avbox_window_cleanup(window);
-		return AVBOX_DISPATCH_OK;
-	}
-	case AVBOX_MESSAGETYPE_CLEANUP:
-		DEBUG_VPRINT("video", "Cleanup for window %s",
-			window->identifier);
 		/* call the user defined destructor */
 		if (window->handler != NULL) {
 			(void) window->handler(window->user_context, msg);
 		}
 		__avbox_window_destroy(window);
+		return AVBOX_DISPATCH_OK;
+	}
+	case AVBOX_MESSAGETYPE_CLEANUP:
+		/* call the user defined destructor */
+		if (window->handler != NULL) {
+			(void) window->handler(window->user_context, msg);
+		}
+		__avbox_window_cleanup(window);
 		return AVBOX_DISPATCH_OK;
 	default:
 		if (window->handler != NULL) {
@@ -1195,14 +1187,12 @@ void
 avbox_window_destroy(struct avbox_window * const window)
 {
 	if (window->object != NULL) {
-		DEBUG_VPRINT("video", "Sending DESTROY message for window %s",
-			window->identifier);
 		avbox_object_destroy(window->object);
 	} else {
 		DEBUG_VPRINT("video", "Destroying window %s right away",
 			window->identifier);
-		__avbox_window_cleanup(window);
 		__avbox_window_destroy(window);
+		__avbox_window_cleanup(window);
 	}
 }
 

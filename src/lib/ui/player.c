@@ -70,7 +70,7 @@
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_BGRA)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_VIDEO_BUFFER_FRAMES  (10)
+#define MB_VIDEO_BUFFER_FRAMES  (20)
 #define MB_VIDEO_BUFFER_PACKETS (1)
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
@@ -140,6 +140,7 @@ struct avbox_player
 	int video_decoder_running;
 	int audio_decoder_running;
 	int stream_percent;
+	int stream_exiting;
 	unsigned int video_skipframes;
 	int64_t video_decoder_pts;
 	int64_t seek_to;
@@ -568,7 +569,8 @@ avbox_player_video(void *arg)
 		if  (LIKELY(frame->pts != AV_NOPTS_VALUE)) {
 			int64_t elapsed;
 
-			frame_time = av_rescale_q(frame->pts,
+			frame_time = av_frame_get_best_effort_timestamp(frame);
+			frame_time = av_rescale_q(frame_time,
 				inst->fmt_ctx->streams[inst->video_stream_index]->time_base,
 				AV_TIME_BASE_Q);
 			inst->video_renderer_pts = frame_time;
@@ -1083,6 +1085,8 @@ avbox_player_video_decode(void *arg)
 			break;
 		}
 
+		//DEBUG_VPRINT("player", "Video dts: %li (pts=%li)", packet->dts, packet->pts);
+
 		/* send packet to codec for decoding */
 		if (UNLIKELY((i = avcodec_send_packet(inst->video_codec_ctx, packet)) < 0)) {
 			if (i == AVERROR(EAGAIN)) {
@@ -1104,10 +1108,9 @@ avbox_player_video_decode(void *arg)
 
 		/* read decoded frames from codec */
 		while (LIKELY((i = avcodec_receive_frame(inst->video_codec_ctx, video_frame_nat))) == 0) {
-			int64_t frame_pts;
 
-			frame_pts = video_frame_nat->pts =
-				av_frame_get_best_effort_timestamp(video_frame_nat);
+			//DEBUG_VPRINT("player", "Video pts: %li", video_frame_nat->pts);
+			//video_frame_nat->pts = video_frame_nat->pkt_pos;
 
 			/* push the decoded frame into the filtergraph */
 			if (UNLIKELY(av_buffersrc_add_frame_flags(video_buffersrc_ctx,
@@ -1138,6 +1141,21 @@ avbox_player_video_decode(void *arg)
 					goto decoder_exit;
 				}
 
+				/* if this is the first frame then set the audio stream
+				 * clock to it's pts. This is needed because not all streams
+				 * start at pts 0 */
+				if (UNLIKELY(!video_time_set)) {
+					int64_t pts;
+					pts = av_frame_get_best_effort_timestamp(video_frame_flt);
+					pts = av_rescale_q(pts,
+						video_buffersink_ctx->inputs[0]->time_base,
+						AV_TIME_BASE_Q);
+					avbox_player_resetsystemtime(inst, pts);
+					DEBUG_VPRINT("player", "First video pts: %li (unscaled=%li)",
+						pts, video_frame_flt->pts);
+					video_time_set = 1;
+				}
+
 				ASSERT(video_buffersink_ctx->inputs[0]->time_base.num == inst->fmt_ctx->streams[inst->video_stream_index]->time_base.num);
 				ASSERT(video_buffersink_ctx->inputs[0]->time_base.den == inst->fmt_ctx->streams[inst->video_stream_index]->time_base.den);
 
@@ -1157,22 +1175,8 @@ avbox_player_video_decode(void *arg)
 				}
 
 				/* update the video decoder pts */
-				inst->video_decoder_pts = frame_pts;
+				inst->video_decoder_pts = video_frame_flt->pts;
 				video_frame_flt = NULL;
-
-				/* if this is the first frame then set the audio stream
-				 * clock to it's pts. This is needed because not all streams
-				 * start at pts 0 */
-				if (UNLIKELY(!video_time_set)) {
-					int64_t pts;
-					pts = av_rescale_q(frame_pts,
-						video_buffersink_ctx->inputs[0]->time_base,
-						AV_TIME_BASE_Q);
-					avbox_player_resetsystemtime(inst, pts);
-					DEBUG_VPRINT("player", "First video pts: %li (unscaled=%li)",
-						pts, frame_pts);
-					video_time_set = 1;
-				}
 			}
 			av_frame_unref(video_frame_nat);
 		}
@@ -1345,9 +1349,6 @@ avbox_player_audio_decode(void * arg)
 
 		/* read decoded frames from codec */
 		while ((ret = avcodec_receive_frame(inst->audio_codec_ctx, audio_frame_nat)) == 0) {
-			audio_frame_nat->pts =
-				av_frame_get_best_effort_timestamp(audio_frame_nat);
-
 			/* push the audio data from decoded frame into the filtergraph */
 			if (UNLIKELY(av_buffersrc_add_frame_flags(audio_buffersrc_ctx,
 				audio_frame_nat, 0) < 0)) {
@@ -1373,12 +1374,13 @@ avbox_player_audio_decode(void * arg)
 				 * start at pts 0 */
 				if (UNLIKELY(!inst->audio_time_set)) {
 					int64_t pts;
-					pts = av_rescale_q(audio_frame->pts,
+					pts = av_frame_get_best_effort_timestamp(audio_frame);
+					pts = av_rescale_q(pts,
 						inst->fmt_ctx->streams[inst->audio_stream_index]->time_base,
 						AV_TIME_BASE_Q);
 					avbox_audiostream_setclock(inst->audio_stream, pts);
-					DEBUG_VPRINT("player", "First audio pts: %li",
-						pts);
+					DEBUG_VPRINT("player", "First audio pts: %li unscaled=%li",
+						pts, audio_frame->pts);
 					inst->audio_time_set = 1;
 				}
 
@@ -1594,7 +1596,7 @@ avbox_player_stream_parse(void *arg)
 			char buf[256];
 			av_strerror(res, buf, sizeof(buf));
 			LOG_VPRINT_ERROR("Could not read frame: %s", buf);
-			break;
+			goto decoder_exit;
 		}
 		if (packet.stream_index == inst->video_stream_index) {
 			if ((ppacket = malloc(sizeof(AVPacket))) == NULL) {
@@ -1608,9 +1610,10 @@ avbox_player_stream_parse(void *arg)
 					if (errno == EAGAIN) {
 						continue;
 					} else if (errno == ESHUTDOWN) {
+						LOG_PRINT_ERROR("Video packets queue shutdown! Aborting parser!");
 						av_packet_unref(ppacket);
 						free(ppacket);
-						break;
+						goto decoder_exit;
 					}
 					LOG_VPRINT_ERROR("Could not add packet to queue: %s",
 						strerror(errno));
@@ -1633,9 +1636,10 @@ avbox_player_stream_parse(void *arg)
 					if (errno == EAGAIN) {
 						continue;
 					} else if (errno == ESHUTDOWN) {
+						LOG_PRINT_ERROR("Audio packets queue shutdown! Aborting parser!");
 						av_packet_unref(ppacket);
 						free(ppacket);
-						break;
+						goto decoder_exit;
 					}
 					LOG_VPRINT_ERROR("Could not enqueue packet: %s",
 						strerror(errno));
@@ -1740,9 +1744,12 @@ avbox_player_stream_parse(void *arg)
 	}
 
 decoder_exit:
-	DEBUG_PRINT("player", "Stream parser exiting");
+	DEBUG_VPRINT("player", "Stream parser exiting (quit=%i)",
+		inst->stream_quit);
 
 	pthread_mutex_lock(&inst->state_lock);
+	inst->stream_exiting  = 1;
+	pthread_mutex_unlock(&inst->state_lock);
 
 	/* clean video stuff */
 	if (inst->have_video) {
@@ -1850,6 +1857,9 @@ decoder_exit:
 	pthread_mutex_lock(&inst->stream_lock);
 	pthread_cond_signal(&inst->stream_signal);
 	pthread_mutex_unlock(&inst->stream_lock);
+
+	pthread_mutex_lock(&inst->state_lock);
+	inst->stream_exiting = 0;
 	pthread_mutex_unlock(&inst->state_lock);
 
 	DEBUG_PRINT("player", "Stream parser thread bailing out");
@@ -2002,7 +2012,8 @@ avbox_player_gettitle(struct avbox_player *inst)
 	AVDictionaryEntry *title_entry;
 	ASSERT(inst != NULL);
 	pthread_mutex_lock(&inst->state_lock);
-	if (inst == NULL || inst->fmt_ctx == NULL || inst->fmt_ctx->metadata == NULL) {
+
+	if (inst->stream_exiting || inst->fmt_ctx == NULL || inst->fmt_ctx->metadata == NULL) {
 		goto end;
 	}
 	if ((title_entry = av_dict_get(inst->fmt_ctx->metadata, "title", NULL, 0)) != NULL) {
@@ -2324,10 +2335,10 @@ avbox_player_getduration(struct avbox_player * const inst, int64_t *duration)
 	ASSERT(inst != NULL);
 	ASSERT(duration != NULL);
 	pthread_mutex_lock(&inst->state_lock);
-	if (inst->fmt_ctx != NULL) {
-		*duration = inst->fmt_ctx->duration;
-	} else {
+	if (inst->stream_exiting || inst->fmt_ctx == NULL) {
 		*duration = 0;
+	} else {
+		*duration = inst->fmt_ctx->duration;
 	}
 	pthread_mutex_unlock(&inst->state_lock);
 }
@@ -2342,10 +2353,10 @@ avbox_player_gettime(struct avbox_player * const inst, int64_t *time)
 	ASSERT(inst != NULL);
 	ASSERT(time != NULL);
 	pthread_mutex_lock(&inst->state_lock);
-	if (inst->getmastertime != NULL) {
-		*time = inst->getmastertime(inst);
-	} else {
+	if (inst->stream_exiting || inst->getmastertime == NULL) {
 		*time = 0;
+	} else {
+		*time = inst->getmastertime(inst);
 	}
 	pthread_mutex_unlock(&inst->state_lock);
 

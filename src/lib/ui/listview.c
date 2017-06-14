@@ -388,8 +388,6 @@ avbox_listview_messagehandler(void *context, struct avbox_message *msg)
 		switch (ev->msg) {
 		case MBI_EVENT_BACK:
 		{
-			DEBUG_PRINT("listview", "Sending DISMISSED message");
-
 			/* send dismiss message to parent */
 			if (avbox_object_sendmsg(&inst->notify_object,
 				AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
