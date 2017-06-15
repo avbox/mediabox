@@ -289,7 +289,7 @@ surface_update(struct mbv_surface * const inst,
 	if (inst == root) {
 		/* if this is the root window simply flip the surface */
 		pthread_mutex_lock(&inst->lock);
-		DFBCHECK(inst->surface->Flip(inst->surface, NULL, DSFLIP_ONSYNC));
+		DFBCHECK(inst->surface->Flip(inst->surface, NULL, DSFLIP_ONSYNC | DSFLIP_WAIT));
 		pthread_mutex_unlock(&inst->lock);
 	} else {
 		/* if this is a regular window then blit it to the
@@ -390,7 +390,7 @@ init(int argc, char **argv, int * const w, int * const h)
 	/* IDirectFBScreen does not return the correct size on SDL */
 	DFBSurfaceDescription dsc;
 	dsc.flags = DSDESC_CAPS;
-	dsc.caps  = DSCAPS_PRIMARY | DSCAPS_PREMULTIPLIED | DSCAPS_DOUBLE;
+	dsc.caps  = DSCAPS_PRIMARY | DSCAPS_PREMULTIPLIED | DSCAPS_DOUBLE | DSCAPS_FLIPPING;
 	IDirectFBSurface *primary;
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &primary));
 	DFBCHECK(primary->GetSize(primary, w, h));
