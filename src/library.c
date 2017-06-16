@@ -466,10 +466,10 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 {
 	struct mbox_library * const inst = context;
 
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_SELECTED:
 	{
-		ASSERT(avbox_dispatch_getmsgpayload(msg) == inst->menu);
+		ASSERT(avbox_message_payload(msg) == inst->menu);
 		struct mbox_library_playlist_item *selected =
 			avbox_listview_getselected(inst->menu);
 
@@ -519,7 +519,7 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 	}
 	case AVBOX_MESSAGETYPE_DISMISSED:
 	{
-		DEBUG_ASSERT("library", avbox_dispatch_getmsgpayload(msg) == inst->menu,
+		DEBUG_ASSERT("library", avbox_message_payload(msg) == inst->menu,
 			"Invalid message payload!");
 
 		if (inst->dotdot != NULL) {

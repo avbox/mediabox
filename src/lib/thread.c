@@ -49,11 +49,11 @@ avbox_thread_msghandler(void * const context, struct avbox_message *msg)
 {
 	struct avbox_thread * const thread = context;
 
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_DELEGATE:
 	{
 		struct avbox_delegate * const del =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 		(void) clock_gettime(CLOCK_MONOTONIC, &thread->start_time);
 		avbox_delegate_execute(del);
 		(void) clock_gettime(CLOCK_MONOTONIC, &thread->stop_time);
@@ -132,7 +132,7 @@ avbox_thread_run(void *arg)
 					strerror(errno), errno);
 			}
 		}
-		avbox_dispatch_dispatchmsg(msg);
+		avbox_message_dispatch(msg);
 	}
 
 	/* cleanup */
@@ -172,6 +172,7 @@ avbox_thread_new(void)
 	pthread_mutex_lock(&lock);
 #ifndef NDEBUG
 	thread->no = thread_no++;
+	thread->jobs = 0;
 #endif
 	thread->running = 0;
 	if (pthread_create(&thread->thread, NULL, avbox_thread_run, thread) != 0) {

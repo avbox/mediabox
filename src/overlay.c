@@ -246,11 +246,11 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 {
 	int msgtype;
 	struct mbox_overlay * const inst = context;
-	switch ((msgtype = avbox_dispatch_getmsgtype(msg))) {
+	switch ((msgtype = avbox_message_id(msg))) {
 	case AVBOX_MESSAGETYPE_PLAYER:
 	{
 		struct avbox_player_status_data * const data =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 		if (data->last_status == MB_PLAYER_STATUS_PAUSED &&
 			data->status != MB_PLAYER_STATUS_PAUSED) {
 			mbox_overlay_setstate(inst, MBOX_OVERLAY_STATE_PLAYING);
@@ -344,7 +344,7 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 	case AVBOX_MESSAGETYPE_TIMER:
 	{
 		struct avbox_timer_data * const data =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 		ASSERT(data != NULL);
 		if (data->id == inst->dismiss_timer) {
 			if (avbox_window_isvisible(inst->window)) {

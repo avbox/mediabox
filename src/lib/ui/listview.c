@@ -379,11 +379,11 @@ avbox_listview_messagehandler(void *context, struct avbox_message *msg)
 {
 	struct avbox_listview *inst = context;
 
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_INPUT:
 	{
 		struct avbox_input_message *ev =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 
 		switch (ev->msg) {
 		case MBI_EVENT_BACK:

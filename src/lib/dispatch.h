@@ -55,7 +55,7 @@ avbox_dispatch_swapep(struct avbox_object *a,
  * Get the type of a message
  */
 int
-avbox_dispatch_getmsgtype(struct avbox_message *msg);
+avbox_message_id(struct avbox_message * const msg);
 
 
 /**
@@ -69,7 +69,7 @@ avbox_dispatch_close(void);
  * Get the message payload.
  */
 void *
-avbox_dispatch_getmsgpayload(struct avbox_message *msg);
+avbox_message_payload(struct avbox_message * const msg);
 
 
 /**
@@ -119,7 +119,7 @@ avbox_dispatch_init();
  * Dispatch a message.
  */
 void
-avbox_dispatch_dispatchmsg(struct avbox_message *msg);
+avbox_message_dispatch(struct avbox_message *msg);
 
 
 /**

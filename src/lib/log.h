@@ -54,6 +54,10 @@ size_t
 log_printf(const char * fmt, ...);
 
 
+void
+log_backtrace(void);
+
+
 /**
  * Initialize logging system for early logging
  */

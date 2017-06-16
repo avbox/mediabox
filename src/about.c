@@ -87,11 +87,11 @@ mbox_about_msghandler(void *context, struct avbox_message *msg)
 {
 	struct mbox_about * const inst = context;
 
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_INPUT:
 	{
 		struct avbox_input_message * const ev =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 
 		DEBUG_PRINT("about", "Hiding window");
 

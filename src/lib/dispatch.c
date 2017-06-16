@@ -48,9 +48,9 @@ LISTABLE_STRUCT(avbox_object,
  */
 struct avbox_message
 {
-	struct avbox_object** dest;
+	int id;
 	int flags;
-	int type;
+	struct avbox_object** dest;
 	void *payload;
 };
 
@@ -153,7 +153,7 @@ avbox_dispatch_freemsg(struct avbox_message *msg)
 static int
 avbox_object_handler(struct avbox_object *object, struct avbox_message * const msg)
 {
-	switch (msg->type) {
+	switch (msg->id) {
 	case AVBOX_MESSAGETYPE_DESTROY:
 	{
 		ASSERT(object != NULL);
@@ -200,10 +200,10 @@ avbox_dispatch_swapobject(struct avbox_object *a,
  * Get the type of a message
  */
 int
-avbox_dispatch_getmsgtype(struct avbox_message *msg)
+avbox_message_id(struct avbox_message * const msg)
 {
-	assert(msg != NULL);
-	return msg->type;
+	ASSERT(msg != NULL);
+	return msg->id;
 }
 
 
@@ -211,9 +211,9 @@ avbox_dispatch_getmsgtype(struct avbox_message *msg)
  * Get the message payload.
  */
 void *
-avbox_dispatch_getmsgpayload(struct avbox_message *msg)
+avbox_message_payload(struct avbox_message * const msg)
 {
-	assert(msg != NULL);
+	ASSERT(msg != NULL);
 	return msg->payload;
 }
 
@@ -292,8 +292,9 @@ avbox_dispatch_destdup(struct avbox_object **dest)
 {
 	int c = 0;
 	struct avbox_object **pdest = dest, **out;
-	assert(dest != NULL);
-	assert(*dest != NULL);
+
+	ASSERT(dest != NULL);
+	ASSERT(*dest != NULL);
 
 	/* count the objects in the array */
 	while (*pdest != NULL) {
@@ -303,7 +304,7 @@ avbox_dispatch_destdup(struct avbox_object **dest)
 
 	/* allocate memory */
 	if ((out = malloc(++c * sizeof(struct avbox_object*))) == NULL) {
-		assert(errno == ENOMEM);
+		ASSERT(errno == ENOMEM);
 		return NULL;
 	}
 
@@ -322,7 +323,7 @@ avbox_dispatch_destdup(struct avbox_object **dest)
  */
 struct avbox_message*
 avbox_object_sendmsg(struct avbox_object **dest,
-	int type, int flags, void * const payload)
+	int id, int flags, void * const payload)
 {
 	int cast;
 	struct avbox_message *msg;
@@ -338,7 +339,7 @@ avbox_object_sendmsg(struct avbox_object **dest,
 	msg->dest = NULL;
 	msg->flags = flags;
 	msg->payload = payload;
-	msg->type = type;
+	msg->id = id;
 
 	cast = flags & (AVBOX_DISPATCH_UNICAST |
 		AVBOX_DISPATCH_ANYCAST | AVBOX_DISPATCH_MULTICAST |
@@ -371,11 +372,7 @@ avbox_object_sendmsg(struct avbox_object **dest,
 		break;
 	}
 	default:
-		DEBUG_VPRINT("dispatch", "Invalid cast: %i",
-			cast);
-		errno = EINVAL;
-		free(msg);
-		return NULL;
+		DEBUG_VABORT("dispatch", "Invalid cast: %i", cast);
 	}
 
 	/* put the message on the target thread's queue */
@@ -538,8 +535,8 @@ avbox_dispatch_shutdown(void)
 	 * the payload of flushed messages */
 	avbox_queue_close(q->queue);
 	while ((msg = avbox_queue_get(q->queue)) != NULL) {
-		DEBUG_VPRINT("dispatch", "LEAK: Leftover message (type=%i)",
-			msg->type);
+		DEBUG_VPRINT("dispatch", "LEAK: Leftover message (id=0x%02x)",
+			msg->id);
 		avbox_dispatch_freemsg(msg);
 	}
 	avbox_queue_destroy(q->queue);
@@ -556,7 +553,7 @@ avbox_dispatch_shutdown(void)
  * Run the main dispatch loop
  */
 void
-avbox_dispatch_dispatchmsg(struct avbox_message *msg)
+avbox_message_dispatch(struct avbox_message * msg)
 {
 	const pid_t tid = gettid();
 	assert(msg != NULL);

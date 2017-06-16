@@ -560,11 +560,11 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 
 	(void) context;
 
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_INPUT:
 	{ 
 		struct avbox_input_message *event =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 
 		DEBUG_PRINT("shell", "Input event received");
 
@@ -702,7 +702,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 	case AVBOX_MESSAGETYPE_TIMER:
 	{
 		struct avbox_timer_data * const timer_data =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 
 		/* DEBUG_VPRINT("shell", "Received timer message id=%i",
 			timer_data->id); */
@@ -721,14 +721,14 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 	case AVBOX_MESSAGETYPE_VOLUME:
 	{
 		int *vol;
-		vol = avbox_dispatch_getmsgpayload(msg);
+		vol = avbox_message_payload(msg);
 		mbox_shell_volumechanged(*vol);
 		break;
 	}
 	case AVBOX_MESSAGETYPE_PLAYER:
 	{
 		struct avbox_player_status_data * const status_data =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 		mbox_shell_playerstatuschanged(status_data->sender,
 			status_data->status, status_data->last_status);
 		free(status_data);
@@ -738,7 +738,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 	{
 		DEBUG_PRINT("shell", "Received DISMISSED message");
 
-		if (avbox_dispatch_getmsgpayload(msg) == mainmenu) {
+		if (avbox_message_payload(msg) == mainmenu) {
 			mbox_mainmenu_destroy(mainmenu);
 			mainmenu = NULL;
 		}
@@ -751,7 +751,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 	}
 	default:
 		DEBUG_VPRINT("shell", "Invalid message type: %i",
-			avbox_dispatch_getmsgtype(msg));
+			avbox_message_id(msg));
 		break;
 	}
 	return ret;

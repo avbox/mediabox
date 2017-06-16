@@ -55,6 +55,7 @@
 do { \
 	if (UNLIKELY(!(expr))) { \
 		DEBUG_VPRINT("ASSERT", "(%s) failed at %s:%i", #expr,  __FILE__, __LINE__ ); \
+		log_backtrace(); \
 		abort(); \
 	} \
 } while (0)
@@ -111,5 +112,6 @@ do { \
 #else
 #define DEBUG_VABORT(module, fmt, ...) (void) 0
 #endif
+
 
 #endif

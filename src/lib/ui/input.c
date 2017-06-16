@@ -68,7 +68,7 @@ realloc_safe(void *buf, size_t sz)
 
 
 static struct avbox_object**
-avbox_input_getendpoints()
+avbox_input_getendpoints(int * const cnt)
 {
 	int i = 0;
 	struct avbox_object** objlist = NULL;
@@ -76,8 +76,9 @@ avbox_input_getendpoints()
 
 	pthread_mutex_lock(&endpoints_lock);
 
+	*cnt = LIST_SIZE(&endpoints);
 	/* allocate memory for endpoints array */
-	if ((objlist = malloc((LIST_SIZE(&endpoints) + 1) *
+	if ((objlist = malloc((*cnt + 1) *
 		sizeof(struct avbox_object*))) == NULL) {
 		assert(errno == ENOMEM);
 		goto end;
@@ -191,6 +192,7 @@ avbox_input_release(struct avbox_object *obj)
 void
 avbox_input_sendevent(enum avbox_input_event e)
 {
+	int cnt;
 	struct avbox_input_message *ev;
 	struct avbox_object **dest = NULL;
 
@@ -200,8 +202,13 @@ avbox_input_sendevent(enum avbox_input_event e)
 	}
 
 	/* get the input stack */
-	if ((dest = avbox_input_getendpoints()) == NULL) {
+	if ((dest = avbox_input_getendpoints(&cnt)) == NULL) {
 		abort();
+	}
+
+	/* no need to send msg if no endpoints */
+	if (cnt == 0) {
+		return;
 	}
 
 	/* initialize it */

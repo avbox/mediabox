@@ -414,7 +414,7 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 {
 	struct mbox_downloads * const inst = context;
 
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_SELECTED:
 	{
 		char *selected = avbox_listview_getselected(inst->menu);
@@ -446,7 +446,7 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 	case AVBOX_MESSAGETYPE_TIMER:
 	{
 		struct avbox_timer_data * const timer_data =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 		mbox_downloads_populatelist(timer_data->id, timer_data->data);
 		free(timer_data);
 		break;

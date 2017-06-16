@@ -517,9 +517,8 @@ avbox_player_video(void *arg)
 
 		/* if we got a flush command flush all decoded video */
 		if (UNLIKELY(inst->video_flush_output)) {
-			DEBUG_PRINT("player", "Flushing video output");
+			DEBUG_PRINT("player", "Flushing video frames");
 			avbox_player_dumpvideo(inst, INT64_MAX, 1);
-			DEBUG_PRINT("player", "Video output flushed");
 			inst->video_flush_output = 0;
 		}
 
@@ -557,6 +556,7 @@ avbox_player_video(void *arg)
 			LOG_VPRINT_ERROR("Could not lock video window: %s",
 				strerror(errno));
 		} else {
+			ASSERT(inst->swscale_ctx != NULL);
 			ASSERT(ALIGNED(*frame->data, 16));
 			ASSERT(ALIGNED(buf, 16));
 			buf += pitch * ((inst->height - inst->video_size.h) / 2);
@@ -1159,23 +1159,25 @@ avbox_player_video_decode(void *arg)
 				ASSERT(video_buffersink_ctx->inputs[0]->time_base.num == inst->fmt_ctx->streams[inst->video_stream_index]->time_base.num);
 				ASSERT(video_buffersink_ctx->inputs[0]->time_base.den == inst->fmt_ctx->streams[inst->video_stream_index]->time_base.den);
 
+				/* update the video decoder pts */
+				inst->video_decoder_pts = video_frame_flt->pts;
+
 				/* add frame to decoded frames queue */
 				while (avbox_queue_put(inst->video_frames_q, video_frame_flt) == -1) {
 					if (errno == EAGAIN) {
 						continue;
 					} else if (errno == ESHUTDOWN) {
-						LOG_PRINT_ERROR("Queue closed unexpectedly!");
+						LOG_PRINT_ERROR("Video frames queue closed unexpectedly!");
 					} else {
 						LOG_VPRINT_ERROR("Error: avbox_queue_put() failed: %s",
 							strerror(errno));
 					}
+					av_frame_unref(video_frame_flt);
 					av_free(video_frame_flt);
 					video_frame_flt = NULL;
 					goto decoder_exit;
 				}
 
-				/* update the video decoder pts */
-				inst->video_decoder_pts = video_frame_flt->pts;
 				video_frame_flt = NULL;
 			}
 			av_frame_unref(video_frame_nat);
@@ -1208,6 +1210,7 @@ decoder_exit:
 		}
 	}
 
+
 	if (inst->swscale_ctx != NULL) {
 		sws_freeContext(inst->swscale_ctx);
 		inst->swscale_ctx = NULL;
@@ -1221,11 +1224,24 @@ decoder_exit:
 	if (video_frame_nat != NULL) {
 		av_free(video_frame_nat);
 	}
+
 	ASSERT(video_frame_flt == NULL);
-	if (video_frame_flt != NULL) {
-		av_free(video_frame_flt);
-	}
+
 	if (video_buffersink_ctx != NULL) {
+		DEBUG_PRINT("player", "Flushing video filter graph");
+		if ((video_frame_flt = av_frame_alloc()) != NULL) {
+			while ((i = av_buffersink_get_frame(video_buffersink_ctx, video_frame_flt)) >= 0) {
+				av_frame_unref(video_frame_flt);
+			}
+			if (i != AVERROR_EOF) {
+				char err[256];
+				av_strerror(i, err, sizeof(err));
+				LOG_VPRINT_ERROR("Could not flush video filter graph: %s", err);
+			}
+			av_free(video_frame_flt);
+		} else {
+			LOG_PRINT_ERROR("LEAK: Could not flush filter graph!");
+		}
 		avfilter_free(video_buffersink_ctx);
 	}
 	if (video_buffersrc_ctx != NULL) {
@@ -1235,6 +1251,8 @@ decoder_exit:
 		avfilter_graph_free(&video_filter_graph);
 	}
 	if (inst->video_codec_ctx != NULL) {
+		DEBUG_PRINT("player", "Flushing video decoder");
+		avcodec_flush_buffers(inst->video_codec_ctx);
 		avcodec_close(inst->video_codec_ctx);
 		avcodec_free_context(&inst->video_codec_ctx);
 		inst->video_codec_ctx = NULL; /* avcodec_free_context() already does this */
@@ -1398,22 +1416,33 @@ avbox_player_audio_decode(void * arg)
 end:
 	DEBUG_PRINT("player", "Audio decoder exiting");
 
+	if (audio_buffersink_ctx != NULL) {
+		DEBUG_PRINT("player", "Flushing audio filter graph");
+		while ((ret = av_buffersink_get_frame(audio_buffersink_ctx, audio_frame)) >= 0) {
+			av_frame_unref(audio_frame);
+		}
+		if (ret != AVERROR_EOF) {
+			char err[256];
+			av_strerror(ret, err, sizeof(err));
+			LOG_VPRINT_ERROR("Could not audio flush filter graph: %s", err);
+		}
+		avfilter_free(audio_buffersrc_ctx);
+	}
+	if (audio_buffersink_ctx != NULL) {
+		avfilter_free(audio_buffersink_ctx);
+	}
+	if (audio_filter_graph != NULL) {
+		avfilter_graph_free(&audio_filter_graph);
+	}
 	if (audio_frame_nat != NULL) {
 		av_free(audio_frame_nat);
 	}
 	if (audio_frame != NULL) {
 		av_free(audio_frame);
 	}
-	if (audio_buffersink_ctx != NULL) {
-		avfilter_free(audio_buffersink_ctx);
-	}
-	if (audio_buffersink_ctx != NULL) {
-		avfilter_free(audio_buffersrc_ctx);
-	}
-	if (audio_filter_graph != NULL) {
-		avfilter_graph_free(&audio_filter_graph);
-	}
 	if (inst->audio_codec_ctx != NULL) {
+		DEBUG_PRINT("player", "Flushing audio decoder");
+		avcodec_flush_buffers(inst->audio_codec_ctx);
 		avcodec_close(inst->audio_codec_ctx);
 		avcodec_free_context(&inst->audio_codec_ctx);
 		inst->audio_codec_ctx = NULL; /* avcodec_free_context() already does this */
@@ -2370,7 +2399,7 @@ static int
 avbox_player_handler(void * const context, struct avbox_message * const msg)
 {
 	struct avbox_player * const inst = context;
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_DESTROY:
 	{
 		ASSERT(inst != NULL);
@@ -2403,7 +2432,7 @@ avbox_player_handler(void * const context, struct avbox_message * const msg)
 	}
 	default:
 		DEBUG_VABORT("player", "Invalid message (type=%d)",
-			avbox_dispatch_getmsgtype(msg));
+			avbox_message_id(msg));
 	}
 	return AVBOX_DISPATCH_OK;
 }

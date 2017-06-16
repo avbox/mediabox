@@ -349,12 +349,12 @@ mbox_mediasearch_msghandler(void *context, struct avbox_message *msg)
 		istext = 1; \
 		break;
 
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_INPUT:
 	{
 		int istext = 0;
 		struct avbox_input_message * const ev =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 		switch (ev->msg) {
 		case MBI_EVENT_CLEAR:
 			mbox_mediasearch_appendtoterms(inst, "\b");

@@ -67,11 +67,11 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 {
 	struct mbox_mainmenu * const inst = context;
 
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_SELECTED:
 	{
 		void * const payload =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 
 		DEBUG_PRINT("mainmenu", "Received SELECTED message");
 
@@ -150,7 +150,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 		DEBUG_PRINT("mainmenu", "Received DISMISSED message");
 
 		void * const payload =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 
 		assert(payload != NULL);
 

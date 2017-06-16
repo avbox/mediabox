@@ -51,10 +51,11 @@ AC_CHECK_FUNCS([ \
 	strdup \
 	strerror \
 	strstr \
+	backtrace \
 ])
 
 AC_HEADER_STDC
-AC_CHECK_HEADERS(unistd.h string.h pwd.h sys/stat.h sys/types.h)
+AC_CHECK_HEADERS(unistd.h string.h pwd.h sys/stat.h sys/types.h execinfo.h)
 
 
 AC_ARG_ENABLE([debug], [extra debugging code])

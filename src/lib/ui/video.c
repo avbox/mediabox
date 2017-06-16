@@ -612,11 +612,11 @@ static int
 avbox_window_handler(void *context, struct avbox_message * const msg)
 {
 	struct avbox_window * const window = context;
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_DELEGATE:
 	{
 		struct avbox_delegate * const del =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 		avbox_delegate_execute(del);
 		return AVBOX_DISPATCH_OK;
 	}
@@ -641,7 +641,7 @@ avbox_window_handler(void *context, struct avbox_message * const msg)
 			return window->handler(window->user_context, msg);
 		} else {
 			DEBUG_VABORT("video", "Invalid message %d and no handler!!",
-				avbox_dispatch_getmsgtype(msg));
+				avbox_message_id(msg));
 		}
 	}
 }
@@ -1159,8 +1159,8 @@ avbox_window_hide(struct avbox_window *window)
 	 * all the windows that are higher on the stack. */
 	LIST_FOREACH(struct avbox_window_node*, damaged_window, &window_stack) {
 		if (avbox_rect_overlaps(&window->rect, &damaged_window->window->rect)) {
-			DEBUG_VPRINT("video", "Repainting damaged window \"%s\"",
-				damaged_window->window->identifier);
+			/* DEBUG_VPRINT("video", "Repainting damaged window \"%s\"",
+				damaged_window->window->identifier); */
 			avbox_window_update(damaged_window->window);
 		}
 	}

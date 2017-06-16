@@ -3,12 +3,21 @@
  * This file is part of mediabox.
  */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <assert.h>
+#include <features.h>
 #include <pthread.h>
 #include <sys/time.h>
+
+#ifdef HAVE_EXECINFO_H
+#include <execinfo.h>
+#endif
 
 
 static FILE *logfile = NULL;
@@ -40,6 +49,27 @@ log_printf(const char * const fmt, ...)
 	pthread_mutex_unlock(&iolock);
 	va_end(args);
 	return ret;
+}
+
+
+void
+log_backtrace(void)
+{
+#ifdef HAVE_BACKTRACE
+	void *bt[20];
+	size_t sz;
+	char **strings;
+
+	sz = backtrace(bt, 20);
+	if ((strings = backtrace_symbols(bt, sz)) == NULL) {
+		return;
+	}
+
+	for (size_t i = 0; i < sz; i++) {
+		log_printf("%s", strings[i]);
+	}
+	free(strings);
+#endif
 }
 
 

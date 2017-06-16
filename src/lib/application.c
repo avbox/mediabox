@@ -214,18 +214,18 @@ avbox_application_delegate(avbox_delegate_fn func, void *arg)
 static int
 avbox_application_msghandler(void *context, struct avbox_message *msg)
 {
-	switch (avbox_dispatch_getmsgtype(msg)) {
+	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_INPUT:
 	{
 		struct avbox_input_message * const ev =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 		avbox_input_eventfree(ev);
 		break;
 	}
 	case AVBOX_MESSAGETYPE_DELEGATE:
 	{
 		struct avbox_delegate * const del =
-			avbox_dispatch_getmsgpayload(msg);
+			avbox_message_payload(msg);
 		avbox_delegate_execute(del);
 		break;
 	}
@@ -489,7 +489,7 @@ avbox_application_run(void)
 					strerror(errno), errno);
 			}
 		}
-		avbox_dispatch_dispatchmsg(msg);
+		avbox_message_dispatch(msg);
 	}
 
 	DEBUG_PRINT("application", "Application quitting");
@@ -540,11 +540,12 @@ avbox_application_doevents()
 			DEBUG_ABORT("application",
 				"BUG: getmsg() returned NULL after peekmsg() succeeded!");
 		}
-		avbox_dispatch_dispatchmsg(msg);
+		avbox_message_dispatch(msg);
 		return 1;
 	}
 	return 0;
 }
+
 
 /**
  * Quit the application.
