@@ -44,14 +44,6 @@ typedef int (*avbox_message_handler)(void *context, struct avbox_message *msg);
 
 
 /**
- * Swap two endpoints.
- */
-void
-avbox_dispatch_swapep(struct avbox_object *a,
-	struct avbox_object *b);
-
-
-/**
  * Get the type of a message
  */
 int

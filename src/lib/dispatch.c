@@ -55,10 +55,8 @@ struct avbox_message
 };
 
 
-static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static int initialized = 0;
-static LIST objects;
 static LIST queues;
 
 
@@ -116,9 +114,9 @@ avbox_object_unref(struct avbox_object *obj)
 	ATOMIC_DEC(&obj->refs);
 	if (obj->refs == 0) {
 		pthread_mutex_lock(&obj->lock);
-		assert(obj->refs == 0);
+		ASSERT(obj->refs == 0);
 		if (obj->refs == 0) {
-			assert(obj->destroyed == 1);
+			ASSERT(obj->destroyed == 1);
 			pthread_mutex_unlock(&obj->lock);
 			free(obj);
 			return;
@@ -157,6 +155,11 @@ avbox_object_handler(struct avbox_object *object, struct avbox_message * const m
 	case AVBOX_MESSAGETYPE_DESTROY:
 	{
 		ASSERT(object != NULL);
+
+		/* destroy object so it won't receive
+		 * more messages */
+		object->destroyed = 1;
+
 		(void) object->handler(object->context, msg);
 
 		if (avbox_object_sendmsg(&object,
@@ -170,29 +173,12 @@ avbox_object_handler(struct avbox_object *object, struct avbox_message * const m
 	{
 		ASSERT(object != NULL);
 		(void) object->handler(object->context, msg);
-		pthread_mutex_lock(&lock);
-		object->destroyed = 1;
-		LIST_REMOVE(object);
-		pthread_mutex_unlock(&lock);
 		avbox_object_unref(object);
 		return AVBOX_DISPATCH_OK;
 	}
 	default:
 		return object->handler(object->context, msg);
 	}
-}
-
-
-/**
- * Swap two endpoints.
- */
-void
-avbox_dispatch_swapobject(struct avbox_object *a,
-	struct avbox_object *b)
-{
-	pthread_mutex_lock(&lock);
-	LIST_SWAP(a, b);
-	pthread_mutex_unlock(&lock);
 }
 
 
@@ -311,6 +297,9 @@ avbox_dispatch_destdup(struct avbox_object **dest)
 	c = 0;
 	pdest = dest;
 	while (*pdest != NULL) {
+		if ((*pdest)->destroyed) {
+			DEBUG_PRINT("dispatch", "Sending message to destroyed object!!");
+		}
 		out[c++] = avbox_object_ref(*pdest++);
 	}
 	out[c] = NULL;
@@ -426,10 +415,6 @@ avbox_object_new(avbox_message_handler handler, void *context)
 	obj->refs = 1;
 	obj->destroyed = 0;
 
-	pthread_mutex_lock(&lock);
-	LIST_ADD(&objects, obj);
-	pthread_mutex_unlock(&lock);
-
 	return obj;
 }
 
@@ -458,7 +443,6 @@ avbox_dispatch_init()
 	struct avbox_dispatch_queue *q;
 
 	if (!initialized) {
-		LIST_INIT(&objects);
 		LIST_INIT(&queues);
 		initialized = 1;
 	}
@@ -574,7 +558,7 @@ avbox_message_dispatch(struct avbox_message * msg)
 				(*dest)->q->tid, tid);
 
 			pthread_mutex_lock(&(*dest)->lock);
-			if (!(*dest)->destroyed) {
+			if (!(*dest)->destroyed || msg->id == AVBOX_MESSAGETYPE_CLEANUP) {
 				if ((res = avbox_object_handler(*dest, msg)) == AVBOX_DISPATCH_OK) {
 					pthread_mutex_unlock(&(*dest)->lock);
 					break;
@@ -595,7 +579,7 @@ avbox_message_dispatch(struct avbox_message * msg)
 		assert(msg->dest != NULL);
 		assert(*msg->dest != NULL);
 		pthread_mutex_lock(&(*msg->dest)->lock);
-		if (!(*msg->dest)->destroyed) {
+		if (!(*msg->dest)->destroyed || msg->id == AVBOX_MESSAGETYPE_CLEANUP) {
 			(void) avbox_object_handler(*msg->dest, msg);
 		} else {
 			DEBUG_PRINT("dispatch", "Target has been destroyed!");
@@ -609,7 +593,7 @@ avbox_message_dispatch(struct avbox_message * msg)
 		struct avbox_object **dest = msg->dest;
 		while (*dest != NULL) {
 			pthread_mutex_lock(&(*dest)->lock);
-			if (!(*dest)->destroyed) {
+			if (!(*dest)->destroyed || msg->id == AVBOX_MESSAGETYPE_CLEANUP) {
 				(void) avbox_object_handler(*dest, msg);
 			} else {
 				DEBUG_PRINT("dispatch", "Target has been destroyed!");
