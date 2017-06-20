@@ -57,6 +57,7 @@ LISTABLE_STRUCT(avbox_process,
 	int stderr;
 	int exit_status;
 	int exitted;
+	int force_kill_timer;
 	unsigned force_kill_delay;
 	unsigned autorestart_delay;
 	enum avbox_process_flags flags;
@@ -332,7 +333,12 @@ avbox_process_free_args(char * const argv[]) {
 static void
 avbox_process_free(struct avbox_process *proc)
 {
-	assert(proc != NULL);
+	ASSERT(proc != NULL);
+
+	if (proc->force_kill_timer != -1) {
+		avbox_timer_cancel(proc->force_kill_timer);
+		proc->force_kill_timer = -1;
+	}
 
 	if (proc->name != NULL) {
 		free((void*) proc->name);
@@ -391,8 +397,6 @@ avbox_process_force_kill(int id, void *data)
 	}
 
 	pthread_mutex_unlock(&process_list_lock);
-
-	free(data);
 
 	return ret;
 }
@@ -828,6 +832,7 @@ avbox_process_start(const char *binary, const char * const argv[],
 	proc->stopping = 0;
 	proc->flags = flags;
 	proc->force_kill_delay = 30;
+	proc->force_kill_timer = -1;
 	proc->autorestart_delay = 5;
 	proc->args = avbox_process_clone_args(argv);
 	proc->name = strdup(name);
@@ -959,15 +964,6 @@ avbox_process_stop(int id)
 			}
 		} else {
 			struct timespec tv;
-			int *id_copy;
-
-			/* allocate heap memory for a copy of the id.
-			 * FIXME: If the timers system gets shutdown before
-			 * the timer fires this memory leaks */
-			if ((id_copy = malloc(sizeof(int))) == NULL) {
-				LOG_PRINT_ERROR("Cannot kill service: Out of memory");
-				return -1;
-			}
 
 			/* send SIGTERM to the process */
 			if (kill(proc->pid, SIGTERM) == -1) {
@@ -978,10 +974,9 @@ avbox_process_stop(int id)
 			/* register a timer to SIGKILL the process if it fails to exit */
 			tv.tv_sec = proc->force_kill_delay;
 			tv.tv_nsec = 0;
-			*id_copy = id;
-			if (avbox_timer_register(&tv, AVBOX_TIMER_TYPE_AUTORELOAD, NULL, avbox_process_force_kill, id_copy) == -1) {
+			if ((proc->force_kill_timer = avbox_timer_register(&tv,
+				AVBOX_TIMER_TYPE_AUTORELOAD, NULL, avbox_process_force_kill, &proc->id)) == -1) {
 				LOG_PRINT_ERROR("Could not register force stop timer");
-				free(id_copy);
 				return -1;
 			}
 		}
