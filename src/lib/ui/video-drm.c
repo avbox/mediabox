@@ -735,7 +735,7 @@ static struct mbv_surface *
 init(int argc, char **argv, int * const w, int * const h)
 {
 	int i, ret, fd = -1;
-	int mode_index = 1;
+	int mode_index = 0;
 	const char *card = "/dev/dri/card0";
 	uint64_t has_dumb;
 
