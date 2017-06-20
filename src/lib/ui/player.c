@@ -610,6 +610,7 @@ avbox_player_video(void *arg)
 						avbox_audiostream_count(inst->audio_stream) == 0) {
 						avbox_player_dumpvideo(inst, elapsed, 1);
 						LOG_PRINT_ERROR("Deadlock detected, recovered (I hope)");
+						continue;
 					}
 				} else {
 					if (UNLIKELY(inst->video_paused)) {
@@ -1221,10 +1222,6 @@ decoder_exit:
 		inst->video_window = NULL;
 	}
 
-	if (video_frame_nat != NULL) {
-		av_free(video_frame_nat);
-	}
-
 	ASSERT(video_frame_flt == NULL);
 
 	if (video_buffersink_ctx != NULL) {
@@ -1252,10 +1249,16 @@ decoder_exit:
 	}
 	if (inst->video_codec_ctx != NULL) {
 		DEBUG_PRINT("player", "Flushing video decoder");
+		while (avcodec_receive_frame(inst->video_codec_ctx, video_frame_nat) == 0) {
+			av_frame_unref(video_frame_nat);
+		}
 		avcodec_flush_buffers(inst->video_codec_ctx);
 		avcodec_close(inst->video_codec_ctx);
 		avcodec_free_context(&inst->video_codec_ctx);
 		inst->video_codec_ctx = NULL; /* avcodec_free_context() already does this */
+	}
+	if (video_frame_nat != NULL) {
+		av_free(video_frame_nat);
 	}
 
 	inst->video_flush_decoder = 0;
