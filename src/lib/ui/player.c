@@ -70,7 +70,7 @@
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_BGRA)
 
 /* This is the # of frames to decode ahead of time */
-#define MB_VIDEO_BUFFER_FRAMES  (20)
+#define MB_VIDEO_BUFFER_FRAMES  (40)
 #define MB_VIDEO_BUFFER_PACKETS (1)
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
@@ -553,8 +553,7 @@ avbox_player_video(void *arg)
 		 * just scale here but in the future this should be done
 		 * by the video driver (possibly accelerated). */
 		if ((buf = avbox_window_lock(inst->video_window, MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
-			LOG_VPRINT_ERROR("Could not lock video window: %s",
-				strerror(errno));
+			LOG_VPRINT_ERROR("Could not lock video window: %s", strerror(errno));
 		} else {
 			ASSERT(inst->swscale_ctx != NULL);
 			ASSERT(ALIGNED(*frame->data, 16));
@@ -2076,7 +2075,7 @@ avbox_player_play(struct avbox_player *inst, const char * const path)
 {
 	int last_percent;
 
-	assert(inst != NULL);
+	ASSERT(inst != NULL);
 
 	/* if no path argument was provided but we're already
 	 * playing a file and we're paused then just resume
@@ -2169,8 +2168,8 @@ avbox_player_play(struct avbox_player *inst, const char * const path)
 	/* fire the audio output thread */
 	if (inst->have_audio) {
 		if (avbox_audiostream_start(inst->audio_stream) == -1) {
+			ASSERT(errno != EEXIST);
 			LOG_PRINT_ERROR("Could not start audio stream");
-			inst->have_audio = 0;
 		}
 	}
 

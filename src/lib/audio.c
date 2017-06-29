@@ -635,12 +635,13 @@ avbox_audiostream_start(struct avbox_audiostream * const stream)
 
 	if (stream->started) {
 		LOG_PRINT_ERROR("Audio stream already started");
+		errno = EEXIST;
 		goto end;
 	}
 
 	if (pthread_create(&stream->thread, NULL, avbox_audiostream_output, stream) != 0) {
 		LOG_PRINT_ERROR("Could not start IO thread");
-		goto end;
+		abort();
 	}
 
 	pthread_cond_wait(&stream->wake, &stream->lock);
