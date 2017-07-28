@@ -1111,7 +1111,11 @@ avbox_player_video_decode(void *arg)
 		while (LIKELY((i = avcodec_receive_frame(inst->video_codec_ctx, video_frame_nat))) == 0) {
 
 			//DEBUG_VPRINT("player", "Video pts: %li", video_frame_nat->pts);
-			//video_frame_nat->pts = video_frame_nat->pkt_pos;
+			if (video_frame_nat->pkt_dts == AV_NOPTS_VALUE) {
+				video_frame_nat->pts = 0;
+			} else {
+				video_frame_nat->pts = video_frame_nat->pkt_dts;
+			}
 
 			/* push the decoded frame into the filtergraph */
 			if (UNLIKELY(av_buffersrc_add_frame_flags(video_buffersrc_ctx,
