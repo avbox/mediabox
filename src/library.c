@@ -592,6 +592,7 @@ mbox_library_new(struct avbox_object *parent)
 
 	/* set width according to screen size */
 	switch (resx) {
+	case 800:  width =  700; break;
 	case 1024: width =  800; break;
 	case 1280: width = 1000; break;
 	case 1920: width = 1280; break;

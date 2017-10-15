@@ -257,9 +257,10 @@ mbox_shell_volumechanged(int volume)
 	int x, y, w, h;
 	int new_timer_id;
 	struct timespec tv;
-	const int bar_width = 800;
 
 	if (volumebar_timer_id == -1) {
+		int bar_width;
+		const int bar_height = 40;
 		struct avbox_window *root_window;
 
 		assert(volumebar == NULL);
@@ -268,18 +269,20 @@ mbox_shell_volumechanged(int volume)
 		/* calculate volumebar size and location */
 		root_window = avbox_video_getrootwindow(0);
 		avbox_window_getcanvassize(root_window, &w, &h);
+		bar_width = (w * 70) / 100;
 		x = (w / 2) - (bar_width / 2);
 		y = h - 150;
 
 		/* create a new window with a progressbar widget */
 		volumebar_window = avbox_window_new(NULL, "volumebar",
-			AVBOX_WNDFLAGS_NONE, x, y, bar_width, 60, NULL, NULL, NULL);
+			AVBOX_WNDFLAGS_NONE, x, y, bar_width, bar_height, NULL, NULL, NULL);
 		if (volumebar_window == NULL) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
 				"Could not create volume indicator window");
 			return;
 		}
-		volumebar = avbox_progressview_new(volumebar_window, 0, 0, bar_width, 60, 0, 100, volume);
+		volumebar = avbox_progressview_new(volumebar_window, 0, 0,
+			bar_width, bar_height, 0, 100, volume);
 		if (volumebar == NULL) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "shell",
 				"Could not create volume indicator");
