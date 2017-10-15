@@ -137,7 +137,6 @@ sysinit_logger(const char * const filepath)
 	/* initialize the logging system */
 	if (filepath == NULL) {
 		log_setfile(stderr);
-		exit(EXIT_FAILURE);
 	} else {
 		FILE *f;
 		if ((f = fopen(filepath, "a")) == NULL) {

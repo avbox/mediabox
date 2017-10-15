@@ -14,7 +14,7 @@ MEDIABOX_LICENSE = OTHER
 MEDIABOX_LICENSE_FILES = COPYING
 MEDIABOX_INSTALL_STAGING = NO
 MEDIABOX_AUTORECONF = YES
-MEDIABOX_DEPENDENCIES = libcurl libupnp directfb openssl mediatomb avmount
+MEDIABOX_DEPENDENCIES = libcurl libupnp directfb openssl mediatomb avmount bluealsa
 
 MEDIABOX_CONF_OPTS = --without-systemd
 

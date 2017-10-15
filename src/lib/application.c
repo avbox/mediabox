@@ -22,6 +22,7 @@
 #include "debug.h"
 #include "dispatch.h"
 #include "thread.h"
+#include "bluetooth.h"
 #include "application.h"
 #include "settings.h"
 #include "timers.h"
@@ -326,7 +327,7 @@ avbox_application_unsubscribe(avbox_application_eventhandler handler, void *cont
 int
 avbox_application_init(int argc, char **cargv, const char *logf)
 {
-	int i;
+	int i, nolog = 0;
 	char **argv;
 	const char * logfile = NULL;
 
@@ -358,12 +359,14 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 			pid1 = 1;
 		} else if (!strcmp(argv[i], "--avbox:logfile")) {
 			logfile = argv[++i];
+		} else if (!strcmp(argv[i], "--avbox:nolog")) {
+			nolog = 1;
 		}
 	}
 
 	/* if no logfile was specified and we're running
 	 * as init then use the default */
-	if (pid1 && logfile == NULL) {
+	if (!nolog && pid1 && logfile == NULL) {
 		logfile = "/var/log/avbox.log";
 	}
 
@@ -416,6 +419,14 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 		}
 		log_setfile(f);
 	}
+
+#ifdef ENABLE_BLUETOOTH
+	/* initialize bluetooth subsystem */
+	if (avbox_bluetooth_init() != 0) {
+		LOG_PRINT_ERROR("Could not initialize bluetooth subsystem");
+		return -1;
+	}
+#endif
 
 	/* initialize input system */
 	if (avbox_input_init(argc, argv) != 0) {
@@ -507,6 +518,9 @@ avbox_application_run(void)
 	avbox_timers_shutdown();
 	avbox_settings_shutdown();
 	avbox_input_shutdown();
+#ifdef ENABLE_BLUETOOTH
+	avbox_bluetooth_shutdown();
+#endif
 	avbox_thread_shutdown();
 	avbox_dispatch_shutdown();
 	avbox_video_shutdown();

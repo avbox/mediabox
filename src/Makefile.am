@@ -83,7 +83,7 @@ mediabox_SOURCES = \
 if ENABLE_BLUETOOTH
 AM_CFLAGS += @BLUEZ_CFLAGS@
 AM_LDFLAGS += @BLUEZ_LIBS@
-mediabox_SOURCES += lib/ui/input-bluetooth.c
+mediabox_SOURCES += a2dp.c lib/bluetooth.c lib/ui/input-bluetooth.c
 endif
 
 if ENABLE_LIBDRM

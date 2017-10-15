@@ -27,6 +27,7 @@
 #include "about.h"
 #include "downloads.h"
 #include "mediasearch.h"
+#include "a2dp.h"
 
 
 /**
@@ -41,6 +42,9 @@ struct mbox_mainmenu
 	struct mbox_about *about;
 	struct mbox_downloads *downloads;
 	struct mbox_mediasearch *search;
+#ifdef ENABLE_BLUETOOTH
+	struct mbox_a2dp *a2dp;
+#endif
 };
 
 
@@ -135,6 +139,24 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 						}
 					}
 				}
+#ifdef ENABLE_BLUETOOTH
+			} else if (!strcmp("A2DP", selected)) {
+				DEBUG_PRINT("mainmenu", "Selected bluetooth audio");
+
+				if (inst->a2dp != NULL) {
+					DEBUG_PRINT("mainmenu", "A2DP Already Active!!");
+				} else {
+					if ((inst->a2dp = mbox_a2dp_new(avbox_window_object(inst->window))) == NULL) {
+						LOG_PRINT_ERROR("Could not create a2dp window!");
+					} else {
+						if (mbox_a2dp_show(inst->a2dp) == -1) {
+							LOG_PRINT_ERROR("Could not show a2dp window!");
+							mbox_a2dp_destroy(inst->a2dp);
+							inst->a2dp = NULL;
+						}
+					}
+				}
+#endif
 			} else {
 				DEBUG_VPRINT("mainmenu", "Selected %s", selected);
 			}
@@ -176,7 +198,17 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 				assert(inst->search != NULL);
 				mbox_mediasearch_destroy(inst->search);
 				inst->search = NULL;
-			} else {
+			}
+#ifdef ENABLE_BLUETOOTH
+			else if (payload == inst->a2dp) {
+				DEBUG_PRINT("mainmenu", "Destroying a2dp window");
+				assert(inst->a2dp != NULL);
+				mbox_a2dp_destroy(inst->a2dp);
+				inst->a2dp = NULL;
+
+			}
+#endif
+			else {
 				DEBUG_VABORT("mediasearch", "Unexpected DISMISSED message: %p",
 					payload);
 			}
@@ -241,7 +273,12 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	int xres, yres;
 	int font_height;
 	int window_height, window_width;
+
+#ifdef ENABLE_BLUETOOTH
+	int n_entries = 9;
+#else
 	int n_entries = 8;
+#endif
 
 	/* allocate memory for main menu */
 	if ((inst = malloc(sizeof(struct mbox_mainmenu))) == NULL) {
@@ -303,9 +340,15 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	inst->search = NULL;
 	inst->about = NULL;
 	inst->downloads = NULL;
+#ifdef ENABLE_BLUETOOTH
+	inst->a2dp = NULL;
+#endif
 
 	/* populate the list */
 	if (avbox_listview_additem(inst->menu, "MEDIA LIBRARY", "LIB") == -1 ||
+#ifdef ENABLE_BLUETOOTH
+		avbox_listview_additem(inst->menu, "BLUETOOTH AUDIO", "A2DP") == -1 ||
+#endif
 		avbox_listview_additem(inst->menu, "OPTICAL DISC", "DVD") == -1 ||
 		avbox_listview_additem(inst->menu, "TV TUNNER", "DVR") == -1 ||
 		avbox_listview_additem(inst->menu, "DOWNLOADS", "DOWN") == -1 ||

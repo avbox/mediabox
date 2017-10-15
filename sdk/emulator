@@ -81,7 +81,7 @@ KARGS=
 KARGS="${KARGS} video=mode:1024x600x32"
 KARGS="${KARGS} root=/dev/sda rw"
 KARGS="${KARGS} quiet loglevel=0"
-KARGS="${KARGS} console=ttyS0"
+KARGS="${KARGS} console=ttyS0 mediabox.avbox:noloxg"
 
 if [ ${BUSYBOX_INIT} -eq 0 ]; then
 	KARGS="${KARGS} init=/bin/mediabox"
@@ -114,8 +114,25 @@ ${QEMU_BIN} \
 	-boot c \
 	-m 1024 \
 	-serial stdio \
+	-usb -bt hci,host \
 	-append "${KARGS}" \
 	-name MediaBox
+
+
+	#-usb -usbdevice host:04ca:300b -bt hci,host:hci0 \
+
+	#-usb -device usb-host,hostbus=1,hostaddr=5 \
+
+#	-device ich9-usb-ehci1,id=usb \
+#	-device ich9-usb-uhci1,masterbus=usb.0,firstport=0,multifunction=on \
+#	-device ich9-usb-uhci2,masterbus=usb.0,firstport=2 \
+#	-device ich9-usb-uhci3,masterbus=usb.0,firstport=4 \
+#	-chardev spicevmc,name=usbredir,id=usbredirchardev1 \
+#	-device usb-redir,chardev=usbredirchardev1,id=usbredirdev1 \
+#	-chardev spicevmc,name=usbredir,id=usbredirchardev2 \
+#	-device usb-redir,chardev=usbredirchardev2,id=usbredirdev2 \
+#	-chardev spicevmc,name=usbredir,id=usbredirchardev3 \
+#	-device usb-redir,chardev=usbredirchardev3,id=usbredirdev3 \
 
 #	-net nic,model=virtio \
 #	-net tap,ifname=vtap,script=no \
