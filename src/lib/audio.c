@@ -242,10 +242,12 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 		break;
 	case SND_PCM_STATE_XRUN:
 	{
+#ifndef NDEBUG
 		const int64_t xruntime = inst->clock_start +
 			FRAMES2TIME(inst, inst->frames);
 		DEBUG_VPRINT("audio", "Pausing on XRUN: offset=%li xruntime=%li",
 			inst->clock_offset, xruntime);
+#endif
 		inst->paused = 1;
 		ret = 0;
 		goto end;

@@ -539,7 +539,6 @@ avbox_dispatch_shutdown(void)
 void
 avbox_message_dispatch(struct avbox_message * msg)
 {
-	const pid_t tid = gettid();
 	assert(msg != NULL);
 
 	const int cast = msg->flags & (AVBOX_DISPATCH_ANYCAST |
@@ -553,9 +552,6 @@ avbox_message_dispatch(struct avbox_message * msg)
 		assert(dest != NULL);
 		while (*dest != NULL) {
 			int res;
-			DEBUG_VASSERT("dispatch", (*dest)->q->tid == tid,
-				"Received message for thread %i on thread %i",
-				(*dest)->q->tid, tid);
 
 			pthread_mutex_lock(&(*dest)->lock);
 			if (!(*dest)->destroyed || msg->id == AVBOX_MESSAGETYPE_CLEANUP) {

@@ -110,7 +110,7 @@ do { \
 	abort(); \
 } while (0)
 #else
-#define DEBUG_VABORT(module, fmt, ...) (void) 0
+#define DEBUG_VABORT(module, fmt, ...) abort()
 #endif
 
 

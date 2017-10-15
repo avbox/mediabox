@@ -417,10 +417,12 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_SELECTED:
 	{
+#ifndef NDEBUG
 		char *selected = avbox_listview_getselected(inst->menu);
 		assert(selected != NULL);
 		DEBUG_VPRINT("downloads", "Selected %s",
 			selected);
+#endif
 		break;
 	}
 	case AVBOX_MESSAGETYPE_DISMISSED:
