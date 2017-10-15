@@ -11,6 +11,9 @@
         android:title="Connect via Bluetooth"
         android:icon="@mipmap/ic_launcher" />
     <item
+        android:id="@+id/connect"
+        android:title="Connect" />
+    <item
         android:id="@+id/about"
         android:title="About"
         android:icon="@mipmap/ic_launcher"/>

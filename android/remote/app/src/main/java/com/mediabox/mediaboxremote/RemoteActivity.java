@@ -453,7 +453,7 @@ public class RemoteActivity extends AppCompatActivity
                 else
                 {
                     Log.d("RemoteActivity", "Opening TCP socket");
-                    InetAddress deviceAddress = InetAddress.getByName(prefs.getString("device", ""));
+                    InetAddress deviceAddress = InetAddress.getByName(prefs.getString("device", "10.10.0.14"));
                     socket = new Socket(deviceAddress, SERVER_PORT);
                 }
             }
