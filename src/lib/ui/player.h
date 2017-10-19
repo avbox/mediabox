@@ -117,7 +117,7 @@ avbox_player_bufferstate(struct avbox_player *inst);
 /**
  * Seek to a chapter.
  */
-int
+void
 avbox_player_seek_chapter(struct avbox_player *inst, int incr);
 
 
@@ -125,16 +125,23 @@ void
 avbox_player_update(struct avbox_player* inst);
 
 
-int 
+void
 avbox_player_play(struct avbox_player* inst, const char * const path);
 
 
-int
+void
 avbox_player_pause(struct avbox_player* inst);
 
 
-int
+void
 avbox_player_stop(struct avbox_player* inst);
+
+
+/**
+ * Gets the underlying dispatch object.
+ */
+struct avbox_object *
+avbox_player_object(struct avbox_player * const inst);
 
 
 /**
@@ -143,12 +150,4 @@ avbox_player_stop(struct avbox_player* inst);
 struct avbox_player*
 avbox_player_new(struct avbox_window *window);
 
-
-/**
- * Destroy media player instance.
- */
-void
-avbox_player_destroy(struct avbox_player *inst);
-
 #endif
-

@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <libgen.h>
 
 #define LOG_MODULE "overlay"
 
@@ -169,7 +170,7 @@ mbox_overlay_draw(struct avbox_window *window)
 		}
 		if ((msg = pango_cairo_create_layout(context)) != NULL) {
 			if ((font_desc = pango_font_description_from_string("Sans Bold 18px")) != NULL) {
-				char duration[18];
+				char duration[20];
 				avbox_overlay_formatpos(duration, inst->position, inst->duration);
 				pango_layout_set_font_description(msg, font_desc);
 				pango_layout_set_width(msg, (250) * PANGO_SCALE);

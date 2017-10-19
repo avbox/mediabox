@@ -4,6 +4,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sched.h>
 #include <alsa/asoundlib.h>
 
 #define LOG_MODULE "audio"
@@ -193,7 +194,7 @@ avbox_audiostream_gettime(struct avbox_audiostream * const stream)
 	}
 end:
 	return stream->clock_start +
-		FRAMES2TIME(stream, stream->frames);
+		(stream->framerate ? FRAMES2TIME(stream, stream->frames) : 0);
 }
 
 
@@ -208,6 +209,8 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 	snd_pcm_status_t *status;
 
 	DEBUG_PRINT("audio", "Pausing audio stream");
+	ASSERT(inst != NULL);
+	ASSERT(inst->framerate != 0);
 
 	snd_pcm_status_alloca(&status);
 
@@ -232,8 +235,8 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 	case SND_PCM_STATE_OPEN:
 	case SND_PCM_STATE_SETUP:
 	case SND_PCM_STATE_PREPARED:
-		LOG_PRINT_ERROR("Error: Non-pausable state");
-		ret = -1;
+		inst->paused = 1;
+		ret = 0;
 		goto end;
 	case SND_PCM_STATE_SUSPENDED:
 	case SND_PCM_STATE_PAUSED:
@@ -272,6 +275,11 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 			}
 		} while (snd_pcm_status_get_state(status) == SND_PCM_STATE_DRAINING);
 
+		inst->clock_offset = FRAMES2TIME(inst, inst->frames);
+
+		DEBUG_VPRINT(LOG_MODULE, "Predicted: %i, Actual: %li",
+			inst->clock_start + FRAMES2TIME(inst, inst->frames),
+			avbox_audiostream_gettime(inst));
 		DEBUG_VPRINT("audio", "PCM state after pause: %s",
 			avbox_pcm_state_getstring(snd_pcm_state(inst->pcm_handle)));
 
@@ -492,6 +500,14 @@ avbox_audiostream_output(void *arg)
 			}
 		}
 
+		/* wait for the pcm to be ready to receive a fragment */
+		if ((ret = snd_pcm_avail(inst->pcm_handle)) < 0 ||
+			(ret = snd_pcm_wait(inst->pcm_handle, 1000)) != 1) {
+			if (ret == 0) {
+				continue;
+			}
+		}
+
 		pthread_mutex_lock(&inst->lock);
 
 		/* check if we're paused */
@@ -500,6 +516,11 @@ avbox_audiostream_output(void *arg)
 			goto end;
 		} else if (UNLIKELY(inst->paused)) {
 			pthread_cond_wait(&inst->wake, &inst->lock);
+			pthread_mutex_unlock(&inst->lock);
+			continue;
+		} else if (UNLIKELY(avbox_queue_peek(inst->packets, 0) != packet)) {
+			/* the packet changed. Mostlikely because the stream was
+			 * flushed while we waited for the PCM */
 			pthread_mutex_unlock(&inst->lock);
 			continue;
 		}
@@ -540,13 +561,6 @@ avbox_audiostream_output(void *arg)
 			}
 		}
 
-		/* If we did a partial write print a debug message.
-		 * I understand this can happen but never seen it */
-		if (UNLIKELY(frames < n_frames)) {
-			DEBUG_VPRINT("audio", "Only %d out of %d frames written",
-				frames, n_frames);
-		}
-
 		/* update frame counts */
 		inst->frames += frames;
 		packet->data += avbox_audiostream_frames2size(inst, frames);
@@ -561,6 +575,7 @@ avbox_audiostream_output(void *arg)
 			free(packet);
 		}
 		pthread_mutex_unlock(&inst->lock);
+		sched_yield();
 	}
 
 end:
@@ -630,6 +645,8 @@ int
 avbox_audiostream_start(struct avbox_audiostream * const stream)
 {
 	int ret = -1;
+
+	DEBUG_PRINT(LOG_MODULE, "Starting audio stream");
 
 	pthread_mutex_lock(&stream->lock);
 
@@ -710,6 +727,7 @@ avbox_audiostream_setclock(struct avbox_audiostream * const stream, const int64_
 	stream->frames = ret = 0;
 end:
 	pthread_mutex_unlock(&stream->lock);
+
 	return ret;
 }
 
@@ -721,6 +739,8 @@ struct avbox_audiostream *
 avbox_audiostream_new(void)
 {
 	struct avbox_audiostream *stream;
+
+	DEBUG_PRINT(LOG_MODULE, "Initializing audio stream");
 
 	/* allocate stream object */
 	if ((stream = malloc(sizeof(struct avbox_audiostream))) == NULL) {

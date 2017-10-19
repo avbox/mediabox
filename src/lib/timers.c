@@ -183,7 +183,7 @@ avbox_timer_register(struct timespec *interval,
 {
 	struct avbox_timer_state *timer;
 
-	DEBUG_PRINT("timers", "Registering timer");
+	/* DEBUG_PRINT("timers", "Registering timer"); */
 
 	/* allocate and initialize timer entry */
 	if ((timer = malloc(sizeof(struct avbox_timer_state))) == NULL) {
@@ -198,8 +198,8 @@ avbox_timer_register(struct timespec *interval,
 	timer->public.data = data;
 	timer->flags = flags;
 
-	DEBUG_VPRINT("timers", "Adding timer (%lis%linsecs)",
-		timer->value.tv_sec, timer->value.tv_nsec);
+	/* DEBUG_VPRINT("timers", "Adding timer (%lis%linsecs)",
+		timer->value.tv_sec, timer->value.tv_nsec); */
 
 	/* add entry to list */
 	pthread_mutex_lock(&timers_lock);

@@ -495,24 +495,9 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 				break;
 			}
 
-			if (avbox_player_playlist(player, &inst->playlist, playlist_item) == 0) {
-				DEBUG_PRINT("library", "Play succeeded. Closing");
-
-				/* hide window */
-				avbox_listview_releasefocus(inst->menu);
-				avbox_window_hide(inst->window);
-
-				/* send dismissed message */
-				if (avbox_object_sendmsg(&inst->parent_obj,
-					AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst) == NULL) {
-					LOG_VPRINT_ERROR("Could not send DISMISSED message: %s",
-						strerror(errno));
-				}
-				break;
-			} else {
-				LOG_PRINT_ERROR("Could not play item!");
-				/* TODO: Display an error message */
-			}
+			/* send the play command */
+			avbox_player_playlist(player,
+				&inst->playlist, playlist_item);
 		}
 
 		break;

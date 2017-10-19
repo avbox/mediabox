@@ -338,6 +338,12 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 	enum avbox_player_status status, enum avbox_player_status last_status)
 {
 	if (inst == player) {
+		if (last_status == MB_PLAYER_STATUS_READY && status != MB_PLAYER_STATUS_READY) {
+			if (mainmenu != NULL) {
+				mbox_mainmenu_destroy(mainmenu);
+				mainmenu = NULL;
+			}
+		}
 		if (last_status == MB_PLAYER_STATUS_BUFFERING &&
 			status != MB_PLAYER_STATUS_BUFFERING) {
 
@@ -507,7 +513,7 @@ mbox_shell_shutdown(void)
 			LOG_VPRINT_ERROR("Could not unsubscribe from player events: %s",
 				strerror(errno));
 		}
-		avbox_player_destroy(player);
+		avbox_object_destroy(avbox_player_object(player));
 	}
 
 	/* unsubscribe from app events */
@@ -617,9 +623,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			}
 			case MB_PLAYER_STATUS_BUFFERING:
 			{
-				/* this should never happen since this state is
-				 * a temporary state in avbox_player_player(). */
-				abort();
+				DEBUG_PRINT(LOG_MODULE, "Received play while buffering");
 				break;
 			}
 			case MB_PLAYER_STATUS_PLAYING:
@@ -826,7 +830,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	if ((dispatch_object = avbox_object_new(mbox_shell_handler, NULL)) == NULL) {
 		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
 			strerror(errno));
-		avbox_player_destroy(player);
+		avbox_object_destroy(avbox_player_object(player));
 		avbox_window_destroy(main_window);
 		return -1;
 	}
@@ -835,7 +839,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	if (avbox_volume_init(dispatch_object) != 0) {
 		LOG_PRINT_ERROR("Could not initialize volume control!");
 		avbox_object_destroy(dispatch_object);
-		avbox_player_destroy(player);
+		avbox_object_destroy(avbox_player_object(player));
 		avbox_window_destroy(main_window);
 		return -1;
 	}
@@ -844,7 +848,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	if (avbox_player_subscribe(player, dispatch_object) == -1) {
 		LOG_PRINT_ERROR("Could not reqister notification object");
 		avbox_object_destroy(dispatch_object);
-		avbox_player_destroy(player);
+		avbox_object_destroy(avbox_player_object(player));
 		avbox_window_destroy(main_window);
 		return -1;
 	}
@@ -854,7 +858,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 		LOG_VPRINT_ERROR("Could not subscribe to app events: %s",
 			strerror(errno));
 		avbox_object_destroy(dispatch_object);
-		avbox_player_destroy(player);
+		avbox_object_destroy(avbox_player_object(player));
 		avbox_window_destroy(main_window);
 		return -1;
 	}
