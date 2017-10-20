@@ -35,31 +35,7 @@ import ycm_core
 # compilation database set (by default, one is not set).
 # CHANGE THIS LIST OF FLAGS. YES, THIS IS THE DROID YOU HAVE BEEN LOOKING FOR.
 flags = [
-'-DHAVE_CONFIG_H',
-'-I.',
-'-std=c99',
-'-Wall',
-'-D_GNU_SOURCE',
-'-DDATADIR=\'"/usr/local/share"\'',
-'-DLOCALSTATEDIR=\'"/usr/local/var"\'',
-'-ggdb',
-'-O1',
-'-DDEBUG',
-'-DHAVE_CONFIG_H',
-'-pthread',
-'-D_REENTRANT',
-'-I/usr/include/directfb',
-'-I/usr/include/alsa',
-'-I/usr/include/pango-1.0',
-'-I/usr/include/cairo',
-'-I/usr/include/pixman-1',
-'-I/usr/include/freetype2',
-'-I/usr/include/harfbuzz',
-'-I/usr/include/glib-2.0',
-'-I/usr/lib64/glib-2.0/include',
-'-I/usr/include/libdrm',
-'-I/usr/include/libpng16',
-
+@YCM_FLAGS@
 
 # ...and the same thing goes for the magic -x option which specifies the
 # language that the files to be compiled are written in. This is mostly

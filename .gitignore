@@ -1,4 +1,5 @@
 android/remote/projectFilesBackup
+src/.ycm_extra_conf.py
 src/*.o
 src/lib/*.o
 src/lib/.dirstamp

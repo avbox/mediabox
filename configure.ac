@@ -166,10 +166,39 @@ PKG_CHECK_MODULES(CURL, [libcurl], ,
 
 AC_DEFINE([USE_CURL], 1, [Define to 1 to use libcurl])
 
+flags2ycm()
+{
+	FLAGS_ARRAY=""
+
+	while [[ "$#" != 0 ]]; do
+		FLAGS_ARRAY="${FLAGS_ARRAY}'${1}',"
+		shift
+	done
+
+	echo "${FLAGS_ARRAY}"
+}
+
+YCM_FLAGS="$(flags2ycm ${CFLAGS} \
+	${PTHREAD_CFLAGS} \
+	${DIRECTFB_CFLAGS} \
+	${ALSA_CFLAGS} \
+	${PANGOCAIRO_CFLAGS} \
+	${CURL_CFLAGS} \
+	${LIBAVUTIL_CFLAGS} \
+	${LIBAVFORMAT_CFLAGS} \
+	${LIBAVCODEC_CFLAGS} \
+	${LIBAVFILTER_CFLAGS} \
+	${GLIB_CFLAGS} \
+	${GIO_CFLAGS} \
+	${LIBINPUT_CFLAGS} \
+	${SQLITE3_CFLAGS})"
+
 
 AC_SUBST(PREFIX)
+AC_SUBST(YCM_FLAGS)
 
 AC_CONFIG_FILES([Makefile
                  src/Makefile
+		 src/.ycm_extra_conf.py
 		 src/mediabox.service])
 AC_OUTPUT
