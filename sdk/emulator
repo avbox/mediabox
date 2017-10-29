@@ -114,10 +114,10 @@ ${QEMU_BIN} \
 	-boot c \
 	-m 1024 \
 	-serial stdio \
-	-usb -bt hci,host \
 	-append "${KARGS}" \
 	-name MediaBox
 
+	#-usb -bt hci,host \
 
 	#-usb -usbdevice host:04ca:300b -bt hci,host:hci0 \
 

@@ -1,0 +1,19 @@
+diff --git a/setup.py b/setup.py
+index b84171a..847a6a9 100755
+--- a/setup.py
++++ b/setup.py
+@@ -208,13 +208,7 @@ for rem in to_remove:
+ _ext_modules = []
+ 
+ # Check for a system libtorrent and if found, then do not build the libtorrent extension
+-build_libtorrent = True
+-try:
+-    from deluge._libtorrent import lt
+-except ImportError:
+-    build_libtorrent = True
+-else:
+-    build_libtorrent = False
++build_libtorrent = False
+ 
+ if build_libtorrent:
+     got_libtorrent = False

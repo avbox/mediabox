@@ -110,9 +110,7 @@ if [ ${CLEAN} -eq 1 ] || [ ! -f "${BUILDROOT_WORKDIR}/Config.in" ]; then
 		make busybox-menuconfig
 		make linux-menuconfig
 	else
-		make BR2_EXTERNAL=$(realpath ../../../external) oldconfig
-		make busybox-oldconfig
-		make linux-oldconfig
+		make BR2_EXTERNAL=$(realpath ../../../external) menuconfig
 	fi
 else
 	cd "${BUILDROOT_WORKDIR}"
