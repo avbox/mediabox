@@ -5,7 +5,7 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_HEADERS(src/config.h)
 AC_CONFIG_SRCDIR(src/main.c)
 AC_CONFIG_MACRO_DIR(m4)
-AC_COPYRIGHT([Copyright (C) 2016 Fernando Rodriguez])
+AC_COPYRIGHT([Copyright (C) 2016-2017 Fernando Rodriguez])
 AC_REVISION([$Revision: 266 $])
 
 AM_INIT_AUTOMAKE([1.9 -Wall std-options gnu])

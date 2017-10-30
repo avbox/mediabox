@@ -1,14 +1,29 @@
-1. Rewrite the message dispatcher to use avbox_queue (currently
-   it uses pipes).
 
-2. Integrate curl into download manager to allow
-   downloading of http, ftp, etc.
+1.  Integrate curl into download manager to allow
+    downloading of http, ftp, etc. We already have most
+    of the code for this on avmount.
 
-3. Write plugin system for writing search plugins
-   using javascript through spidermonkey.
+2.  Write plugin system for writing search plugins
+    using javascript through spidermonkey.
 
-4. Fix rewind/fast foward.
+3.  Fix rewind/fast foward.
 
-5. Fix problems with audio driver (it doesn't work with
-   pulseaudio and audio may get choppy after a while until
-   paused on some audio hardware).
+4.  Add the ability to send a URL to stream from the
+    Android remote.
+
+5.  Add the ability to stream videos from youtube using
+    youtube-dl
+
+6.  Fix bugs with downloads list and media search.
+
+7.  Integrate the bluealsa bluetooth code into our process
+    and use the player widget to decode and play the
+    audio stream.
+
+8.  Create a local library of media instead of accessing
+    the local media through UPnP
+
+9.  Create a built-in upnp client and server to replace
+    mediatomb and avmount
+
+10. Add seek bar to android remote.
