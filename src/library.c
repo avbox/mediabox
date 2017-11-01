@@ -36,6 +36,7 @@
 #include "lib/dispatch.h"
 #include "lib/thread.h"
 #include "lib/application.h"
+#include "lib/timers.h"
 #include "lib/ui/video.h"
 #include "lib/ui/listview.h"
 #include "lib/ui/input.h"
@@ -61,6 +62,11 @@ struct mbox_library
 	struct avbox_window *window;
 	struct avbox_listview *menu;
 	struct avbox_object *parent_obj;
+	struct avbox_delegate *worker;
+	int destroying;
+	int select_timer_id;
+	int dismiss_timer_id;
+	int abort;
 	char *dotdot;
 };
 
@@ -257,7 +263,7 @@ __mbox_library_loadlist(void *ctx)
 		inst->dotdot = NULL;
 	}
 
-	while ((ent = readdir(dir)) != NULL) {
+	while (!inst->abort && (ent = readdir(dir)) != NULL) {
 		char *filepath, *filepathrel, *title, *ext;
 		struct stat st;
 
@@ -444,8 +450,13 @@ static void
 mbox_library_loadlist(struct mbox_library * const inst, const char * const path)
 {
 	struct mbox_library_loadlist_context *ctx;
-	struct avbox_delegate *del;
 	char *selected_copy;
+
+	ASSERT(inst->worker == NULL);
+
+	if (inst->destroying) {
+		return;
+	}
 
 	/* allocate memory for context */
 	if ((selected_copy = strdup(path)) == NULL) {
@@ -462,13 +473,12 @@ mbox_library_loadlist(struct mbox_library * const inst, const char * const path)
 	/* populate the list from a background thread */
 	ctx->inst = inst;
 	ctx->path = selected_copy;
-	if ((del = avbox_thread_delegate(__mbox_library_loadlist, ctx)) == NULL) {
+	inst->abort = 0;
+	if ((inst->worker = avbox_thread_delegate(__mbox_library_loadlist, ctx)) == NULL) {
 		LOG_VPRINT_ERROR("Could not delegate to main thread: %s",
 			strerror(errno));
 		free(ctx);
 		free(selected_copy);
-	} else {
-		avbox_delegate_dettach(del);
 	}
 }
 
@@ -482,15 +492,92 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 	struct mbox_library * const inst = context;
 
 	switch (avbox_message_id(msg)) {
+	case AVBOX_MESSAGETYPE_TIMER:
+	{
+		struct avbox_timer_data * const timer_data =
+			avbox_message_payload(msg);
+		if (timer_data->id == inst->select_timer_id) {
+			struct avbox_object *object =
+				avbox_window_object(inst->window);
+			/* resend the SELECTED message */
+			if (avbox_object_sendmsg(&object,
+				AVBOX_MESSAGETYPE_SELECTED, AVBOX_DISPATCH_UNICAST, inst->menu) == NULL) {
+				LOG_VPRINT_ERROR("Could not re-send SELECTED message: %s",
+					strerror(errno));
+			}
+			free(timer_data);
+			inst->select_timer_id = -1;
+
+		} else if (timer_data->id == inst->dismiss_timer_id) {
+			struct avbox_object *object =
+				avbox_window_object(inst->window);
+			/* resend the SELECTED message */
+			if (avbox_object_sendmsg(&object,
+				AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst->menu) == NULL) {
+				LOG_VPRINT_ERROR("Could not re-send SELECTED message: %s",
+					strerror(errno));
+			}
+			free(timer_data);
+			inst->dismiss_timer_id = -1;
+
+		} else {
+			DEBUG_VPRINT(LOG_MODULE, "Invalid timer: %i",
+				timer_data->id);
+		}
+
+		return AVBOX_DISPATCH_OK;
+	}
 	case AVBOX_MESSAGETYPE_SELECTED:
 	{
 		ASSERT(avbox_message_payload(msg) == inst->menu);
+
 		struct mbox_library_playlist_item *selected =
 			avbox_listview_getselected(inst->menu);
 
 		ASSERT(selected != NULL);
 
+		/* if there's already a SELECTED message pending
+		 * ignore this one */
+		if (inst->select_timer_id != -1 || inst->dismiss_timer_id != -1) {
+			return AVBOX_DISPATCH_OK;
+		}
+
 		if (selected->isdir) {
+			if (inst->worker != NULL) {
+				if (!avbox_delegate_finished(inst->worker)) {
+					struct timespec tv;
+
+					/* signal the worker to abort */
+					inst->abort = 1;
+
+					/* Set a timer to invoke the SELECTED message again
+					 * after a delay */
+					tv.tv_sec = 0;
+					tv.tv_nsec = 100L * 1000L;
+					inst->select_timer_id = avbox_timer_register(&tv,
+						AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
+						avbox_window_object(inst->window), NULL, NULL);
+
+					/* if the timer fails for any reason (it shouldn't) then
+					 * we need to send the SELECTED message again immediately */
+					if (inst->select_timer_id == -1) {
+						struct avbox_object *object =
+							avbox_window_object(inst->window);
+						LOG_VPRINT_ERROR("Could not register destructor timer: %s",
+							strerror(errno));
+						if (avbox_object_sendmsg(&object,
+							AVBOX_MESSAGETYPE_SELECTED, AVBOX_DISPATCH_UNICAST, inst->menu) == NULL) {
+							LOG_VPRINT_ERROR("Could not send CLEANUP message: %s",
+								strerror(errno));
+						}
+						/* yield the CPU so the other threads can do their work */
+						sched_yield();
+					}
+					return AVBOX_DISPATCH_OK;
+				}
+				avbox_delegate_wait(inst->worker, NULL);
+				inst->worker = NULL;
+			}
 			DEBUG_VPRINT("library", "Selected directory: %s",
 				selected->data.filepath);
 			mbox_library_loadlist(inst, selected->data.filepath);
@@ -522,7 +609,48 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 		DEBUG_ASSERT("library", avbox_message_payload(msg) == inst->menu,
 			"Invalid message payload!");
 
+		/* if there's already a SELECTED or DISMISSED message pending
+		 * ignore this one */
+		if (inst->select_timer_id != -1 || inst->dismiss_timer_id != -1) {
+			return AVBOX_DISPATCH_OK;
+		}
+
 		if (inst->dotdot != NULL) {
+			if (inst->worker != NULL) {
+				if (!avbox_delegate_finished(inst->worker)) {
+					struct timespec tv;
+
+					/* signal the worker to abort */
+					inst->abort = 1;
+
+					/* Set a timer to invoke the SELECTED message again
+					 * after a delay */
+					tv.tv_sec = 0;
+					tv.tv_nsec = 100L * 1000L;
+					inst->dismiss_timer_id = avbox_timer_register(&tv,
+						AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
+						avbox_window_object(inst->window), NULL, NULL);
+
+					/* if the timer fails for any reason (it shouldn't) then
+					 * we need to send the SELECTED message again immediately */
+					if (inst->dismiss_timer_id == -1) {
+						struct avbox_object *object =
+							avbox_window_object(inst->window);
+						LOG_VPRINT_ERROR("Could not register destructor timer: %s",
+							strerror(errno));
+						if (avbox_object_sendmsg(&object,
+							AVBOX_MESSAGETYPE_DISMISSED, AVBOX_DISPATCH_UNICAST, inst->menu) == NULL) {
+							LOG_VPRINT_ERROR("Could not send CLEANUP message: %s",
+								strerror(errno));
+						}
+						/* yield the CPU so the other threads can do their work */
+						sched_yield();
+					}
+					return AVBOX_DISPATCH_OK;
+				}
+				avbox_delegate_wait(inst->worker, NULL);
+				inst->worker = NULL;
+			}
 			mbox_library_loadlist(inst, inst->dotdot);
 		} else {
 			/* hide window */
@@ -543,16 +671,34 @@ mbox_library_messagehandler(void *context, struct avbox_message *msg)
 	{
 		DEBUG_PRINT("library", "Shutdown library");
 
-		if (inst->dotdot != NULL) {
-			free(inst->dotdot);
-			inst->dotdot = NULL;
-		}
+		inst->destroying = 1;
 
 		if (avbox_window_isvisible(inst->window)) {
 			avbox_window_hide(inst->window);
 		}
 
+		if (inst->select_timer_id != -1 || inst->dismiss_timer_id != -1) {
+			DEBUG_VPRINT(LOG_MODULE, "Delaying DESTROY. Timer pending select=%i dismiss=%i",
+				inst->select_timer_id, inst->dismiss_timer_id);
+			return AVBOX_DISPATCH_CONTINUE;
+		}
+
+		if (inst->worker != NULL) {
+			inst->abort = 1;
+			if (!avbox_delegate_finished(inst->worker)) {
+				DEBUG_PRINT(LOG_MODULE, "Delaying destroy. Worker not finished");
+				return AVBOX_DISPATCH_CONTINUE;
+			}
+			avbox_delegate_wait(inst->worker, NULL);
+		}
+
+		if (inst->dotdot != NULL) {
+			free(inst->dotdot);
+			inst->dotdot = NULL;
+		}
+
 		mbox_library_freeplaylist(inst);
+
 		if (inst->menu != NULL) {
 			avbox_listview_enumitems(inst->menu, mbox_library_freeitems, NULL);
 			avbox_listview_destroy(inst->menu);
@@ -630,6 +776,9 @@ mbox_library_new(struct avbox_object *parent)
 	/* initialize context */
 	inst->parent_obj = parent;
 	inst->dotdot = NULL;
+	inst->worker = NULL;
+	inst->select_timer_id = -1;
+	inst->dismiss_timer_id = -1;
 
 	/* populate the menu */
 	mbox_library_loadlist(inst, "/");
