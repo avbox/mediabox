@@ -311,7 +311,8 @@ mbox_shell_volumechanged(int volume)
 		avbox_progressview_setvalue(volumebar, volume);
 	}
 
-	avbox_progressview_update(volumebar);
+	/* draw the progress bar */
+	avbox_window_update(volumebar_window);
 
 	/* Register timer to dismiss volume bar */
 	tv.tv_sec = 5;
@@ -692,7 +693,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 		{
 			int volume;
 			volume = avbox_volume_get();
-			volume += 10;
+			volume += 5;
 			if (volume > 100) {
 				volume = 100;
 			}
@@ -703,7 +704,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 		{
 			int volume;
 			volume = avbox_volume_get();
-			volume -= 10;
+			volume -= 5;
 			if (volume < 0) {
 				volume = 0;
 			}
