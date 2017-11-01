@@ -71,6 +71,7 @@ struct mbox_downloads
 	struct avbox_object *parent_object;
 	struct avbox_delegate *worker;
 	int update_timer_id;
+	int destroying;
 	LIST downloads;
 };
 
@@ -396,6 +397,10 @@ mbox_downloads_populatelist(int id, void *data)
 {
 	struct mbox_downloads * const inst = data;
 
+	if (inst->destroying) {
+		return;
+	}
+
 	/* if the background thread is still running */
 	if (inst->worker != NULL) {
 		/* check if it finished and collect result */
@@ -442,11 +447,6 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 	}
 	case AVBOX_MESSAGETYPE_DISMISSED:
 	{
-		/* cancel the update timer */
-		if (inst->update_timer_id != -1) {
-			avbox_timer_cancel(inst->update_timer_id);
-		}
-
 		/* hide the downloads window */
 		avbox_listview_releasefocus(inst->menu);
 		avbox_window_hide(inst->window);
@@ -464,36 +464,73 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 	{
 		struct avbox_timer_data * const timer_data =
 			avbox_message_payload(msg);
-		mbox_downloads_populatelist(timer_data->id, timer_data->data);
+		DEBUG_PRINT(LOG_MODULE, "Timer callback received");
+		if (inst->update_timer_id == timer_data->id) {
+			if (inst->destroying) {
+				inst->update_timer_id = -1;
+			} else {
+				struct timespec tv;
+
+				mbox_downloads_populatelist(timer_data->id, timer_data->data);
+
+				/* register the update timer */
+				tv.tv_sec = 2;
+				tv.tv_nsec = 0;
+				inst->update_timer_id = avbox_timer_register(&tv,
+					AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
+					avbox_window_object(inst->window), NULL, inst);
+				if (inst->update_timer_id == -1) {
+					LOG_VPRINT_ERROR("Could not re-register update timer: %s",
+						strerror(errno));
+				}
+			}
+		} else {
+			LOG_VPRINT_ERROR("Invalid timer: %i", timer_data->id);
+		}
 		free(timer_data);
 		break;
 	}
 	case AVBOX_MESSAGETYPE_DESTROY:
 	{
+		DEBUG_PRINT(LOG_MODULE, "Destroying downloads window");
+
+		inst->destroying = 1;
+
+		/* hide the window */
+		if (avbox_window_isvisible(inst->window)) {
+			avbox_listview_releasefocus(inst->menu);
+			avbox_window_hide(inst->window);
+		}
+
+		/* if the update timer is still running wait for
+		 * it to stop */
 		if (inst->update_timer_id != -1) {
-			DEBUG_PRINT("downloads", "Cancelling update timer");
-			avbox_timer_cancel(inst->update_timer_id);
+			DEBUG_PRINT(LOG_MODULE, "Delaying destruction. Timer pending");
+			return AVBOX_DISPATCH_CONTINUE;
 		}
 
 		/* if the worker is still running wait for it
 		 * to exit */
 		if (inst->worker != NULL) {
 			DEBUG_PRINT("downloads", "Waiting for worker");
-			avbox_delegate_wait(inst->worker, NULL);
+			if (!avbox_delegate_finished(inst->worker)) {
+				DEBUG_PRINT(LOG_MODULE, "Delaying destruction. Worker running");
+				return AVBOX_DISPATCH_CONTINUE;
+			} else {
+				avbox_delegate_wait(inst->worker, NULL);
+			}
 		}
 
-		if (avbox_window_isvisible(inst->window)) {
-			avbox_listview_releasefocus(inst->menu);
-			avbox_window_hide(inst->window);
-		}
 		if (inst->menu != NULL) {
 			avbox_listview_enumitems(inst->menu, mbox_downloads_freeitems, NULL);
 			avbox_listview_destroy(inst->menu);
 		}
+
 		break;
 	}
 	case AVBOX_MESSAGETYPE_CLEANUP:
 	{
+		DEBUG_PRINT(LOG_MODULE, "Cleaning downloads window");
 		free(inst);
 		break;
 	}
@@ -568,6 +605,7 @@ mbox_downloads_new(struct avbox_object *parent)
 	inst->parent_object = parent;
 	inst->update_timer_id = -1;
 	inst->worker = NULL;
+	inst->destroying = 0;
 	return inst;
 }
 
@@ -587,7 +625,7 @@ mbox_downloads_show(struct mbox_downloads * const inst)
 	tv.tv_sec = 2;
 	tv.tv_nsec = 0;
 	inst->update_timer_id = avbox_timer_register(&tv,
-		AVBOX_TIMER_TYPE_AUTORELOAD | AVBOX_TIMER_MESSAGE,
+		AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
 		avbox_window_object(inst->window), NULL, inst);
 	if (inst->update_timer_id == -1) {
 		avbox_window_hide(inst->window);

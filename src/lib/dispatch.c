@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
+#include <sched.h>
 
 #define LOG_MODULE "dispatch"
 
@@ -39,6 +40,7 @@
 #include "queue.h"
 #include "dispatch.h"
 #include "compiler.h"
+#include "timers.h"
 
 
 /**
@@ -57,6 +59,7 @@ LISTABLE_STRUCT(avbox_object,
 	pthread_mutex_t lock;
 	unsigned int refs;
 	int destroyed;
+	int destroy_timer_id;
 	struct avbox_dispatch_queue *q;
 	avbox_message_handler handler;
 	void *context;
@@ -137,6 +140,7 @@ avbox_object_unref(struct avbox_object *obj)
 		ASSERT(obj->refs == 0);
 		if (obj->refs == 0) {
 			ASSERT(obj->destroyed == 1);
+			ASSERT(obj->destroy_timer_id = -1);
 			pthread_mutex_unlock(&obj->lock);
 			free(obj);
 			return;
@@ -172,21 +176,68 @@ static int
 avbox_object_handler(struct avbox_object *object, struct avbox_message * const msg)
 {
 	switch (msg->id) {
+	case AVBOX_MESSAGETYPE_TIMER:
+	{
+		struct avbox_timer_data * const timer_data =
+			avbox_message_payload(msg);
+		if (timer_data->id == object->destroy_timer_id) {
+			/* resend the DESTROY message */
+			if (avbox_object_sendmsg(&object,
+				AVBOX_MESSAGETYPE_DESTROY, AVBOX_DISPATCH_UNICAST, NULL) == NULL) {
+				LOG_VPRINT_ERROR("Could not send CLEANUP message: %s",
+					strerror(errno));
+			}
+			free(timer_data);
+			object->destroy_timer_id = -1;
+			return AVBOX_DISPATCH_OK;
+		} else {
+			return object->handler(object->context, msg);
+		}
+	}
 	case AVBOX_MESSAGETYPE_DESTROY:
 	{
+		int ret;
+
 		ASSERT(object != NULL);
+		ASSERT(object->destroy_timer_id == -1);
 
-		/* destroy object so it won't receive
-		 * more messages */
-		object->destroyed = 1;
+		if ((ret = object->handler(object->context, msg)) == AVBOX_DISPATCH_OK) {
+			/* destroy object so it won't receive
+			 * more messages */
+			object->destroyed = 1;
+			if (avbox_object_sendmsg(&object,
+				AVBOX_MESSAGETYPE_CLEANUP, AVBOX_DISPATCH_UNICAST, NULL) == NULL) {
+				LOG_VPRINT_ERROR("Could not send CLEANUP message: %s",
+					strerror(errno));
+			}
+		} else {
+			struct timespec tv;
+			ASSERT(ret == AVBOX_DISPATCH_CONTINUE);
+			(void) ret;
 
-		(void) object->handler(object->context, msg);
+			/* Set a timer to invoke the destructor again after
+			 * a delay */
+			tv.tv_sec = 0;
+			tv.tv_nsec = 100L * 1000L;
+			object->destroy_timer_id = avbox_timer_register(&tv,
+				AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
+				object, NULL, NULL);
 
-		if (avbox_object_sendmsg(&object,
-			AVBOX_MESSAGETYPE_CLEANUP, AVBOX_DISPATCH_UNICAST, NULL) == NULL) {
-			LOG_VPRINT_ERROR("Could not send CLEANUP message: %s",
-				strerror(errno));
+			/* if the timer fails for any reason (it shouldn't) then
+			 * we need to send the DESTROY message again immediately */
+			if (object->destroy_timer_id == -1) {
+				LOG_VPRINT_ERROR("Could not register destructor timer: %s",
+					strerror(errno));
+				if (avbox_object_sendmsg(&object,
+					AVBOX_MESSAGETYPE_DESTROY, AVBOX_DISPATCH_UNICAST, NULL) == NULL) {
+					LOG_VPRINT_ERROR("Could not send CLEANUP message: %s",
+						strerror(errno));
+				}
+				/* yield the CPU so the other threads can do their work */
+				sched_yield();
+			}
 		}
+
 		return AVBOX_DISPATCH_OK;
 	}
 	case AVBOX_MESSAGETYPE_CLEANUP:
@@ -434,6 +485,7 @@ avbox_object_new(avbox_message_handler handler, void *context)
 	obj->context = context;
 	obj->refs = 1;
 	obj->destroyed = 0;
+	obj->destroy_timer_id = -1;
 
 	return obj;
 }

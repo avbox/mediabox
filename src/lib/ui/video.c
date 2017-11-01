@@ -639,9 +639,15 @@ avbox_window_handler(void *context, struct avbox_message * const msg)
 	{
 		/* call the user defined destructor */
 		if (window->handler != NULL) {
-			(void) window->handler(window->user_context, msg);
+			int ret = window->handler(window->user_context, msg);
+			if (ret == AVBOX_DISPATCH_OK) {
+				__avbox_window_destroy(window);
+			} else {
+				return ret;
+			}
+		} else {
+			__avbox_window_destroy(window);
 		}
-		__avbox_window_destroy(window);
 		return AVBOX_DISPATCH_OK;
 	}
 	case AVBOX_MESSAGETYPE_CLEANUP:
