@@ -684,7 +684,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			enum avbox_player_status status;
 			status = avbox_player_getstatus(player);
 			if (status == MB_PLAYER_STATUS_PLAYING || status == MB_PLAYER_STATUS_PAUSED) {
-				avbox_player_seek_chapter(player, -1);
+				avbox_player_seek(player, AVBOX_PLAYER_SEEK_CHAPTER, -1);
 			}
 			break;
 		}
@@ -693,7 +693,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			enum avbox_player_status status;
 			status = avbox_player_getstatus(player);
 			if (status == MB_PLAYER_STATUS_PLAYING || status == MB_PLAYER_STATUS_PAUSED) {
-				avbox_player_seek_chapter(player, 1);
+				avbox_player_seek(player, AVBOX_PLAYER_SEEK_CHAPTER, 1);
 			}
 			break;
 		}

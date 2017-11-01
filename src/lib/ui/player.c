@@ -84,10 +84,6 @@
 #define AVBOX_PLAYERCTL_STREAM_EXIT	(0x0B)
 #define AVBOX_PLAYERCTL_BUFFER_UNDERRUN	(0x0C)
 
-#define AVBOX_PLAYER_SEEK_ABSOLUTE	(0x01)
-#define AVBOX_PLAYER_SEEK_CHAPTER	(0x02)
-#define AVBOX_PLAYER_SEEK_RELATIVE	(0x04)
-
 
 /* playback startup stages */
 #define AVBOX_PLAYER_PLAYSTATE_READY		(0x00)
@@ -2275,18 +2271,18 @@ avbox_player_getstatus(struct avbox_player *inst)
 
 
 /**
- * Seek to a chapter.
+ * Seek.
  */
 void
-avbox_player_seek_chapter(struct avbox_player *inst, int incr)
+avbox_player_seek(struct avbox_player *inst, int flags, int64_t pos)
 {
 	struct avbox_player_seekargs *args;
 	if ((args = malloc(sizeof(struct avbox_player_seekargs))) == NULL) {
 		LOG_PRINT_ERROR("Could not allocate memory for arguments");
 		return;
 	}
-	args->flags = AVBOX_PLAYER_SEEK_CHAPTER;
-	args->pos = incr;
+	args->flags = flags;
+	args->pos = pos;
 	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_SEEK, args);
 }
 
@@ -2303,7 +2299,11 @@ char *
 avbox_player_getmediafile(struct avbox_player *inst)
 {
 	ASSERT(inst != NULL);
-	return strdup(inst->media_file);
+	if (inst->media_file == NULL) {
+		return NULL;
+	} else {
+		return strdup(inst->media_file);
+	}
 }
 
 

@@ -26,6 +26,10 @@
 #include "../linkedlist.h"
 #include "../dispatch.h"
 
+#define AVBOX_PLAYER_SEEK_ABSOLUTE	(0x01)
+#define AVBOX_PLAYER_SEEK_CHAPTER	(0x02)
+#define AVBOX_PLAYER_SEEK_RELATIVE	(0x04)
+
 
 struct avbox_player;
 
@@ -133,7 +137,7 @@ avbox_player_bufferstate(struct avbox_player *inst);
  * Seek to a chapter.
  */
 void
-avbox_player_seek_chapter(struct avbox_player *inst, int incr);
+avbox_player_seek(struct avbox_player *inst, int flags, int64_t pos);
 
 
 void
