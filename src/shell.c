@@ -39,6 +39,7 @@
 #include "library.h"
 #include "lib/dispatch.h"
 #include "lib/application.h"
+#include "lib/settings.h"
 #include "mainmenu.h"
 #include "discovery.h"
 #include "downloads-backend.h"
@@ -347,7 +348,7 @@ mbox_shell_volumechanged(int volume)
 
 
 /**
- * mbs_playerstatuschanged() -- Handle player state change events
+ * Handle player state change events
  */
 static void
 mbox_shell_playerstatuschanged(struct avbox_player *inst,
@@ -356,6 +357,11 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 	if (inst == player) {
 		if (last_status == MB_PLAYER_STATUS_READY && status != MB_PLAYER_STATUS_READY) {
 			if (mainmenu != NULL) {
+				char * last_file = avbox_player_getmediafile(inst);
+				if (last_file != NULL) {
+					avbox_settings_setstring("last_file", last_file);
+					free(last_file);
+				}
 				mbox_mainmenu_destroy(mainmenu);
 				mainmenu = NULL;
 			}
@@ -627,14 +633,22 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			switch (avbox_player_getstatus(player)) {
 			case MB_PLAYER_STATUS_READY:
 			{
-				const char *media_file = avbox_player_getmediafile(player);
+				char *media_file = avbox_player_getmediafile(player);
 				if (media_file == NULL) {
-					media_file = MEDIA_FILE;
+					media_file = avbox_settings_getstring("last_file");
+					if (media_file == NULL) {
+						media_file = strdup(MEDIA_FILE);
+					}
 				} else {
 					DEBUG_VPRINT("shell", "Playing '%s' from memory",
 						media_file);
 				}
-				avbox_player_play(player, media_file);
+				if (media_file != NULL) {
+					avbox_player_play(player, media_file);
+					free(media_file);
+				} else {
+					LOG_PRINT_ERROR("No file to play");
+				}
 				break;
 			}
 			case MB_PLAYER_STATUS_BUFFERING:

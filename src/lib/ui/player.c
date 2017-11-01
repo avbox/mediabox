@@ -2299,11 +2299,11 @@ avbox_player_bufferstate(struct avbox_player *inst)
 }
 
 
-const char *
+char *
 avbox_player_getmediafile(struct avbox_player *inst)
 {
 	ASSERT(inst != NULL);
-	return inst->media_file;
+	return strdup(inst->media_file);
 }
 
 

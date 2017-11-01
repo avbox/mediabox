@@ -95,7 +95,7 @@ avbox_player_getstatus(struct avbox_player* inst);
 /**
  * Get the last played file
  */
-const char *
+char *
 avbox_player_getmediafile(struct avbox_player *inst);
 
 
