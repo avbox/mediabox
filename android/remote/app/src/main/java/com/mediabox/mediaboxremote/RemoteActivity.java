@@ -9,8 +9,12 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.graphics.Point;
+import android.net.Uri;
 import android.os.Parcelable;
 import android.preference.PreferenceManager;
+import android.support.v4.app.DialogFragment;
+import android.support.v4.app.FragmentManager;
+import android.support.v4.app.FragmentTransaction;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -24,6 +28,7 @@ import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.Toast;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -186,11 +191,30 @@ public class RemoteActivity extends AppCompatActivity
         }
     }
 
+    private void handleIntent(Intent intent)
+    {
+        if (intent != null) {
+            if (intent.getAction().equals("android.intent.action.VIEW")) {
+                Uri uri = intent.getData();
+                FragmentManager fm = getSupportFragmentManager();
+                SendURLDialogFragment dialog = new SendURLDialogFragment();
+                dialog.setUrl(uri.toString());
+                dialog.show(fm, "dialog");
+            }
+        }
+    }
+
+    protected void onNewIntent(Intent intent)
+    {
+        super.onNewIntent(intent);
+        handleIntent(intent);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState)
     {
         super.onCreate(savedInstanceState);
+
         setContentView(R.layout.activity_remote);
 
         /* Start the discovery service */
@@ -240,6 +264,7 @@ public class RemoteActivity extends AppCompatActivity
         /* Register broadcast receiver to get SDP discovery results */
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_UUID);
         registerReceiver(mReceiver, filter);
+        handleIntent(getIntent());
     }
 
 
@@ -251,6 +276,11 @@ public class RemoteActivity extends AppCompatActivity
         return true;
     }
 
+    public void onSendURL(String url)
+    {
+        Log.d("RemoteActivity", String.format("Sending %s", url));
+        sendMessage(String.format("URL:%s", url));
+    }
 
     public boolean onOptionsItemSelected(MenuItem item)
     {
@@ -259,6 +289,12 @@ public class RemoteActivity extends AppCompatActivity
         {
             startActivity(new Intent(this, DeviceListActivity.class));
             return true;
+        }
+        else if (id == R.id.send_url)
+        {
+            FragmentManager fm = getSupportFragmentManager();
+            DialogFragment dialog = new SendURLDialogFragment();
+            dialog.show(fm, "dialog");
         }
         else if (id == R.id.bluetooth)
         {

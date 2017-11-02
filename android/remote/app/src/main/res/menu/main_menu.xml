@@ -7,6 +7,9 @@
         android:title="Discover Devices"
         android:icon="@mipmap/ic_launcher"/>
     <item
+        android:id="@+id/send_url"
+        android:title="Send URL" />
+    <item
         android:id="@+id/bluetooth"
         android:title="Connect via Bluetooth"
         android:icon="@mipmap/ic_launcher" />
