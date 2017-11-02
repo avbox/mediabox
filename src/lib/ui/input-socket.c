@@ -31,10 +31,12 @@
 #include <sys/types.h>
 #include <fcntl.h>
 
+#define LOG_MODULE "input-socket"
 
 #include "input.h"
 #include "input-socket.h"
 #include "../debug.h"
+#include "../log.h"
 
 
 #define STRINGIZE2(x) #x
@@ -47,27 +49,30 @@ mbi_socket_connection(void *arg)
 	struct conn_state *state = (struct conn_state*) arg;
 	int fd = state->fd;
 	int n;
+	ssize_t ret;
 	struct timeval tv;
-	char buffer[256];
+	char buffer[4096], *pbuf;
 	fd_set fds;
 
-	assert(arg != NULL);
-	assert(((struct conn_state*) arg)->fd > 0);
+	ASSERT(arg != NULL);
+	ASSERT(((struct conn_state*) arg)->fd > 0);
 
-	MB_DEBUG_SET_THREAD_NAME("input-socket");
+	DEBUG_SET_THREAD_NAME("input-socket");
 	DEBUG_PRINT("input-socket", "Connection handler running");
+
 	pthread_detach(pthread_self());
 
-	bzero(buffer,256);
+	/* clear the buffer */
+	bzero(buffer, sizeof(buffer));
 
 	while (!state->quit) {
 
 		FD_ZERO(&fds);
 		FD_SET(fd, &fds);
 
+		/* check if the connection is still good */
 		if (fcntl(fd, F_GETFD) == -1) {
-			fprintf(stderr, "input-socket: Connection broken (fd=%i)\n",
-				fd);
+			LOG_VPRINT_ERROR("Connection broken (fd=%i)", fd);
 			break;
 		}
 
@@ -79,56 +84,82 @@ mbi_socket_connection(void *arg)
 			if (errno == EINTR) {
 				continue;
 			}
-			fprintf(stderr, "input-socket: select() returned %i\n", n);
+			LOG_VPRINT_ERROR("select() returned %i", n);
 			break;
 		}
 
+		/* if there's no data continue waiting */
 		if (!FD_ISSET(fd, &fds)) {
 			continue;
 		}
 
-		if ((n = read(fd, buffer, 255)) <= 0) {
-			break;
+		/* read the next line one char at the time for now */
+		n = 0;
+		pbuf = buffer;
+		while (n < sizeof(buffer) - 1) {
+			if (state->quit) {
+				goto end;
+			}
+			if ((ret = read(fd, pbuf, 1)) == -1) {
+				if (errno == EAGAIN || errno == EINTR) {
+					continue;
+				} else {
+					LOG_VPRINT_ERROR("Unable to read() from socket: %s",
+						strerror(errno));
+					goto end;
+				}
+			} else if (ret == 0) {
+				goto end; /* eof */
+			}
+			if (*pbuf == '\n') {
+				*pbuf = '\0';
+				break;
+			}
+			n++;
+			pbuf++;
 		}
 
-		if (!memcmp("MENU", buffer, 4)) {
-			avbox_input_sendevent(MBI_EVENT_MENU);
-		} else if (!memcmp("LEFT", buffer, 4)) {
-			avbox_input_sendevent(MBI_EVENT_ARROW_LEFT);
-		} else if (!memcmp("RIGHT", buffer, 5)) {
-			avbox_input_sendevent(MBI_EVENT_ARROW_RIGHT);
-		} else if (!memcmp("UP", buffer, 2)) {
-			avbox_input_sendevent(MBI_EVENT_ARROW_UP);
-		} else if (!memcmp("DOWN", buffer, 4)) {
-			avbox_input_sendevent(MBI_EVENT_ARROW_DOWN);
-		} else if (!memcmp("ENTER", buffer, 5)) {
-			avbox_input_sendevent(MBI_EVENT_ENTER);
-		} else if (!memcmp("BACK", buffer, 4)) {
-			avbox_input_sendevent(MBI_EVENT_BACK);
-		} else if (!memcmp("PLAY", buffer, 4)) {
-			avbox_input_sendevent(MBI_EVENT_PLAY);
-		} else if (!memcmp("STOP", buffer, 4)) {
-			avbox_input_sendevent(MBI_EVENT_STOP);
-		} else if (!memcmp("CLEAR", buffer, 5)) {
-			avbox_input_sendevent(MBI_EVENT_CLEAR);
-		} else if (!memcmp("PREV", buffer, 4)) {
-			avbox_input_sendevent(MBI_EVENT_PREV);
-		} else if (!memcmp("NEXT", buffer, 4)) {
-			avbox_input_sendevent(MBI_EVENT_NEXT);
-		} else if (!memcmp("INFO", buffer, 4)) {
-			avbox_input_sendevent(MBI_EVENT_INFO);
-		} else if (!memcmp("VOLUP", buffer, 5)) {
-			avbox_input_sendevent(MBI_EVENT_VOLUME_UP);
-		} else if (!memcmp("VOLDOWN", buffer, 7)) {
-			avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN);
-		} else if (!memcmp("KEY:", buffer, 4)) {
+		DEBUG_VPRINT(LOG_MODULE, "Read line: %s", buffer);
+
+		/* process the command */
+		if (!strncmp("MENU", buffer, 4)) {
+			avbox_input_sendevent(MBI_EVENT_MENU, NULL);
+		} else if (!strncmp("LEFT", buffer, 4)) {
+			avbox_input_sendevent(MBI_EVENT_ARROW_LEFT, NULL);
+		} else if (!strncmp("RIGHT", buffer, 5)) {
+			avbox_input_sendevent(MBI_EVENT_ARROW_RIGHT, NULL);
+		} else if (!strncmp("UP", buffer, 2)) {
+			avbox_input_sendevent(MBI_EVENT_ARROW_UP, NULL);
+		} else if (!strncmp("DOWN", buffer, 4)) {
+			avbox_input_sendevent(MBI_EVENT_ARROW_DOWN, NULL);
+		} else if (!strncmp("ENTER", buffer, 5)) {
+			avbox_input_sendevent(MBI_EVENT_ENTER, NULL);
+		} else if (!strncmp("BACK", buffer, 4)) {
+			avbox_input_sendevent(MBI_EVENT_BACK, NULL);
+		} else if (!strncmp("PLAY", buffer, 4)) {
+			avbox_input_sendevent(MBI_EVENT_PLAY, NULL);
+		} else if (!strncmp("STOP", buffer, 4)) {
+			avbox_input_sendevent(MBI_EVENT_STOP, NULL);
+		} else if (!strncmp("CLEAR", buffer, 5)) {
+			avbox_input_sendevent(MBI_EVENT_CLEAR, NULL);
+		} else if (!strncmp("PREV", buffer, 4)) {
+			avbox_input_sendevent(MBI_EVENT_PREV, NULL);
+		} else if (!strncmp("NEXT", buffer, 4)) {
+			avbox_input_sendevent(MBI_EVENT_NEXT, NULL);
+		} else if (!strncmp("INFO", buffer, 4)) {
+			avbox_input_sendevent(MBI_EVENT_INFO, NULL);
+		} else if (!strncmp("VOLUP", buffer, 5)) {
+			avbox_input_sendevent(MBI_EVENT_VOLUME_UP, NULL);
+		} else if (!strncmp("VOLDOWN", buffer, 7)) {
+			avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN, NULL);
+		} else if (!strncmp("KEY:", buffer, 4)) {
 #define ELIF_KEY(x) \
-	else if (!memcmp(buffer + 4, STRINGIZE(x), 1)) { \
-		avbox_input_sendevent(MBI_EVENT_KBD_ ##x ); \
+	else if (!strncmp(buffer + 4, STRINGIZE(x), 1)) { \
+		avbox_input_sendevent(MBI_EVENT_KBD_ ##x, NULL); \
 	}
 
-			if (!memcmp(buffer + 4, " ", 1)) {
-				avbox_input_sendevent(MBI_EVENT_KBD_SPACE);
+			if (!strncmp(buffer + 4, " ", 1)) {
+				avbox_input_sendevent(MBI_EVENT_KBD_SPACE, NULL);
 			}
 			ELIF_KEY(A)
 			ELIF_KEY(B)
@@ -157,12 +188,19 @@ mbi_socket_connection(void *arg)
 			ELIF_KEY(Y)
 			ELIF_KEY(Z)
 #undef ELIF_KEY
+		} else if (!strncmp("URL:", buffer, 4)) {
+			char *url;
+			if ((url = strdup(buffer + 4)) == NULL) {
+				LOG_PRINT_ERROR("Could not allocate memory for URL");
+			} else {
+				avbox_input_sendevent(MBI_EVENT_URL, url);
+			}
 		} else {
-			DEBUG_VPRINT("input-socket", "Unknown command '%s'", buffer);
+			DEBUG_VPRINT(LOG_MODULE, "Unknown command '%s'", buffer);
 		}
 	}
-
-	DEBUG_VPRINT("input-socket", "Closing connection (fd=%i)", fd);
+end:
+	DEBUG_VPRINT(LOG_MODULE, "Closing connection (fd=%i)", fd);
 
 	close(fd);
 

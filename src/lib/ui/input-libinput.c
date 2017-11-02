@@ -86,7 +86,7 @@ static pthread_t event_loop_thread;
 
 #define CASE_KEYBOARD(x) \
 	case DIKS_KEY_ ## x: \
-		avbox_input_sendevent(MBI_EVENT_KBD_ ## x); \
+		avbox_input_sendevent(MBI_EVENT_KBD_ ## x, NULL); \
 		break;
 
 
@@ -132,17 +132,17 @@ mbi_libinput_event_loop(void *arg)
 				}
 
 				switch (keycode) {
-				case DIKS_ESCAPE:       avbox_input_sendevent(MBI_EVENT_BACK); break;
-				case DIKS_RETURN:       avbox_input_sendevent(MBI_EVENT_ENTER); break;
-				case DIKS_SHIFT:        avbox_input_sendevent(MBI_EVENT_MENU); break;
-				case DIKS_CURSOR_UP:    avbox_input_sendevent(MBI_EVENT_ARROW_UP); break;
-				case DIKS_CURSOR_DOWN:  avbox_input_sendevent(MBI_EVENT_ARROW_DOWN); break;
-				case DIKS_CURSOR_LEFT:  avbox_input_sendevent(MBI_EVENT_ARROW_LEFT); break;
-				case DIKS_CURSOR_RIGHT: avbox_input_sendevent(MBI_EVENT_ARROW_RIGHT); break;
-				case DIKS_BACKSPACE:    avbox_input_sendevent(MBI_EVENT_CLEAR); break;
-				case DIKS_SPACE:        avbox_input_sendevent(MBI_EVENT_KBD_SPACE); break;
-				case DIKS_LEFT_CTRL:	avbox_input_sendevent(MBI_EVENT_VOLUME_UP); break;
-				case DIKS_LEFT_ALT:	avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN); break;
+				case DIKS_ESCAPE:       avbox_input_sendevent(MBI_EVENT_BACK, NULL); break;
+				case DIKS_RETURN:       avbox_input_sendevent(MBI_EVENT_ENTER, NULL); break;
+				case DIKS_SHIFT:        avbox_input_sendevent(MBI_EVENT_MENU, NULL); break;
+				case DIKS_CURSOR_UP:    avbox_input_sendevent(MBI_EVENT_ARROW_UP, NULL); break;
+				case DIKS_CURSOR_DOWN:  avbox_input_sendevent(MBI_EVENT_ARROW_DOWN, NULL); break;
+				case DIKS_CURSOR_LEFT:  avbox_input_sendevent(MBI_EVENT_ARROW_LEFT, NULL); break;
+				case DIKS_CURSOR_RIGHT: avbox_input_sendevent(MBI_EVENT_ARROW_RIGHT, NULL); break;
+				case DIKS_BACKSPACE:    avbox_input_sendevent(MBI_EVENT_CLEAR, NULL); break;
+				case DIKS_SPACE:        avbox_input_sendevent(MBI_EVENT_KBD_SPACE, NULL); break;
+				case DIKS_LEFT_CTRL:	avbox_input_sendevent(MBI_EVENT_VOLUME_UP, NULL); break;
+				case DIKS_LEFT_ALT:	avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN, NULL); break;
 
 				CASE_KEYBOARD(A)
 				CASE_KEYBOARD(B)

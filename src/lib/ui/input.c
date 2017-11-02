@@ -126,10 +126,15 @@ avbox_input_getendpoint(struct avbox_object *obj)
 }
 
 
+/**
+ * Sends an input event down the input stack.
+ *
+ */
 void
 avbox_input_eventfree(struct avbox_input_message *msg)
 {
-	assert(msg != NULL);
+	ASSERT(msg != NULL);
+	ASSERT(msg->payload == NULL);	/* as a reminder to free it */
 	free(msg);
 }
 
@@ -205,7 +210,7 @@ avbox_input_release(struct avbox_object *obj)
  * Send an input event.
  */
 void
-avbox_input_sendevent(enum avbox_input_event e)
+avbox_input_sendevent(enum avbox_input_event e, void * const payload)
 {
 	int cnt;
 	struct avbox_input_message *ev;
@@ -228,7 +233,7 @@ avbox_input_sendevent(enum avbox_input_event e)
 
 	/* initialize it */
 	ev->msg = e;
-	ev->payload = NULL;
+	ev->payload = payload;
 
 	/* send the event */
 	if (avbox_object_sendmsg(dest, AVBOX_MESSAGETYPE_INPUT,

@@ -78,6 +78,7 @@ enum avbox_input_event
 	MBI_EVENT_TIMER,
 	MBI_EVENT_VOLUME_CHANGED,
 	MBI_EVENT_PLAYER_NOTIFICATION,
+	MBI_EVENT_URL,
 	MBI_EVENT_EXIT,
 	MBI_EVENT_QUIT,
 };
@@ -92,7 +93,7 @@ struct avbox_input_message
 
 
 void
-avbox_input_sendevent(enum avbox_input_event e);
+avbox_input_sendevent(enum avbox_input_event e, void * const payload);
 
 
 /**

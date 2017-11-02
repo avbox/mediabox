@@ -725,6 +725,24 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			avbox_volume_set(volume);
 			break;
 		}
+		case MBI_EVENT_URL:
+		{
+			ASSERT(event->payload != NULL);
+			if (!strncmp("magnet:", (char*) event->payload, 7)) {
+				DEBUG_VPRINT(LOG_MODULE, "Received magnet url: %s",
+					event->payload);
+				if (mb_downloadmanager_addurl((char*) event->payload) != 0) {
+					LOG_VPRINT_ERROR("Could not add URL: %s",
+						event->payload);
+				}
+			} else {
+				LOG_VPRINT_ERROR("Unsupported URL: %s",
+					event->payload);
+			}
+			free(event->payload);
+			event->payload = NULL;
+			break;
+		}
 		default:
 			DEBUG_VPRINT("shell", "Received event %i", (int) event->msg);
 			/* since we're the root window we need to

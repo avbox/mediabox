@@ -69,9 +69,10 @@ mb_downloadmanager_addurl(char *url)
 	};
 
 	/* launch the deluged process */
-	if ((process_id = avbox_process_start(DELUGED_BIN, (const char **) args,
-		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
-		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT, "deluge-console", NULL, NULL)) == -1) {
+	if ((process_id = avbox_process_start(DELUGE_BIN, (const char **) args,
+		AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT,
+		"deluge-console", NULL, NULL)) == -1) {
 		LOG_VPRINT(MB_LOGLEVEL_ERROR, "download-backend",
 			"Could not execute deluge-console (errno=%i)", errno);
 		return -1;
