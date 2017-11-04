@@ -195,11 +195,9 @@ public class RemoteActivity extends AppCompatActivity
     {
         if (intent != null) {
             if (intent.getAction().equals("android.intent.action.VIEW")) {
-                Uri uri = intent.getData();
-                FragmentManager fm = getSupportFragmentManager();
-                SendURLDialogFragment dialog = new SendURLDialogFragment();
-                dialog.setUrl(uri.toString());
-                dialog.show(fm, "dialog");
+                StreamOpenDialog dialog = new StreamOpenDialog();
+                dialog.setUrl(intent.getData().toString());
+                dialog.show(getSupportFragmentManager(), "dialog");
             }
         }
     }
@@ -264,7 +262,11 @@ public class RemoteActivity extends AppCompatActivity
         /* Register broadcast receiver to get SDP discovery results */
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_UUID);
         registerReceiver(mReceiver, filter);
-        handleIntent(getIntent());
+
+        if (savedInstanceState == null)
+        {
+            handleIntent(getIntent());
+        }
     }
 
 
