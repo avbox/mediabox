@@ -36,7 +36,7 @@
 #include "lib/ui/video.h"
 #include "lib/ui/listview.h"
 #include "lib/ui/input.h"
-#include "library.h"
+#include "browser.h"
 #include "lib/su.h"
 #include "shell.h"
 #include "about.h"
@@ -53,7 +53,7 @@ struct mbox_mainmenu
 	struct avbox_window *window;
 	struct avbox_object *notify_object;
 	struct avbox_listview *menu;
-	struct mbox_library *library;
+	struct mbox_browser *library;
 	struct mbox_about *about;
 	struct mbox_downloads *downloads;
 	struct mbox_mediasearch *search;
@@ -100,12 +100,14 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 			assert(selected != NULL);
 
 			if (!memcmp("LIB", selected, 4)) {
-				if ((inst->library = mbox_library_new(avbox_window_object(inst->window))) == NULL) {
+				if ((inst->library = mbox_browser_new(avbox_window_object(inst->window))) == NULL) {
 					LOG_PRINT_ERROR("Could not initialize library!");
 				} else {
-					if (mbox_library_show(inst->library) == -1) {
+					if (mbox_browser_show(inst->library) == -1) {
 						LOG_PRINT_ERROR("Could not show library!");
-						mbox_library_destroy(inst->library);
+						avbox_object_destroy(
+							avbox_window_object(
+								mbox_browser_window(inst->library)));
 						inst->library = NULL;
 					}
 				}
@@ -195,29 +197,31 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 			mbox_mainmenu_dismiss(inst);
 		} else {
 			if (payload == inst->library) {
-				assert(inst->library != NULL);
-				mbox_library_destroy(inst->library);
+				ASSERT(inst->library != NULL);
+				avbox_object_destroy(
+					avbox_window_object(
+						mbox_browser_window(inst->library)));
 				inst->library = NULL;
-				mbox_mainmenu_dismiss(inst);
 
 			} else if (payload == inst->about) {
 				DEBUG_PRINT("mainmenu", "Destroying about box");
-				assert(inst->about != NULL);
+				ASSERT(inst->about != NULL);
 				mbox_about_destroy(inst->about);
 				inst->about = NULL;
+
 			} else if (payload == inst->downloads) {
-				assert(inst->downloads != NULL);
+				ASSERT(inst->downloads != NULL);
 				mbox_downloads_destroy(inst->downloads);
 				inst->downloads = NULL;
 			} else if (payload == inst->search) {
-				assert(inst->search != NULL);
+				ASSERT(inst->search != NULL);
 				mbox_mediasearch_destroy(inst->search);
 				inst->search = NULL;
 			}
 #ifdef ENABLE_BLUETOOTH
 			else if (payload == inst->a2dp) {
 				DEBUG_PRINT("mainmenu", "Destroying a2dp window");
-				assert(inst->a2dp != NULL);
+				ASSERT(inst->a2dp != NULL);
 				mbox_a2dp_destroy(inst->a2dp);
 				inst->a2dp = NULL;
 
@@ -249,7 +253,9 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 	{
 		DEBUG_PRINT("mainmenu", "Destroying mainmenu");
 		if (inst->library != NULL) {
-			mbox_library_destroy(inst->library);
+			avbox_object_destroy(
+				avbox_window_object(
+					mbox_browser_window(inst->library)));
 		}
 		if (inst->search != NULL) {
 			mbox_mediasearch_destroy(inst->search);
@@ -288,11 +294,10 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	int xres, yres;
 	int font_height;
 	int window_height, window_width;
+	int n_entries = 5;
 
 #ifdef ENABLE_BLUETOOTH
-	int n_entries = 9;
-#else
-	int n_entries = 8;
+	n_entries++;
 #endif
 
 	/* allocate memory for main menu */
@@ -360,14 +365,11 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 #endif
 
 	/* populate the list */
-	if (avbox_listview_additem(inst->menu, "MEDIA LIBRARY", "LIB") == -1 ||
+	if (avbox_listview_additem(inst->menu, "BROWSE MEDIA", "LIB") == -1 ||
 #ifdef ENABLE_BLUETOOTH
 		avbox_listview_additem(inst->menu, "BLUETOOTH AUDIO", "A2DP") == -1 ||
 #endif
-		avbox_listview_additem(inst->menu, "OPTICAL DISC", "DVD") == -1 ||
-		avbox_listview_additem(inst->menu, "TV TUNNER", "DVR") == -1 ||
 		avbox_listview_additem(inst->menu, "DOWNLOADS", "DOWN") == -1 ||
-		avbox_listview_additem(inst->menu, "MEDIA SEARCH", "MEDIASEARCH") == -1 ||
 		avbox_listview_additem(inst->menu, "GAMING CONSOLES", "CONSOLES") == -1 ||
 		avbox_listview_additem(inst->menu, "SETTINGS", "SETTINGS") == -1 ||
 		avbox_listview_additem(inst->menu, "ABOUT MEDIABOX", "ABOUT") == -1) {

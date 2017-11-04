@@ -18,27 +18,91 @@
  */
 
 
-#ifndef __MB_LIBRARY_H__
-#define __MB_LIBRARY_H__
-#include "lib/dispatch.h"
+#ifndef __MBOX_LIBRARY_H__
+#define __MBOX_LIBRARY_H__
+
+#include <dirent.h>
+#include "lib/linkedlist.h"
 
 
-struct mbox_library;
+LISTABLE_STRUCT(mbox_library_dirent,
+	int isdir;
+	char *path;
+	char *name;
+);
+
+
+struct mbox_library_rootdir
+{
+	struct mbox_library_dirent *ptr;
+	LIST entries;
+};
+
+struct mbox_library_upnpdir
+{
+	DIR *dir;
+	char *path;
+};
+
+struct mbox_library_emptydir
+{
+	int read;
+};
+
+
+struct mbox_library_dir
+{
+	int type;
+	char *path;
+	union {
+		struct mbox_library_upnpdir upnpdir;
+		struct mbox_library_rootdir rootdir;
+		struct mbox_library_emptydir emptydir;
+	} state;
+};
 
 
 /**
- *Initialize the MediaBox menu
+ * Open a library directory
  */
-struct mbox_library*
-mbox_library_new(struct avbox_object *parent);
+struct mbox_library_dir *
+mbox_library_opendir(const char * const path);
 
 
-int
-mbox_library_show(struct mbox_library * const inst);
+/**
+ * Read the next entry in an open directory.
+ */
+struct mbox_library_dirent *
+mbox_library_readdir(struct mbox_library_dir * const dir);
 
 
+/**
+ * Free the directory entry.
+ */
 void
-mbox_library_destroy(struct mbox_library * const inst);
+mbox_library_freedirentry(struct mbox_library_dirent * const ent);
+
+
+/**
+ * Close a library directory.
+ */
+void
+mbox_library_closedir(struct mbox_library_dir * const dir);
+
+
+/**
+ * Initialize the library backend.
+ */
+int
+mbox_library_init(const int launch_avmount,
+	const int launch_mediatomb);
+
+
+/**
+ * Shutdown the library backend.
+ */
+void
+mbox_library_shutdown(void);
 
 
 #endif

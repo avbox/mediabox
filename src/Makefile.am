@@ -76,8 +76,8 @@ mediabox_SOURCES = \
 	mediasearch.c \
 	about.c \
 	discovery.c \
-	library-backend.c \
 	library.c \
+	browser.c \
 	overlay.c \
 	main.c
 

@@ -18,23 +18,29 @@
  */
 
 
-#ifndef __MB_LIBRARY_BACKEND_H__
-#define __MB_LIBRARY_BACKEND_H__
+#ifndef __MB_LIBRARY_H__
+#define __MB_LIBRARY_H__
+
+#include "lib/ui/video.h"
+
+
+struct mbox_browser;
 
 
 /**
- * Initialize the library backend.
+ *Initialize the MediaBox menu
  */
+struct mbox_browser*
+mbox_browser_new(struct avbox_object *parent);
+
+
 int
-mb_library_backend_init(const int launch_avmount,
-	const int launch_mediatomb);
-
+mbox_browser_show(struct mbox_browser * const inst);
 
 /**
- * Shutdown the library backend.
+ * Gets the underlying window.
  */
-void
-mb_library_backend_shutdown(void);
-
+struct avbox_window *
+mbox_browser_window(struct mbox_browser * const inst);
 
 #endif

@@ -36,14 +36,14 @@
 #include "lib/debug.h"
 #include "lib/log.h"
 #include "lib/volume.h"
-#include "library.h"
 #include "lib/dispatch.h"
 #include "lib/application.h"
 #include "lib/settings.h"
 #include "mainmenu.h"
 #include "discovery.h"
 #include "downloads-backend.h"
-#include "library-backend.h"
+#include "library.h"
+#include "browser.h"
 #include "overlay.h"
 
 
@@ -823,7 +823,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	struct avbox_window *root_window;
 
 	/* initialize the library backend */
-	if (mb_library_backend_init(launch_avmount, launch_mediatomb) == -1) {
+	if (mbox_library_init(launch_avmount, launch_mediatomb) == -1) {
 		fprintf(stderr, "Could not initialize library backend\n");
 		return -1;
 	}
