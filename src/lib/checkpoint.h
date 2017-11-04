@@ -25,47 +25,43 @@
 #include <pthread.h>
 #include <assert.h>
 
+#include "debug.h"
+#include "compiler.h"
 
-#define AVBOX_CHECKPOINT_READY		(0)
-#define AVBOX_CHECKPOINT_HALTING	(1)
-#define AVBOX_CHECKPOINT_HALTED		(2)
-#define AVBOX_CHECKPOINT_DISABLED	(3)
+#define AVBOX_CHECKPOINT_ENABLED	(0x1)
+#define AVBOX_CHECKPOINT_HALTED 	(0x2) 
 
 
 struct avbox_checkpoint
 {
+	int count;
 	int state;
 	pthread_mutex_t mutex;
 	pthread_cond_t halted;
 	pthread_cond_t released;
 };
 
+
 typedef struct avbox_checkpoint avbox_checkpoint_t;
 
 
 static inline void
-avbox_checkpoint_init(avbox_checkpoint_t * const checkpoint)
-{
-	if (pthread_mutex_init(&checkpoint->mutex, NULL) != 0 ||
-		pthread_cond_init(&checkpoint->halted, NULL) != 0 ||
-		pthread_cond_init(&checkpoint->released, NULL) != 0) {
-		abort();
-	}
-	checkpoint->state = AVBOX_CHECKPOINT_DISABLED;
-}
-
-static inline void
 avbox_checkpoint_here(avbox_checkpoint_t * const checkpoint)
 {
-	assert(checkpoint->state != AVBOX_CHECKPOINT_DISABLED);
-	pthread_mutex_lock(&checkpoint->mutex);
-	if (checkpoint->state == AVBOX_CHECKPOINT_HALTING) {
-		checkpoint->state = AVBOX_CHECKPOINT_HALTED;
-		pthread_cond_signal(&checkpoint->halted);
-		pthread_cond_wait(&checkpoint->released, &checkpoint->mutex);
-		checkpoint->state = AVBOX_CHECKPOINT_READY;
+	ASSERT(checkpoint->state & AVBOX_CHECKPOINT_ENABLED);
+
+	if (checkpoint->count > 0 ) {
+		while (checkpoint->count > 0) {
+			pthread_mutex_lock(&checkpoint->mutex);
+			if (checkpoint->count > 0 ) {
+				checkpoint->state |= AVBOX_CHECKPOINT_HALTED;
+				pthread_cond_signal(&checkpoint->halted);
+				pthread_cond_wait(&checkpoint->released, &checkpoint->mutex);
+			}
+			pthread_mutex_unlock(&checkpoint->mutex);
+		}
+		checkpoint->state &= ~AVBOX_CHECKPOINT_HALTED;
 	}
-	pthread_mutex_unlock(&checkpoint->mutex);
 }
 
 
@@ -73,7 +69,7 @@ static inline void
 avbox_checkpoint_disable(avbox_checkpoint_t * const checkpoint)
 {
 	pthread_mutex_lock(&checkpoint->mutex);
-	checkpoint->state = AVBOX_CHECKPOINT_DISABLED;
+	checkpoint->state &= ~AVBOX_CHECKPOINT_ENABLED;
 	pthread_cond_signal(&checkpoint->halted);
 	pthread_mutex_unlock(&checkpoint->mutex);
 }
@@ -83,8 +79,8 @@ static inline void
 avbox_checkpoint_enable(avbox_checkpoint_t * const checkpoint)
 {
 	pthread_mutex_lock(&checkpoint->mutex);
-	checkpoint->state = AVBOX_CHECKPOINT_READY;
-	pthread_cond_signal(&checkpoint->halted);
+	checkpoint->state |= AVBOX_CHECKPOINT_ENABLED;
+	pthread_cond_broadcast(&checkpoint->halted);
 	pthread_mutex_unlock(&checkpoint->mutex);
 }
 
@@ -92,22 +88,20 @@ avbox_checkpoint_enable(avbox_checkpoint_t * const checkpoint)
 static inline void
 avbox_checkpoint_halt(avbox_checkpoint_t * const checkpoint)
 {
-	assert(checkpoint->state == AVBOX_CHECKPOINT_READY);
 	pthread_mutex_lock(&checkpoint->mutex);
-	if (checkpoint->state != AVBOX_CHECKPOINT_DISABLED) {
-		checkpoint->state = AVBOX_CHECKPOINT_HALTING;
-	}
+	checkpoint->count++;
 	pthread_mutex_unlock(&checkpoint->mutex);
 
 }
 
+
 static inline void
 avbox_checkpoint_wait(avbox_checkpoint_t * const checkpoint)
 {
-	while (checkpoint->state != AVBOX_CHECKPOINT_HALTED &&
-		checkpoint->state != AVBOX_CHECKPOINT_DISABLED) {
+	/* block while we are enabled but not halted */
+	while (checkpoint->state == AVBOX_CHECKPOINT_ENABLED) {
 		pthread_mutex_lock(&checkpoint->mutex);
-		if (checkpoint->state != AVBOX_CHECKPOINT_HALTED) {
+		if (checkpoint->state == AVBOX_CHECKPOINT_ENABLED) {
 			pthread_cond_wait(&checkpoint->halted, &checkpoint->mutex);
 		}
 		pthread_mutex_unlock(&checkpoint->mutex);
@@ -119,8 +113,23 @@ static inline void
 avbox_checkpoint_continue(avbox_checkpoint_t * const checkpoint)
 {
 	pthread_mutex_lock(&checkpoint->mutex);
+	ASSERT(checkpoint->count > 0);
+	checkpoint->count--;
 	pthread_cond_signal(&checkpoint->released);
 	pthread_mutex_unlock(&checkpoint->mutex);
+}
+
+
+static inline void
+avbox_checkpoint_init(avbox_checkpoint_t * const checkpoint)
+{
+	if (pthread_mutex_init(&checkpoint->mutex, NULL) != 0 ||
+		pthread_cond_init(&checkpoint->halted, NULL) != 0 ||
+		pthread_cond_init(&checkpoint->released, NULL) != 0) {
+		abort();
+	}
+	checkpoint->count = 0;
+	checkpoint->state = 0;
 }
 
 #endif
