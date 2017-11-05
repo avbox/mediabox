@@ -119,8 +119,6 @@ mbi_socket_connection(void *arg)
 			pbuf++;
 		}
 
-		DEBUG_VPRINT(LOG_MODULE, "Read line: %s", buffer);
-
 		/* process the command */
 		if (!strncmp("MENU", buffer, 4)) {
 			avbox_input_sendevent(MBI_EVENT_MENU, NULL);

@@ -1,8 +1,8 @@
 AUTOMAKE_OPTIONS = subdir-objects
 
 AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
-	-DDATADIR='"$(datadir)"' \
-	-DLOCALSTATEDIR='"$(localstatedir)"' \
+	-DDATADIR="$(datadir)" \
+	-DLOCALSTATEDIR="$(localstatedir)" \
 	@CFLAGS@ \
 	@PTHREAD_CFLAGS@ \
 	@DIRECTFB_CFLAGS@ \

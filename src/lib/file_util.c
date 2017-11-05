@@ -37,6 +37,10 @@
 #include "proc_util.h"
 
 
+#define STRINGIZE2(x)	#x
+#define STRINGIZE(x)	STRINGIZE2(x)
+
+
 /**
  * closefrom() -- Close all file descriptors >= fd_max.
  */
@@ -163,7 +167,7 @@ mb_getdatadir(char *buf, size_t bufsize)
 	if (mb_getexepath(exe_path, sizeof(exe_path_mem)) == -1) {
 		LOG_VPRINT(LOGLEVEL_ERROR, "file-util", "Could not get executable path: %s",
 			strerror(errno));
-		strncpy(buf, DATADIR, bufsize);
+		strncpy(buf, STRINGIZE(DATADIR), bufsize);
 		return buf;
 
 	} else {
@@ -190,8 +194,8 @@ mb_getdatadir(char *buf, size_t bufsize)
 			} else {
 				DEBUG_VPRINT("library-backend", "Config template not found: %s",
 					conf_path);
-				if (strlen(DATADIR) < bufsize) {
-					strcpy(buf, DATADIR);
+				if (strlen(STRINGIZE(DATADIR)) < bufsize) {
+					strcpy(buf, STRINGIZE(DATADIR));
 					free(conf_path);
 					return buf;
 				}
@@ -213,14 +217,14 @@ getstatedir()
 
 	/* attempt to create the directory if it
 	 * doesn't exists */
-	mkdir_p(LOCALSTATEDIR "/lib/mediabox", S_IRWXU);
+	mkdir_p(STRINGIZE(LOCALSTATEDIR) "/lib/mediabox", S_IRWXU);
 
 	/* if it still doesn't exists or we can't access it
 	 * then use something else */
-	if (stat(LOCALSTATEDIR "/lib/mediabox", &st) == -1 ||
-		access(LOCALSTATEDIR "/lib/mediabox", R_OK|W_OK) == -1) {
+	if (stat(STRINGIZE(LOCALSTATEDIR) "/lib/mediabox", &st) == -1 ||
+		access(STRINGIZE(LOCALSTATEDIR) "/lib/mediabox", R_OK|W_OK) == -1) {
 		DEBUG_VPRINT("file-util", "Could not access '%s': %s",
-			LOCALSTATEDIR "/mediabox", strerror(errno));
+			STRINGIZE(LOCALSTATEDIR) "/mediabox", strerror(errno));
 		char *envhome = getenv("HOME");
 		char home[PATH_MAX];
 		if (envhome == NULL) {
@@ -233,7 +237,7 @@ getstatedir()
 		return strdup(home);
 	} else {
 		/* otherwise just return it */
-		return strdup(LOCALSTATEDIR "/lib/mediabox");
+		return strdup(STRINGIZE(LOCALSTATEDIR) "/lib/mediabox");
 	}
 }
 

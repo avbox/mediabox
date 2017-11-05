@@ -44,6 +44,9 @@
 #define DELUGED_BIN "/usr/bin/deluged"
 #define PREFIX "/usr/local"
 
+#define STRINGIZE2(x)	#x
+#define STRINGIZE(x)	STRINGIZE2(x)
+
 
 int daemon_id = -1;
 
@@ -108,8 +111,8 @@ mb_downloadmanager_init(void)
 	umask(000);
 
 	mkdir_p("/tmp/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	cp(DATADIR "/mediabox/deluge/core.conf", "/tmp/mediabox/deluge/core.conf");
-	cp(DATADIR "/mediabox/deluge/auth", "/tmp/mediabox/deluge/auth");
+	cp(STRINGIZE(DATADIR) "/mediabox/deluge/core.conf", "/tmp/mediabox/deluge/core.conf");
+	cp(STRINGIZE(DATADIR) "/mediabox/deluge/auth", "/tmp/mediabox/deluge/auth");
 	unlink("/tmp/mediabox/deluge/deluged.pid");
 
 	/* launch the deluged process */

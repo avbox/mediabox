@@ -171,7 +171,7 @@ flags2ycm()
 	FLAGS_ARRAY=""
 
 	while [[ "$#" != 0 ]]; do
-		FLAGS_ARRAY="${FLAGS_ARRAY}'${1}',"
+		FLAGS_ARRAY="${FLAGS_ARRAY}'${1}',"$'\n'
 		shift
 	done
 
@@ -196,6 +196,7 @@ YCM_FLAGS="$(flags2ycm ${CFLAGS} \
 
 AC_SUBST(PREFIX)
 AC_SUBST(YCM_FLAGS)
+AM_SUBST_NOTMAKE(YCM_FLAGS)
 
 AC_CONFIG_FILES([Makefile
                  src/Makefile
