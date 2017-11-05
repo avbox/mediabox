@@ -17,10 +17,15 @@
  *
  */
 
-
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
+
+#define LOG_MODULE "string_util"
+
+#include "debug.h"
+#include "log.h"
 
 
 /**
@@ -37,3 +42,96 @@ strisdigit(const char *str)
 	return 1;
 }
 
+
+/**
+ * Takes a pointer to a malloc allocated string and returns
+ * a pointer to a malloc allocated string with the
+ * replacements. If the replacements cannot be done in place
+ * a new buffer will be allocated for the string and str
+ * will be freed.
+ */
+char *
+strreplace(char *str, const char * const what, const char * const with)
+{
+	int len, diff;
+	char *ins, *ret = NULL;
+
+	ASSERT(str != NULL);
+	ASSERT(what != NULL);
+	ASSERT(with != NULL);
+
+	const int what_len = strlen(what);
+	const int with_len = strlen(with);
+
+	if (strstr(str, what) == NULL) {
+		return str;
+	}
+
+	/* calculate the length if the new string */
+	len = strlen(str);
+	diff = with_len - what_len;
+	for (ins = strstr(str, what); ins != NULL;
+		len += diff, ins = strstr(ins + what_len, what));
+
+	/* allocate memory for new string */
+	if ((ret = malloc(len + 1)) == NULL) {
+		ASSERT(errno == ENOMEM);
+		goto end;
+	}
+
+	for (*ret = '\0', ins = str; ins != NULL; ins = ins) {
+		char *next = strstr(ins, what);
+		if (next == NULL) {
+			strcat(ret, ins);
+			ins = NULL;
+		} else {
+			int sublen = next - ins;
+			strncat(ret, ins, sublen);
+			strcat(ret, with);
+			ins += sublen + what_len;
+		}
+	}
+end:
+	free(str);
+	return ret;
+}
+
+
+/**
+ * Trims the string in place.
+ */
+char *
+strtrim(char * const str)
+{
+	char *pstr;
+	size_t len;
+
+	if (str == NULL) {
+		errno = EINVAL;
+		return NULL;
+	}
+
+
+	/* trim spaces of the end */
+	len = strlen(str);
+	pstr = str + len - 1;
+	while (len > 0 && (*pstr == ' ' || *pstr == '\t')) {
+		*pstr-- = '\0';
+		len--;
+	}
+
+	/* trim spaces of the start */
+	pstr = str;
+	while (*pstr != '\0' && (*pstr == ' ' || *pstr == '\t')) {
+		pstr++;
+		len--;
+	}
+
+	ASSERT(len >= 0);
+
+	if (pstr > str) {
+		memmove(str, pstr, len + 1);
+	}
+
+	return str;
+}

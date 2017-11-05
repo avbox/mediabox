@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+#	include "config.h"
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -32,8 +32,15 @@
 #include <libgen.h>
 #include <assert.h>
 #include <limits.h>
+#include <sqlite3.h>
+#include <magic.h>
+#include <sys/mount.h>
+#include <sys/inotify.h>
+#include <regex.h>
+#include <pthread.h>
+#include <signal.h>
 
-#define LOG_MODULE "library-backend"
+#define LOG_MODULE "library"
 
 #include "lib/log.h"
 #include "lib/debug.h"
@@ -42,18 +49,31 @@
 #include "lib/linkedlist.h"
 #include "lib/proc_util.h"
 #include "lib/file_util.h"
+#include "lib/db_util.h"
 #include "library.h"
+#include "lib/delegate.h"
+#include "lib/thread.h"
+#include "lib/string_util.h"
 
 
 #define MEDIATOMB_BIN "/usr/bin/mediatomb"
 #define MEDIATOMB_RUN "/tmp/mediabox/mediatomb"
-#define MEDIATOMB_VAR "/var/mediabox/mediatomb"
+#define MEDIATOMB_VAR "/var/lib/mediabox/mediatomb"
 #define AVMOUNT_BIN "/usr/bin/avmount"
 #define AVMOUNT_MOUNTPOINT "/media/UPnP"
 #define DEFAULT_LOGFILE "/var/log/avmount-mediabox.log"
 #define FUSERMOUNT_BIN "/usr/bin/fusermount"
 
+#define MBOX_STORE_MOUNTPOINT	"/var/lib/mediabox/store"
+#define MBOX_STORE_VIDEO	"/var/lib/mediabox/store/Video"
+#define MBOX_STORE_AUDIO	"/var/lib/mediabox/store/Audio"
+
 #define UPNP_ROOT	"/media/UPnP"
+
+#define MBOX_LIBRARY_LOCAL_DIRECTORY_AUDIO	(1)
+#define MBOX_LIBRARY_LOCAL_DIRECTORY_MOVIES	(3)
+#define MBOX_LIBRARY_LOCAL_DIRECTORY_SERIES	(4)
+
 
 #define MBOX_LIBRARY_DIRTYPE_ROOT 	(0)
 #define MBOX_LIBRARY_DIRTYPE_LOCAL	(1)
@@ -62,21 +82,73 @@
 #define MBOX_LIBRARY_DIRTYPE_BLUETOOTH	(4)
 #define MBOX_LIBRARY_DIRTYPE_TV		(5)
 
+#define STRINGIZE2(x)	#x
+#define STRINGIZE(x)	STRINGIZE2(x)
+
 
 LISTABLE_STRUCT(mb_mediatomb_inst,
 	int procid;
 );
+
 
 struct mt_init_state
 {
 	int port;
 	int err;
 	int gotone;
-	char *home;
 };
 
-LIST_DECLARE_STATIC(mediatomb_instances);
+
+LISTABLE_STRUCT(mbox_library_local_watchdir,
+	int watch_fd;
+	char *path;
+);
+
+
+static char * mediatomb_home = NULL;
+static LIST mediatomb_instances;
+
 static int avmount_process_id = -1;
+static int local_inotify_fd = -1;
+static int local_inotify_quit = 0;
+static pthread_t local_inotify_thread;
+static LIST local_inotify_watches;
+
+
+#if 0
+static int
+mbox_library_mediatombadd(const char * const path)
+{
+	int process_id, exit_status;
+	const char * args[] =
+	{
+		MEDIATOMB_BIN,
+		"--config",
+		MEDIATOMB_RUN "/config.xml",
+		"--home",
+		mediatomb_home,
+		"--add",
+		path,
+		NULL
+	};
+
+	/* launch the mediatomb process */
+	if ((process_id = avbox_process_start(MEDIATOMB_BIN, (const char **) args,
+		AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT |
+		AVBOX_PROCESS_STDOUT_LOG | AVBOX_PROCESS_STDERR_LOG,
+		"mediatomb-add", NULL, NULL)) == -1) {
+		LOG_VPRINT_ERROR("Could not execute deluge-console (errno=%i)",
+			errno);
+		return -1;
+	}
+
+	/* wait for process to exit */
+	avbox_process_wait(process_id, &exit_status);
+
+	return exit_status;
+}
+#endif
 
 
 /**
@@ -100,6 +172,8 @@ mb_library_backend_startmediatomb(const char * iface_name, void  *data)
 		MEDIATOMB_RUN "/config.xml",
 		"--home",
 		homedir,
+		"--add",
+		MBOX_STORE_VIDEO,
 		NULL
 	};
 
@@ -125,7 +199,7 @@ mb_library_backend_startmediatomb(const char * iface_name, void  *data)
 	 * and port. Also create the home directory if it doesn't
 	 * already exists */
 	snprintf(port, sizeof(port), "%i", state->port++);
-	snprintf(homedir, sizeof(homedir), "%s.%s", state->home, iface_name);
+	snprintf(homedir, sizeof(homedir), "%s", mediatomb_home);
 	if (mkdir_p(homedir, S_IRWXU | S_IRWXG) == -1) {
 		state->err = 1;
 		return 0;
@@ -145,7 +219,7 @@ mb_library_backend_startmediatomb(const char * iface_name, void  *data)
 	/* launch the mediatomb process */
 	if ((inst->procid = avbox_process_start(MEDIATOMB_BIN, (const char **) mtargs,
 		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
-		AVBOX_PROCESS_SUPERUSER/* | AVBOX_PROCESS_STDOUT_LOG | AVBOX_PROCESS_STDERR_LOG */,
+		AVBOX_PROCESS_SUPERUSER /*| AVBOX_PROCESS_STDOUT_LOG | AVBOX_PROCESS_STDERR_LOG*/,
 		"mediatomb", NULL, NULL)) == -1) {
 		LOG_PRINT_ERROR("Could not start mediatomb daemon");
 		free(inst);
@@ -496,6 +570,98 @@ mbox_library_striplastlevel(char * const path)
 }
 
 
+static char *
+mbox_library_transform_video_title(char * title)
+{
+	char *tmp;
+
+	title = strreplace(title, "\t", "");
+	title = strreplace(title, "YIFY", "");
+	title = strreplace(title, "BluRay", "");
+	title = strreplace(title, "x264", "");
+	title = strreplace(title, "BrRip", "");
+	title = strreplace(title, "HDRip", "");
+	title = strreplace(title, "AAC2", "");
+	title = strreplace(title, "AAC-JYK", "");
+	title = strreplace(title, "bitloks", "");
+	title = strreplace(title, "H264", "");
+	title = strreplace(title, "AAC-RARBG", "");
+	title = strreplace(title, "SiNNERS", "");
+	title = strreplace(title, "X264", "");
+	title = strreplace(title, "XViD", "");
+	title = strreplace(title, "XviD", "");
+	title = strreplace(title, "EVO", "");
+	title = strreplace(title, "_", " ");
+	title = strreplace(title, "psig", " ");
+	title = strreplace(title, "xvid", "");
+	title = strreplace(title, "dvdrip", "");
+	title = strreplace(title, "ac3", "");
+	title = strreplace(title, "AC3", "");
+	title = strreplace(title, "DvDrip", "");
+	title = strreplace(title, "DVDRip", "");
+	title = strreplace(title, "internal", "");
+	title = strreplace(title, "iNFAMOUS", "");
+	title = strreplace(title, "HD-CAM", "");
+	title = strreplace(title, "AC3-CPG", "");
+	title = strreplace(title, "HQMic", "");
+	title = strreplace(title, "BRRip", "");
+	title = strreplace(title, "Bluray", "");
+	title = strreplace(title, "500MB", "");
+	title = strreplace(title, "aXXo", "");
+	title = strreplace(title, "VPPV", "");
+	title = strreplace(title, "BOKUTOX", "");
+	title = strreplace(title, "George Lucas", "");
+	title = strreplace(title, "Eng Subs", "");
+	title = strreplace(title, "BRrip", "");
+	title = strreplace(title, "DTS", "");
+	title = strreplace(title, "GAZ", "");
+	title = strreplace(title, "AAC", "");
+	title = strreplace(title, "YTS", "");
+	title = strreplace(title, "AG", "");
+	title = strreplace(title, "RARBG", "");
+	title = strreplace(title, "CPG", "");
+	title = strreplace(title, "HD TS", "");
+	title = strreplace(title, "SyED", "");
+	title = strreplace(title, "MkvCage", "");
+	title = strreplace(title, "WEBRip", "");
+	title = strreplace(title, "HC ETRG", "");
+	title = strreplace(title, "DVDSrc", "");
+	title = strreplace(title, "XVID", "");
+	title = strreplace(title, "HQ Hive", "");
+	title = strreplace(title, "CM8", "");
+	title = strreplace(title, "mkv muxed old", "");
+	title = strreplace(title, "0 STUTTERSHIT", "");
+	title = strreplace(title, "WEB DL", "");
+	title = strreplace(title, "JYK", "");
+	title = strreplace(title, "Xvid", "");
+	title = strreplace(title, "avi", "");
+	title = strreplace(title, "mp4", "");
+	title = strreplace(title, ".", " ");
+	title = strreplace(title, "-", " ");
+
+	do {
+		tmp = strdup(title);
+		ASSERT(tmp != NULL);
+		title = strreplace(title, "  ", " ");
+	} while (strcmp(tmp, title));
+
+	if (tmp != NULL) {
+		free(tmp);
+	}
+
+
+	title = strreplace(title, "[]", "");
+	title = strreplace(title, "[ ]", "");
+	title = strtrim(title);
+
+	if (!strcmp(title, "COM") || !strcmp(title, "com")) {
+		title[0] = '\0';
+	}
+
+	return title;
+}
+
+
 static struct mbox_library_dirent *
 mbox_library_dupdirent(struct mbox_library_dirent * const ent)
 {
@@ -517,6 +683,907 @@ mbox_library_dupdirent(struct mbox_library_dirent * const ent)
 	}
 	newent->isdir = ent->isdir;
 	return newent;
+}
+
+
+static int
+mbox_library_local_open_database(sqlite3 **db, const int flags)
+{
+	int ret = -1;
+	char *filename = NULL;
+
+	if ((filename = avbox_dbutil_getdbfile("content.db")) == NULL) {
+		ASSERT(errno == ENOMEM);
+		goto end;
+	}
+
+	/* open db connection */
+	if (sqlite3_open_v2(filename, db, flags | SQLITE_OPEN_FULLMUTEX, NULL) != SQLITE_OK) {
+		LOG_VPRINT_ERROR("Could not open database '%s': %s",
+			filename, sqlite3_errmsg(*db));
+		errno = EIO;
+		goto end;
+	}
+
+	ret = 0;
+end:
+	if (filename != NULL) {
+		free(filename);
+	}
+
+	return ret;
+}
+
+
+/**
+ * Get the id of a library path if it exists.
+ */
+static int64_t
+mbox_library_local_getid(const char * const path, int64_t start_at)
+{
+	int64_t ret = -1;
+	int res;
+	size_t len = 0;
+	sqlite3 *db = NULL;
+	sqlite3_stmt *stmt = NULL;
+	const char *ppath;
+	char *name = NULL, *pname;
+	const char * const sql = "SELECT id FROM local_objects WHERE parent_id = ? AND name = ?";
+
+	ppath = (*path == '/') ?  path + 1 : path;
+	while (*ppath != '/' && *ppath != '\0') {
+		ppath++;
+		len++;
+	}
+
+	/* this is the root directory */
+	if (len == 0) {
+		return start_at;
+	}
+
+	if ((name = malloc(len + 1)) == NULL) {
+		ASSERT(errno == ENOMEM);
+		return -1;
+	}
+
+	/* copy name */
+	ppath = (*path == '/') ?  path + 1 : path;
+	pname = name;
+	while (len > 0) {
+		*pname++ = *ppath++;
+		len--;
+	}
+	*pname = '\0';
+
+	ASSERT(*ppath == '/' || *ppath == '\0');
+
+	/* open db connection */
+	if (mbox_library_local_open_database(&db, SQLITE_OPEN_READONLY) == -1) {
+		LOG_VPRINT_ERROR("Could not open database: %s",
+			sqlite3_errmsg(db));
+		goto end;
+	}
+
+	/* prepare the query */
+	while ((res = sqlite3_prepare_v2(db, sql, -1, &stmt, 0)) != SQLITE_OK) {
+		if (res == SQLITE_LOCKED) {
+			usleep(100L * 1000L);
+			continue;
+		} else {
+			errno = EFAULT;
+		}
+		LOG_VPRINT_ERROR("Could not prepare SQL statement: %s", sql);
+		LOG_VPRINT_ERROR("SQL Error: %s", sqlite3_errmsg(db));
+		goto end;
+	}
+
+	/* bind parameters */
+	if (sqlite3_bind_int(stmt, 1, start_at) != SQLITE_OK ||
+		sqlite3_bind_text(stmt, 2, name, strlen(name), NULL) != SQLITE_OK) {
+		LOG_VPRINT_ERROR("Binding failed: %s", sqlite3_errmsg(db));
+		goto end;
+	}
+
+	/* execute the query and do it again until
+	 * we resolve the path */
+	while (1) {
+		if ((res = sqlite3_step(stmt)) == SQLITE_ROW) {
+			ret = sqlite3_column_int(stmt, 0);
+			if (strlen(ppath) > 1) {
+				ret = mbox_library_local_getid(ppath, ret);
+			}
+			break;
+		} else if (res == SQLITE_BUSY) {
+			usleep(100L * 1000L);
+			continue;
+		} else if (res == SQLITE_DONE) {
+			ret = -1;
+			break;
+		} else if (res == SQLITE_MISUSE) {
+			DEBUG_ABORT(LOG_MODULE, "sqlite misuse");
+		} else if (res == SQLITE_ERROR) {
+			LOG_VPRINT_ERROR("Sqlite error: %s", sqlite3_errmsg(db));
+			ret = -1;
+			break;
+		} else {
+			DEBUG_VPRINT(LOG_MODULE, "Step failed: %i", res);
+			ret = -1;
+			break;
+		}
+	}
+
+end:
+	if (stmt != NULL) {
+		sqlite3_finalize(stmt);
+	}
+	if (db != NULL) {
+		sqlite3_close(db);
+	}
+	if (name != NULL) {
+		free(name);
+	}
+
+	return ret;
+}
+
+
+static int64_t
+mbox_library_local_getid_by_uri(const char * const uri)
+{
+	int64_t ret = -1;
+	int res;
+	sqlite3 *db = NULL;
+	sqlite3_stmt *stmt = NULL;
+	const char * const sql = "SELECT id FROM local_objects WHERE path = ? LIMIT 1";
+
+	/* open db connection */
+	if (mbox_library_local_open_database(&db, SQLITE_OPEN_READONLY) == -1) {
+		LOG_VPRINT_ERROR("Could not open database: %s",
+			sqlite3_errmsg(db));
+		goto end;
+	}
+
+	/* prepare the query */
+	while ((res = sqlite3_prepare_v2(db, sql, -1, &stmt, 0)) != SQLITE_OK) {
+		if (res == SQLITE_LOCKED) {
+			usleep(100L * 1000L);
+			continue;
+		} else {
+			errno = EFAULT;
+		}
+		LOG_VPRINT_ERROR("Could not prepare SQL statement: %s", sql);
+		LOG_VPRINT_ERROR("SQL Error: %s", sqlite3_errmsg(db));
+		goto end;
+	}
+
+	/* bind parameters */
+	if (sqlite3_bind_text(stmt, 1, uri, strlen(uri), NULL) != SQLITE_OK) {
+		LOG_VPRINT_ERROR("Binding failed: %s", sqlite3_errmsg(db));
+		goto end;
+	}
+
+	/* execute the query and do it again until
+	 * we resolve the path */
+	while (1) {
+		if ((res = sqlite3_step(stmt)) == SQLITE_ROW) {
+			ret = sqlite3_column_int(stmt, 0);
+			break;
+		} else if (res == SQLITE_BUSY) {
+			usleep(100L * 1000L);
+			continue;
+		} else if (res == SQLITE_DONE) {
+			ret = -1;
+			break;
+		} else if (res == SQLITE_MISUSE) {
+			DEBUG_ABORT(LOG_MODULE, "sqlite misuse");
+		} else if (res == SQLITE_ERROR) {
+			LOG_VPRINT_ERROR("Sqlite error: %s", sqlite3_errmsg(db));
+			ret = -1;
+			break;
+		} else {
+			DEBUG_VPRINT(LOG_MODULE, "Step failed: %i", res);
+			ret = -1;
+			break;
+		}
+	}
+
+end:
+	if (stmt != NULL) {
+		sqlite3_finalize(stmt);
+	}
+	if (db != NULL) {
+		sqlite3_close(db);
+	}
+
+	return ret;
+
+}
+
+
+static int64_t
+mbox_library_local_mkdir(const char * const name, const int64_t parent_id)
+{
+	int res, ret = -1;
+	sqlite3 *db = NULL;
+	sqlite3_stmt *stmt = NULL;
+	const char * const sql = "INSERT INTO local_objects (parent_id, name, path) VALUES (?, ?, '')";
+
+	ASSERT(name != NULL);
+	ASSERT(strlen(name) > 0);
+
+	/* open db connection */
+	if (mbox_library_local_open_database(&db, SQLITE_OPEN_READWRITE) == -1) {
+		LOG_VPRINT_ERROR("Could not open database: %s",
+			sqlite3_errmsg(db));
+		goto end;
+	}
+
+	/* prepare the query */
+	while ((res = sqlite3_prepare_v2(db, sql, -1, &stmt, 0)) != SQLITE_OK) {
+		if (res == SQLITE_LOCKED) {
+			usleep(100L * 1000L);
+			continue;
+		}
+		errno = EFAULT;
+		LOG_VPRINT_ERROR("Could not prepare SQL statement: %s", sql);
+		LOG_VPRINT_ERROR("SQL Error: %s", sqlite3_errmsg(db));
+		goto end;
+	}
+
+	/* bind parameters */
+	if (sqlite3_bind_int(stmt, 1, parent_id) != SQLITE_OK ||
+		sqlite3_bind_text(stmt, 2, name, strlen(name), NULL) != SQLITE_OK) {
+		LOG_VPRINT_ERROR("Binding failed: %s", sqlite3_errmsg(db));
+		goto end;
+	}
+
+	/* execute the statement */
+	while ((res = sqlite3_step(stmt)) != SQLITE_DONE) {
+		if (res == SQLITE_BUSY) {
+			usleep(100L * 1000L);
+			continue;
+		} else if (res == SQLITE_ERROR) {
+			LOG_VPRINT_ERROR("SQLite Error: %s", sqlite3_errmsg(db));
+			goto end;
+		} else if (res == SQLITE_MISUSE) {
+			DEBUG_ABORT(LOG_MODULE, "Sqlite misuse!");
+		}
+	}
+
+	/* get the row id */
+	ret = sqlite3_last_insert_rowid(db);
+end:
+	if (stmt != NULL) {
+		sqlite3_finalize(stmt);
+	}
+	if (db != NULL) {
+		sqlite3_close(db);
+	}
+	return ret;
+}
+
+
+static char *
+mbox_library_local_video_name(const char * const path, int64_t * const parent_id)
+{
+	int ret, i;
+	char *name = NULL, *tmp = NULL, *res = NULL;
+	const char *patterns[] =
+	{
+		"(.*)S([0-9][0-9])E([0-9][0-9])(.*)",
+		"(.*)S([0-9][0-9])(.*)"
+	};
+
+	if ((tmp = strdup(path)) == NULL) {
+		ASSERT(errno == ENOMEM);
+		goto end;
+	}
+	if ((name = strdup(basename(tmp))) == NULL) {
+		goto end;
+	}
+	free(tmp);
+
+	mbox_library_stripext(name);
+
+	for (i = 0; i < (sizeof(patterns) / sizeof(char*)); i++) {
+		regex_t regex;
+		int nmatches = 5;
+		regmatch_t matches[nmatches];
+
+		if ((ret = regcomp(&regex, patterns[i], REG_EXTENDED | REG_ICASE)) != 0) {
+			DEBUG_ABORT(LOG_MODULE, "Could not compile regexp!");
+		}
+
+		/* if the name looks like a TV serie... */
+		if ((ret = regexec(&regex, name, nmatches, matches, 0)) == 0) {
+
+			char buf[1024] = "", *pbuf;
+			char *serie_name, *season, *episode;
+			int64_t tmp_id;
+			size_t matchlen;
+
+			matchlen = matches[1].rm_eo - matches[1].rm_so;
+			strncpy(buf, name + matches[1].rm_so, matchlen);
+			buf[matchlen] = '\0';
+			if ((serie_name = strdup(buf)) == NULL) {
+				abort();
+			}
+			if ((serie_name = mbox_library_transform_video_title(serie_name)) == NULL) {
+				abort();
+			}
+			if ((serie_name = strtrim(serie_name)) == NULL) {
+				abort();
+			}
+
+			matchlen = matches[2].rm_eo - matches[2].rm_so;
+			strcpy(buf, "Season ");
+			strncat(buf, name + matches[2].rm_so, matchlen);
+			buf[matchlen + 7] = '\0';
+			if ((season = strdup(buf)) == NULL) {
+				abort();
+			}
+
+			matchlen = matches[3].rm_eo - matches[3].rm_so;
+			strcpy(buf, "Episode ");
+			strncat(buf, name + matches[3].rm_so, matchlen);
+			buf[matchlen + 8] = '\0';
+			strcat(buf, " ");
+
+			pbuf = &buf[matchlen + 9];
+			matchlen = matches[4].rm_eo - matches[4].rm_so;
+			strncpy(pbuf, name + matches[4].rm_so, matchlen);
+			if ((episode = strdup(buf)) == NULL) {
+				abort();
+			}
+
+			/* lookup or create serie directory */
+			if ((*parent_id = mbox_library_local_getid(serie_name,
+				MBOX_LIBRARY_LOCAL_DIRECTORY_SERIES)) == -1) {
+				if ((*parent_id = mbox_library_local_mkdir(serie_name,
+					MBOX_LIBRARY_LOCAL_DIRECTORY_SERIES)) == -1) {
+					LOG_VPRINT_ERROR("Could not create series directory: %s",
+						strerror(errno));
+					res = NULL;
+					goto serie_end;
+				}
+			}
+
+			/* find or create the season directory */
+			if ((tmp_id = mbox_library_local_getid(season, *parent_id)) == -1) {
+				if ((*parent_id = mbox_library_local_mkdir(season, *parent_id)) == -1) {
+					LOG_VPRINT_ERROR("Could not create season directory: %s",
+						strerror(errno));
+					res = NULL;
+					goto serie_end;
+				}
+			} else {
+				*parent_id = tmp_id;
+			}
+
+			/* copy and format the episode name */
+			if ((res = strdup(episode)) == NULL) {
+				LOG_PRINT_ERROR("Could not dup episode name");
+			}
+			if ((res = mbox_library_transform_video_title(res)) == NULL) {
+				LOG_VPRINT_ERROR("Could not tranform video title: %s",
+					strerror(errno));
+			}
+serie_end:
+			free(episode);
+			free(season);
+			free(serie_name);
+
+			goto end;
+
+		} else if (ret == REG_NOMATCH) {
+			/* nothing */
+		} else {
+			char buf[256];
+			regerror(ret, &regex, buf, sizeof(buf));
+			LOG_VPRINT_ERROR("Regex error: %s", buf);
+		}
+
+		regfree(&regex);
+	}
+
+	/* this is not a serie */
+	*parent_id = MBOX_LIBRARY_LOCAL_DIRECTORY_MOVIES;
+	name = mbox_library_transform_video_title(name);
+	res = strdup(name);
+
+end:
+	if (name != NULL) {
+		free(name);
+	}
+
+	return res;
+};
+
+
+static char *
+mbox_library_local_audio_name(const char * const path, int64_t * const parent_id)
+{
+	*parent_id = 2;
+	return strdup("Song");
+}
+
+
+/**
+ * Add content to the local media library.
+ */
+static int64_t
+mbox_library_addcontent(const char * const path)
+{
+	int ret = -1;
+	magic_t magic;
+	const char *mime = NULL;
+
+	if ((magic = magic_open(MAGIC_MIME)) == NULL) {
+		LOG_PRINT_ERROR("Could not create magic cookie");
+		errno = EFAULT;
+		return -1;
+	}
+
+	if (magic_load(magic, NULL) != 0) {
+		LOG_VPRINT_ERROR("Could not load magic database: %s",
+			magic_error(magic));
+		magic_close(magic);
+		errno = EFAULT;
+		return -1;
+	}
+
+	if ((mime = magic_file(magic, path)) == NULL) {
+		LOG_PRINT_ERROR("Could not get file magic");
+		magic_close(magic);
+		errno = EFAULT;
+		return -1;
+	}
+
+	if ((!strncmp(mime, "video/", 6) && strcmp(mime, "video/subtitle")) || !strncmp(mime, "video/", 6)) {
+		int res, retries = 0;
+		int64_t id, parent_id;
+		sqlite3 *db = NULL;
+		sqlite3_stmt *stmt = NULL;
+		char * name = NULL;
+		const char * const sql_insert = "INSERT INTO local_objects (parent_id, name, path) VALUES (?, ?, ?)";
+		const char * const sql_update = "UPDATE local_objects SET name = ? WHERE id = ?";
+
+		if (!strcmp(path + (strlen(path) - 3), "sub")) {
+			errno = EINVAL;
+			goto end;
+		}
+
+		id = mbox_library_local_getid_by_uri(path);
+		if (id == -1) {
+			DEBUG_VPRINT(LOG_MODULE, "Adding '%s' to library", path);
+		} else {
+			DEBUG_VPRINT(LOG_MODULE, "Updating '%s' (%i)", path, id);
+		}
+
+		if (!strncmp(mime, "video/", 6)) {
+			if ((name = mbox_library_local_video_name(path, &parent_id)) == NULL) {
+				LOG_VPRINT_ERROR("Could not get video name: %s",
+					strerror(errno));
+				goto end;
+			}
+		} else {
+			ASSERT(!strncmp(mime, "audio/", 6));
+			if ((name = mbox_library_local_audio_name(path, &parent_id)) == NULL) {
+				goto end;
+			}
+		}
+		if (!strcmp(name, "")) {
+			errno = EINVAL;
+			goto end;
+		}
+
+		/* add the file to the mediatomb database */
+		#if 0
+		if (mbox_library_mediatombadd(path) != 0) {
+			LOG_VPRINT_ERROR("mediatomb --add '%s' failed!",
+				path);
+		}
+		#endif
+
+		/* open db connection */
+		if (mbox_library_local_open_database(&db, SQLITE_OPEN_READWRITE) == -1) {
+			LOG_VPRINT_ERROR("Could not open database: %s",
+				sqlite3_errmsg(db));
+			goto end;
+		}
+
+		if (id == -1) {
+			/* prepare the query */
+			while ((res = sqlite3_prepare_v2(db, sql_insert, -1, &stmt, 0)) != SQLITE_OK) {
+				if (res == SQLITE_LOCKED) {
+					if (retries < 3) {
+						usleep(100L * 1000L);
+						retries++;
+						continue;
+					}
+					errno = EAGAIN;
+				} else {
+					errno = EFAULT;
+				}
+				LOG_VPRINT_ERROR("Could not prepare SQL statement: %s", sql_insert);
+				LOG_VPRINT_ERROR("SQL Error: %s", sqlite3_errmsg(db));
+				goto end;
+			}
+
+			/* bind parameters */
+			if (sqlite3_bind_int(stmt, 1, parent_id) != SQLITE_OK ||
+				sqlite3_bind_text(stmt, 2, name, strlen(name), NULL) != SQLITE_OK ||
+				sqlite3_bind_text(stmt, 3, path, strlen(path), NULL) != SQLITE_OK) {
+				LOG_VPRINT_ERROR("Binding failed: %s", sqlite3_errmsg(db));
+				goto end;
+			}
+		} else {
+			/* prepare the query */
+			while ((res = sqlite3_prepare_v2(db, sql_update, -1, &stmt, 0)) != SQLITE_OK) {
+				if (res == SQLITE_LOCKED) {
+					if (retries < 3) {
+						usleep(100L * 1000L);
+						retries++;
+						continue;
+					}
+					errno = EAGAIN;
+				} else {
+					errno = EFAULT;
+				}
+				LOG_VPRINT_ERROR("Could not prepare SQL statement: %s", sql_insert);
+				LOG_VPRINT_ERROR("SQL Error: %s", sqlite3_errmsg(db));
+				goto end;
+			}
+
+			/* bind parameters */
+			if (sqlite3_bind_text(stmt, 1, name, strlen(name), NULL) != SQLITE_OK ||
+				sqlite3_bind_int(stmt, 2, id) != SQLITE_OK) {
+				LOG_VPRINT_ERROR("Binding failed: %s", sqlite3_errmsg(db));
+				goto end;
+			}
+		}
+
+		/* execute the statement */
+		while ((res = sqlite3_step(stmt)) != SQLITE_DONE) {
+			if (res == SQLITE_BUSY) {
+				usleep(100L * 1000L);
+				continue;
+			} else if (res == SQLITE_ERROR) {
+				LOG_VPRINT_ERROR("SQLite Error: %s", sqlite3_errmsg(db));
+				break;
+			} else if (res == SQLITE_MISUSE) {
+				DEBUG_ABORT(LOG_MODULE, "Sqlite misuse!");
+			}
+		}
+
+		ret = sqlite3_last_insert_rowid(db);
+end:
+		if (name != NULL) {
+			free(name);
+		}
+		if (stmt != NULL) {
+			sqlite3_finalize(stmt);
+		}
+		if (db != NULL) {
+			sqlite3_close(db);
+		}
+	} else {
+		errno = EINVAL;
+	}
+
+	magic_close(magic);
+
+	return ret;
+}
+
+
+/**
+ * Add a directory to the watch list.
+ */
+int
+mbox_library_scandir(const char * const path)
+{
+	DIR *dir;
+	struct dirent *ent;
+	int ret = -1;
+
+	DEBUG_VPRINT(LOG_MODULE, "Scanning '%s'...", path);
+
+	if ((dir = opendir(path)) == NULL) {
+		LOG_VPRINT_ERROR("Could not watch path (%s): %s",
+			path, strerror(errno));
+		return -1;
+	}
+
+	while ((ent = readdir(dir)) != NULL) {
+		char *entpath;
+		struct stat st;
+
+		if (ent->d_name[0] == '.') {
+			continue;
+		}
+
+		entpath = malloc(strlen(path) + 1 + strlen(ent->d_name) + 1);
+		if (entpath == NULL) {
+			ASSERT(errno == ENOMEM);
+			DEBUG_PRINT(LOG_MODULE, "Library scan aborted. Out of memory");
+			goto end;
+		}
+
+		strcpy(entpath, path);
+		strcat(entpath, "/");
+		strcat(entpath, ent->d_name);
+
+		if (stat(entpath, &st) == -1) {
+			LOG_VPRINT_ERROR("Could not stat %s: %s",
+				entpath, strerror(errno));
+			free(entpath);
+			continue;
+		}
+
+		if (S_ISDIR(st.st_mode)) {
+			if (mbox_library_scandir(entpath) == -1) {
+				LOG_VPRINT_ERROR("Could not scan directory '%s': %s",
+					entpath, strerror);
+			}
+		} else {
+			if (mbox_library_addcontent(entpath) == -1) {
+				if (errno != EINVAL) {
+					LOG_VPRINT_ERROR("Could not add content '%s': %s",
+						entpath, strerror(errno));
+				}
+			}
+		}
+
+		free(entpath);
+	}
+
+	ret = 0;
+end:
+	if (dir != NULL) {
+		closedir(dir);
+	}
+
+	return ret;
+}
+
+
+static void *
+mbox_library_local_scan_library(void * const arg)
+{
+	DEBUG_PRINT(LOG_MODULE, "Scanning media library...");
+	mbox_library_scandir(MBOX_STORE_VIDEO);
+	mbox_library_scandir(MBOX_STORE_AUDIO);
+	DEBUG_PRINT(LOG_MODULE, "Library scan complete.");
+	return NULL;
+}
+
+
+/**
+ * Check if the local database exists and create it if it
+ * doesn't.
+ */
+static int
+mbox_library_create_db_if_not_exist()
+{
+	int ret = -1;
+	char *filename;
+	struct stat st;
+	struct avbox_delegate *del;
+
+	if ((filename = avbox_dbutil_getdbfile("content.db")) == NULL) {
+		ASSERT(errno == ENOMEM);
+		return ret;
+	}
+
+	while (stat(filename, &st) == -1) {
+
+		int res;
+		sqlite3 *db = NULL;
+
+		if (errno == EAGAIN || errno == EINTR) {
+			continue;
+		} else if (errno != ENOENT) {
+			LOG_VPRINT_ERROR("Cannot stat content database: %s",
+				strerror(errno));
+			goto end;
+		}
+
+		DEBUG_VPRINT(LOG_MODULE, "Could not find database %s. Creating",
+			filename);
+
+		const char * const sql =
+			"CREATE TABLE local_objects ("
+			"	id INTEGER PRIMARY KEY,"
+			"	parent_id INTEGER,"
+			"	name TEXT,"
+			"	path TEXT,"
+			"	date_added INTEGER,"
+			"	date_modified INTEGER"
+			");"
+			"INSERT INTO local_objects (id, parent_id, name, path) VALUES (1, 0, 'Audio', '');"
+			"INSERT INTO local_objects (id, parent_id, name, path) VALUES (2, 0, 'Video', '');"
+			"INSERT INTO local_objects (id, parent_id, name, path) VALUES (3, 2, 'Movies', '');"
+			"INSERT INTO local_objects (id, parent_id, name, path) VALUES (4, 2, 'TV Shows', '');";
+
+		/* open database */
+		if (mbox_library_local_open_database(&db,
+			SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE) == -1) {
+			ASSERT(errno == EIO);
+			LOG_VPRINT_ERROR("Could not open database: %s",
+				sqlite3_errmsg(db));
+			goto end;
+		}
+
+		if ((res = sqlite3_exec(db, sql, NULL, NULL, NULL)) != SQLITE_OK) {
+			LOG_VPRINT_ERROR("SQL Query: '%s' failed (%d)!", sql, res);
+			LOG_VPRINT_ERROR("SQL Error: %s", sqlite3_errmsg(db));
+			sqlite3_close(db);
+			goto end;
+		}
+
+		sqlite3_close(db);
+
+		/* scan the internal storage in background thread */
+		if ((del = avbox_thread_delegate(
+			mbox_library_local_scan_library, NULL)) == NULL) {
+			LOG_VPRINT_ERROR("Could not start scan worker: %s",
+				strerror(errno));
+		} else {
+			avbox_delegate_dettach(del);
+		}
+
+		break;
+	}
+
+	ret = 0;
+end:
+	if (filename != NULL) {
+		free(filename);
+	}
+
+	return ret;
+}
+
+
+static struct mbox_library_dir *
+mbox_library_local_opendir(const char * const path, struct mbox_library_dir *dir)
+{
+	int64_t id;
+	int res;
+	struct mbox_library_dir *ret = NULL;
+	const char * const ppath = path + 6;
+	const char * const sql = "SELECT id, name, path FROM local_objects WHERE parent_id = ? ORDER BY name;";
+
+	/* get the id of the directory */
+	if ((id = mbox_library_local_getid(ppath, 0)) == -1) {
+		DEBUG_VPRINT(LOG_MODULE, "Could not get id for %s",
+			ppath);
+		errno = ENOENT;
+		return NULL;
+	}
+
+	/* open db connection */
+	if (mbox_library_local_open_database(
+		&dir->state.localdir.db, SQLITE_OPEN_READONLY) == -1) {
+		LOG_VPRINT_ERROR("Could not open database: %s",
+			sqlite3_errmsg(dir->state.localdir.db));
+		errno = EIO;
+		goto end;
+	}
+
+	/* prepare the query */
+	while ((res = sqlite3_prepare_v2(dir->state.localdir.db, sql,
+		-1, &dir->state.localdir.stmt, 0)) != SQLITE_OK) {
+		if (res == SQLITE_LOCKED) {
+			usleep(100L * 1000L);
+			continue;
+		} else {
+			errno = EFAULT;
+			LOG_VPRINT_ERROR("Could not prepare SQL statement: %s", sql);
+			LOG_VPRINT_ERROR("SQL Error: %s", sqlite3_errmsg(dir->state.localdir.db));
+			goto end;
+		}
+	}
+
+	/* bind parameter */
+	if (sqlite3_bind_int(dir->state.localdir.stmt, 1, id) != SQLITE_OK) {
+		LOG_VPRINT_ERROR("Could not bind parameter: %s", sql);
+		LOG_VPRINT_ERROR("SQL Error: %s", sqlite3_errmsg(dir->state.localdir.db));
+		goto end;
+
+	}
+
+	dir->type = MBOX_LIBRARY_DIRTYPE_LOCAL;
+	dir->state.localdir.dotdot_sent = 0;
+	ret = dir;
+end:
+	if (ret == NULL) {
+		if (dir->state.localdir.stmt != NULL) {
+			sqlite3_finalize(dir->state.localdir.stmt);
+			dir->state.localdir.stmt = NULL;
+		}
+		if (dir->state.localdir.db != NULL) {
+			sqlite3_close(dir->state.localdir.db);
+			dir->state.localdir.db = NULL;
+		}
+	}
+	return ret;
+}
+
+
+static struct mbox_library_dirent *
+mbox_library_local_readdir(struct mbox_library_dir * const dir)
+{
+	int ret;
+	struct mbox_library_dirent *ent = NULL;
+
+	ASSERT(dir->state.localdir.db != NULL);
+	ASSERT(dir->state.localdir.stmt != NULL);
+
+	if ((ent = malloc(sizeof(struct mbox_library_dirent))) == NULL) {
+		ASSERT(errno == ENOMEM);
+		return NULL;
+	}
+
+	if (!dir->state.localdir.dotdot_sent) {
+		if ((ent->name = strdup("..")) == NULL) {
+			ASSERT(errno == ENOMEM);
+			free(ent);
+			return NULL;
+		}
+		if ((ent->path = mbox_library_striplastlevel(dir->path)) == NULL) {
+			ASSERT(errno == ENOMEM);
+			free(ent->name);
+			free(ent);
+			return NULL;
+		}
+		ent->isdir = 1;
+		dir->state.localdir.dotdot_sent = 1;
+		return ent;
+	}
+
+	/* fetch the next row */
+	if ((ret = sqlite3_step(dir->state.localdir.stmt)) != SQLITE_ROW) {
+		if (ret == SQLITE_BUSY) {
+			errno = EAGAIN;
+		} else {
+			errno = ENOMEM;
+		}
+		free(ent);
+		return NULL;
+	}
+
+	ent->isdir = (sqlite3_column_text(dir->state.localdir.stmt, 2)[0] == '\0'); /* path */
+	ent->name = strdup((const char *) sqlite3_column_text(dir->state.localdir.stmt, 1));
+	if (ent->name == NULL) {
+		ASSERT(errno == ENOMEM);
+		free(ent);
+		return NULL;
+	}
+
+	if (ent->isdir) {
+		ent->path = malloc(strlen(dir->path) + 1 + strlen(ent->name) + 1);
+		if (ent->path == NULL) {
+			free(ent->name);
+			free(ent);
+			return NULL;
+		}
+		strcpy(ent->path, dir->path);
+		if (ent->path[strlen(ent->path) - 1] != '/') {
+			strcat(ent->path, "/");
+		}
+		strcat(ent->path, ent->name);
+	} else {
+		ent->path = strdup((const char *) sqlite3_column_text(dir->state.localdir.stmt, 2));
+		if (ent->path == NULL) {
+			free(ent->name);
+			free(ent);
+			return NULL;
+		}
+	}
+
+	return ent;
 }
 
 
@@ -552,8 +1619,11 @@ mbox_library_opendir(const char * const path)
 		mbox_library_adddirent("Bluetooth Devices", "/bluetooth", 1, &dir->state.rootdir.entries);
 
 	} else if (!strncmp("/local", path, 6)) {
-		dir->type = MBOX_LIBRARY_DIRTYPE_LOCAL;
-		dir->state.emptydir.read = 0;
+		if (mbox_library_local_opendir(path, dir) == NULL) {
+			free(dir->path);
+			free(dir);
+			return NULL;
+		}
 	} else if (!strncmp("/upnp", path, 5)) {
 		char *rpath;
 		char resolved_path[PATH_MAX];
@@ -561,6 +1631,7 @@ mbox_library_opendir(const char * const path)
 		const int path_len = strlen(path + 5);
 
 		if ((rpath = malloc(sizeof(UPNP_ROOT) + path_len + 2)) == NULL) {
+			free(dir->path);
 			free(dir);
 			errno = ENOMEM;
 			return NULL;
@@ -577,12 +1648,14 @@ mbox_library_opendir(const char * const path)
 			DEBUG_VPRINT(LOG_MODULE, "Could not resolve path: %s",
 				rpath);
 			free(rpath);
+			free(dir->path);
 			free(dir);
 			return NULL;
 		}
 
 		if ((dir->state.upnpdir.path = strdup(resolved_path)) == NULL) {
 			free(rpath);
+			free(dir->path);
 			free(dir);
 		}
 
@@ -592,6 +1665,7 @@ mbox_library_opendir(const char * const path)
 			DEBUG_VPRINT(LOG_MODULE, "opendir(\"%s\") failed: %s",
 				resolved_path, strerror(errno));
 			free(rpath);
+			free(dir->path);
 			free(dir);
 		}
 
@@ -634,6 +1708,10 @@ mbox_library_readdir(struct mbox_library_dir * const dir)
 			return NULL;
 		}
 		return mbox_library_dupdirent(dir->state.rootdir.ptr);
+	}
+	case MBOX_LIBRARY_DIRTYPE_LOCAL:
+	{
+		return mbox_library_local_readdir(dir);
 	}
 	case MBOX_LIBRARY_DIRTYPE_UPNP:
 	{
@@ -751,7 +1829,6 @@ mbox_library_readdir(struct mbox_library_dir * const dir)
 
 		return NULL;
 	}
-	case MBOX_LIBRARY_DIRTYPE_LOCAL:
 	case MBOX_LIBRARY_DIRTYPE_TV:
 	case MBOX_LIBRARY_DIRTYPE_DVD:
 	case MBOX_LIBRARY_DIRTYPE_BLUETOOTH:
@@ -826,6 +1903,16 @@ mbox_library_closedir(struct mbox_library_dir * const dir)
 		});
 		break;
 	}
+	case MBOX_LIBRARY_DIRTYPE_LOCAL:
+	{
+		ASSERT(dir->state.localdir.db != NULL);
+		ASSERT(dir->state.localdir.stmt != NULL);
+		sqlite3_finalize(dir->state.localdir.stmt);
+		sqlite3_close(dir->state.localdir.db);
+		dir->state.localdir.stmt = NULL;
+		dir->state.localdir.db = NULL;
+		break;
+	}
 	case MBOX_LIBRARY_DIRTYPE_UPNP:
 	{
 		ASSERT(dir->state.upnpdir.path != NULL);
@@ -833,7 +1920,6 @@ mbox_library_closedir(struct mbox_library_dir * const dir)
 		closedir(dir->state.upnpdir.dir);
 		break;
 	}
-	case MBOX_LIBRARY_DIRTYPE_LOCAL:
 	case MBOX_LIBRARY_DIRTYPE_TV:
 	case MBOX_LIBRARY_DIRTYPE_DVD:
 	case MBOX_LIBRARY_DIRTYPE_BLUETOOTH:
@@ -849,21 +1935,379 @@ mbox_library_closedir(struct mbox_library_dir * const dir)
 }
 
 
+static int
+mbox_library_local_add_watch(const char * const path)
+{
+	DIR *dir;
+	struct dirent *ent;
+	struct mbox_library_local_watchdir *watch_dir;
+
+	if ((watch_dir = malloc(sizeof(struct mbox_library_local_watchdir))) == NULL) {
+		ASSERT(errno == ENOMEM);
+		return -1;
+	}
+
+	if ((watch_dir->path = strdup(path)) == NULL) {
+		ASSERT(errno == ENOMEM);
+		free(watch_dir);
+		return -1;
+	}
+
+	/* create the inotify watch */
+	if ((watch_dir->watch_fd = inotify_add_watch(
+		local_inotify_fd, watch_dir->path,
+		IN_CREATE | IN_DELETE | IN_DELETE_SELF |
+		IN_CLOSE_WRITE | IN_MOVE_SELF | IN_MOVED_FROM | IN_MOVED_TO)) == -1) {
+		LOG_VPRINT_ERROR("Could not add watch: %s",
+			strerror(errno));
+		free(watch_dir->path);
+		free(watch_dir);
+		return -1;
+	}
+
+	if ((dir = opendir(watch_dir->path)) == NULL) {
+		LOG_VPRINT_ERROR("Could not open directory: '%s'", path);
+		inotify_rm_watch(local_inotify_fd, watch_dir->watch_fd);
+		free(watch_dir->path);
+		free(watch_dir);
+		return -1;
+	}
+
+	while (1) {
+		struct stat st;
+		char * child_path = NULL;
+
+		if (!(errno = 0) && (ent = readdir(dir)) == NULL) {
+			if (errno == EAGAIN || errno == EINTR) {
+				continue;
+			} else if (errno == 0) {
+				break;
+			} else {
+				LOG_VPRINT_ERROR("Could not read watch dir: %s",
+					strerror(errno));
+				inotify_rm_watch(local_inotify_fd, watch_dir->watch_fd);
+				free(watch_dir->path);
+				free(watch_dir);
+				return -1;
+			}
+		}
+
+		if (ent->d_name[0] == '.' || !strcmp(ent->d_name, "lost+found")) {
+			continue;
+		}
+
+		/* build the path */
+		if ((child_path = malloc(strlen(path) + 1 + strlen(ent->d_name) + 1)) == NULL) {
+			ASSERT(errno == ENOMEM);
+			break;
+		}
+		strcpy(child_path, watch_dir->path);
+		if (path[strlen(watch_dir->path) - 1] != '/') {
+			strcat(child_path, "/");
+		}
+		strcat(child_path, ent->d_name);
+
+		if (stat(child_path, &st) != -1) {
+			if (S_ISDIR(st.st_mode)) {
+				(void) mbox_library_local_add_watch(child_path);
+			}
+		}
+		free(child_path);
+	}
+
+	LIST_ADD(&local_inotify_watches, watch_dir);
+
+	return 0;
+}
+
+
+static void *
+mbox_library_local_inotify(void * const arg)
+{
+	char buf[1024];
+	struct inotify_event *event = (struct inotify_event*) buf;
+
+	DEBUG_SET_THREAD_NAME("library-inotify");
+	DEBUG_PRINT(LOG_MODULE, "Starting inotify loop");
+
+	while (!local_inotify_quit) {
+
+		if (read(local_inotify_fd, buf, sizeof(buf)) == -1) {
+			if (errno == EAGAIN || errno == EINTR) {
+				continue;
+			} else {
+				LOG_VPRINT_ERROR("Inotify read failed: %s",
+					strerror(errno));
+			}
+		}
+
+		if (event->len > 0) {
+
+			char *dir_path = NULL, *path;
+			struct mbox_library_local_watchdir *watchdir;
+			LIST_FOREACH(struct mbox_library_local_watchdir*,
+				watchdir, &local_inotify_watches) {
+				if (event->wd == watchdir->watch_fd) {
+					dir_path = watchdir->path;
+				}
+			}
+
+			if (dir_path == NULL) {
+				DEBUG_VPRINT(LOG_MODULE, "Event for unkown descriptor %i",
+					event->wd);
+				continue;
+			}
+
+			/* build the full path
+			 * Note that we are allocating an extra byte in case
+			 * we need to append a % for the sql statement */
+			if ((path = malloc(strlen(dir_path) + 1 + strlen(event->name) + 2)) == NULL) {
+				abort();
+			}
+			strcpy(path, dir_path);
+			if (dir_path[strlen(dir_path) - 1] != '/') {
+				strcat(path, "/");
+			}
+			strcat(path, event->name);
+
+			if (event->mask & (IN_DELETE_SELF | IN_MOVE_SELF)) {
+				/* these are illegal. for now we just abort(). in the future
+				 * we should display a message on the ui and then abort() */
+				abort();
+			} else if (event->mask & IN_MOVED_TO) {
+				struct stat st;
+
+				DEBUG_VPRINT(LOG_MODULE, "File/directory moved in: %s",
+					path);
+
+				if (stat(path, &st) == -1) {
+					LOG_VPRINT_ERROR("Could not stat '%s': %s",
+						path, strerror(errno));
+				} else {
+					if (S_ISDIR(st.st_mode)) {
+						/* scan the directory and add it to the
+						 * watch list */
+						mbox_library_local_add_watch(path);
+						mbox_library_scandir(path);
+					} else {
+						if (mbox_library_addcontent(path) == -1) {
+							if (errno != EINVAL) {
+								LOG_VPRINT_ERROR("Could not create add '%s': %s",
+									path, strerror(errno));
+							}
+						}
+					}
+				}
+
+			} else if (event->mask & IN_CREATE) {
+				struct stat st;
+
+				DEBUG_VPRINT(LOG_MODULE, "File/directory created: %s",
+					path);
+
+				if (stat(path, &st) == -1) {
+					LOG_VPRINT_ERROR("Could not stat '%s': %s",
+						path, strerror(errno));
+				} else {
+					if (S_ISDIR(st.st_mode)) {
+						mbox_library_local_add_watch(path);
+
+						/* in a perfect world we don't need to scan
+						 * here but since the message may be delayed
+						 * (or read late) there may be new files in before
+						 * we can add the watch */
+						mbox_library_scandir(path);
+					} else {
+						/* we just wait for the IN_CLOSE_WRITE event */
+					}
+				}
+
+
+			} else if (event->mask & (IN_DELETE | IN_MOVED_FROM)) {
+				int res;
+				sqlite3 *db = NULL;
+				sqlite3_stmt *stmt = NULL;
+				const char * const sql = "DELETE FROM local_objects WHERE path LIKE ?";
+
+				DEBUG_VPRINT(LOG_MODULE, "File deleted/moved out: %s",
+					path);
+
+				/* append wildcard to path */
+				strcat(path, "%");
+
+				/* open db connection */
+				if (mbox_library_local_open_database(&db, SQLITE_OPEN_READWRITE) == -1) {
+					LOG_VPRINT_ERROR("Could not open database: %s",
+						sqlite3_errmsg(db));
+					errno = EIO;
+					goto remove_end;
+				}
+
+
+				/* prepare the query */
+				while ((res = sqlite3_prepare_v2(db, sql, -1, &stmt, 0)) != SQLITE_OK) {
+					if (res == SQLITE_LOCKED) {
+						usleep(100L * 1000L);
+						continue;
+					} else {
+						errno = EFAULT;
+					}
+					LOG_VPRINT_ERROR("Could not prepare SQL statement: %s", sql);
+					LOG_VPRINT_ERROR("SQL Error: %s", sqlite3_errmsg(db));
+					goto remove_end;
+				}
+
+				/* bind parameters */
+				if (sqlite3_bind_text(stmt, 1, path, strlen(path), NULL) != SQLITE_OK) {
+					LOG_VPRINT_ERROR("Binding failed: %s", sqlite3_errmsg(db));
+					goto remove_end;
+				}
+
+				/* execute the statement */
+				while ((res = sqlite3_step(stmt)) != SQLITE_DONE) {
+					if (res == SQLITE_BUSY) {
+						usleep(100L * 1000L);
+						continue;
+					} else if (res == SQLITE_ERROR) {
+						LOG_VPRINT_ERROR("SQLite Error: %s", sqlite3_errmsg(db));
+						break;
+					} else if (res == SQLITE_MISUSE) {
+						DEBUG_ABORT(LOG_MODULE, "Sqlite misuse!");
+					}
+				}
+remove_end:
+				if (stmt != NULL) {
+					sqlite3_finalize(stmt);
+				}
+				if (db != NULL) {
+					sqlite3_close(db);
+				}
+
+			} else if (event->mask & (IN_CLOSE_WRITE)) {
+				DEBUG_VPRINT(LOG_MODULE, "File closed: %s",
+					path);
+				if (mbox_library_addcontent(path) == -1) {
+					if (errno != EINVAL) {
+						LOG_VPRINT_ERROR("Could not add '%s': %s",
+							path, strerror(errno));
+					}
+				}
+			} else if (event->mask & (IN_MODIFY)) {
+				DEBUG_VPRINT(LOG_MODULE, "File modified: %s",
+					path);
+			}
+
+			free(path);
+		}
+	}
+
+	DEBUG_PRINT(LOG_MODULE, "inotify thread exitting");
+
+	return NULL;
+}
+
+
+static int
+mbox_library_local_init(const char * const store)
+{
+	struct stat st;
+
+	/* if a store was specified then mount it */
+	if (store != NULL) {
+		DEBUG_VPRINT(LOG_MODULE, "Mounting %s on %s",
+			store, MBOX_STORE_MOUNTPOINT);
+
+		if (stat(MBOX_STORE_MOUNTPOINT, &st) == -1) {
+			mkdir_p(MBOX_STORE_MOUNTPOINT,
+				S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+		}
+
+		if (mount(store, MBOX_STORE_MOUNTPOINT, "ext4", 0, "") == -1) {
+			LOG_VPRINT_ERROR("Could not mount proc: %s",
+				strerror(errno));
+			return -1;
+		}
+	}
+
+	/* create the library database if it doesn't exist */
+	if (mbox_library_create_db_if_not_exist()) {
+		LOG_PRINT_ERROR("Could not create database!");
+		return -1;
+	}
+
+	/* initialize watch list */
+	LIST_INIT(&local_inotify_watches);
+
+	/* initialize inotify */
+	if ((local_inotify_fd = inotify_init1(IN_CLOEXEC)) == -1) {
+		LOG_VPRINT_ERROR("Could not initialize inotify: %s",
+			strerror(errno));
+		return -1;
+	}
+
+	/* add watch */
+	if (mbox_library_local_add_watch(MBOX_STORE_AUDIO) == -1) {
+		LOG_VPRINT_ERROR("Could not watch directory '%s': %s",
+			MBOX_STORE_AUDIO, strerror(errno));
+		return -1;
+	}
+	if (mbox_library_local_add_watch(MBOX_STORE_VIDEO) == -1) {
+		LOG_VPRINT_ERROR("Could not watch directory '%s': %s",
+			MBOX_STORE_VIDEO, strerror(errno));
+		return -1;
+	}
+
+
+
+	/* start inotify thread */
+	if (pthread_create(&local_inotify_thread, NULL,
+		mbox_library_local_inotify, NULL) != 0) {
+		abort();
+	}
+
+	return 0;
+}
+
+
+static void
+mbox_library_local_shutdown(void)
+{
+	struct mbox_library_local_watchdir *watch_dir;
+
+	local_inotify_quit = 1;
+	pthread_kill(local_inotify_thread, SIGUSR1);
+	pthread_join(local_inotify_thread, NULL);
+
+	/* remove all file watches */
+	LIST_FOREACH_SAFE(struct mbox_library_local_watchdir*,
+		watch_dir, &local_inotify_watches, {
+		LIST_REMOVE(watch_dir);
+		inotify_rm_watch(local_inotify_fd, watch_dir->watch_fd);
+		free(watch_dir->path);
+		free(watch_dir);
+	});
+
+	if (local_inotify_fd != -1) {
+		close(local_inotify_fd);
+		local_inotify_fd = -1;
+	}
+}
+
+
 /**
  * Initialize the library backend.
  */
 int
-mbox_library_init(const int launch_avmount,
-	const int launch_mediatomb)
+mbox_library_init(const char * const store,
+	const int launch_avmount, const int launch_mediatomb)
 {
 	char exe_path_mem[255];
 	char *exe_path = exe_path_mem;
 	char *avmount_logfile = NULL;
-	char *mt_home = NULL;
 	int config_setup = 0;
 	struct stat st;
 
-	DEBUG_PRINT("library-backend", "Starting library backend");
+	DEBUG_PRINT(LOG_MODULE, "Starting library backend");
 
 	/* Figure out which config file template to use.
 	 * If we're running on the build directory we use
@@ -890,7 +2334,7 @@ mbox_library_init(const int launch_avmount,
 					conf_path);
 				strcpy(conf_path, exe_path);
 				strcat(conf_path, "/res/mediatomb");
-				if ((mt_home = mb_library_backend_mediaboxsetup(conf_path)) == NULL) {
+				if ((mediatomb_home = mb_library_backend_mediaboxsetup(conf_path)) == NULL) {
 					LOG_PRINT(LOGLEVEL_ERROR, "library-backend",
 						"Could not setup mediatomb config.");
 					return -1;
@@ -905,14 +2349,15 @@ mbox_library_init(const int launch_avmount,
 	}
 
 	if (!config_setup) {
-		if ((mt_home = mb_library_backend_mediaboxsetup(DATADIR "/mediabox/mediatomb")) == NULL) {
+		if ((mediatomb_home = mb_library_backend_mediaboxsetup(
+			STRINGIZE(DATADIR) "/mediabox/mediatomb")) == NULL) {
 			LOG_PRINT(LOGLEVEL_ERROR, "library-backend",
 				"Could not setup mediatomb config (2).");
 			return -1;
 		}
 	}
 
-	ASSERT(mt_home != NULL);
+	ASSERT(mediatomb_home != NULL);
 
 	/* check that we have permission to write to DEFAULT_LOGFILE
 	 * before trying */
@@ -942,11 +2387,9 @@ mbox_library_init(const int launch_avmount,
 	if (launch_mediatomb) {
 		struct mt_init_state state;
 		state.port = 49163;
-		state.home = mt_home;
 		state.err = 0;
 		state.gotone = 0;
 		ifaceutil_enumifaces(mb_library_backend_startmediatomb, &state);
-		free(mt_home);
 		if (state.err != 0) {
 			LOG_PRINT_ERROR("An error occurred while launching mediatomb!");
 			return -1;
@@ -998,6 +2441,13 @@ mbox_library_init(const int launch_avmount,
 		}
 	}
 
+	/* initialize local provider */
+	if (mbox_library_local_init(store) == -1) {
+		LOG_VPRINT_ERROR("Could not start local library provider: %s",
+			strerror(errno));
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -1016,4 +2466,6 @@ mbox_library_shutdown(void)
 	if (avmount_process_id != -1) {
 		avbox_process_stop(avmount_process_id);
 	}
+
+	mbox_library_local_shutdown();
 }

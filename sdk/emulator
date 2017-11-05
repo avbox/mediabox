@@ -123,9 +123,11 @@ ${QEMU_BIN} \
 	-smp ${NCORES} \
 	-vga ${EMU_VIDEO}  \
 	-device intel-hda -device hda-duplex \
-	-drive file=${ROOTFS},format=raw,if=none,id=a1 \
 	-device ich9-ahci,id=ahci \
+	-drive file=${ROOTFS},format=raw,if=none,id=a1 \
 	-device ide-drive,drive=a1,bus=ahci.0 \
+	-drive file=hd.img,format=raw,if=none,id=a2 \
+	-device ide-drive,drive=a2,bus=ahci.1 \
 	-net nic,model=virtio \
 	-net tap,ifname=vtap0,script=no,downscript=no \
 	-boot c \

@@ -23,10 +23,27 @@
 
 
 /**
- * strisdigit() -- Like isdigit() but works on strings.
+ * Like isdigit() but works on strings.
  */
 int
 strisdigit(const char *str);
 
+
+/**
+ * Takes a pointer to a malloc allocated string and returns
+ * a pointer to a malloc allocated string with the
+ * replacements. If the replacements cannot be done in place
+ * a new buffer will be allocated for the string and str
+ * will be freed.
+ */
+char *
+strreplace(char *str, const char * const what, const char * const with);
+
+
+/**
+ * Trims the string in place.
+ */
+char *
+strtrim(char * const str);
 
 #endif

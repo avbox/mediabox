@@ -817,13 +817,14 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
  * Initialize the MediaBox shell
  */
 int
-mbox_shell_init(int launch_avmount, int launch_mediatomb)
+mbox_shell_init(const char * const store,
+	const int launch_avmount, const int launch_mediatomb)
 {
 	int w, h;
 	struct avbox_window *root_window;
 
 	/* initialize the library backend */
-	if (mbox_library_init(launch_avmount, launch_mediatomb) == -1) {
+	if (mbox_library_init(store, launch_avmount, launch_mediatomb) == -1) {
 		fprintf(stderr, "Could not initialize library backend\n");
 		return -1;
 	}

@@ -132,6 +132,12 @@ PKG_CHECK_MODULES(LIBAVFILTER, [libavfilter], ,
 PKG_CHECK_MODULES(SQLITE3, [sqlite3], ,
 	AC_MSG_ERROR('Unable to find SQLite3. Please make sure library and header files are installed.'))
 
+AC_CHECK_HEADER([magic.h], [], [
+	AC_MSG_ERROR([required header magic.h not found])
+])
+AC_SEARCH_LIBS([magic_open], [magic], [], [
+	AC_MSG_ERROR([required library libmagic not found])
+])
 
 #
 # libdrm support

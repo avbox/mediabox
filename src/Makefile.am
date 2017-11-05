@@ -58,6 +58,7 @@ mediabox_SOURCES = \
 	lib/string_util.c \
 	lib/proc_util.c \
 	lib/ffmpeg_util.c \
+	lib/db_util.c \
 	lib/ui/video.c \
 	lib/ui/video-directfb.c \
 	lib/ui/listview.c \

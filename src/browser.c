@@ -204,7 +204,16 @@ __mbox_browser_loadlist(void *ctx)
 		inst->dotdot = NULL;
 	}
 
-	while (!inst->abort && (ent = mbox_library_readdir(dir)) != NULL) {
+	while (!inst->abort) {
+		if ((ent = mbox_library_readdir(dir)) == NULL) {
+			if (errno == EAGAIN) {
+				continue;
+			} else {
+				LOG_VPRINT_ERROR("mbox_library_readdir() error: %s",
+					strerror(errno));
+				break;
+			}
+		}
 		if (!strcmp(ent->name, "..")) {
 			if ((inst->dotdot = strdup(ent->path)) == NULL) {
 				LOG_VPRINT_ERROR("Could not set BACK directory: %s",

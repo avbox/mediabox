@@ -22,6 +22,8 @@
 #define __MBOX_LIBRARY_H__
 
 #include <dirent.h>
+#include <sqlite3.h>
+
 #include "lib/linkedlist.h"
 
 
@@ -36,6 +38,13 @@ struct mbox_library_rootdir
 {
 	struct mbox_library_dirent *ptr;
 	LIST entries;
+};
+
+struct mbox_library_localdir
+{
+	sqlite3 *db;
+	sqlite3_stmt *stmt;
+	int dotdot_sent;
 };
 
 struct mbox_library_upnpdir
@@ -57,6 +66,7 @@ struct mbox_library_dir
 	union {
 		struct mbox_library_upnpdir upnpdir;
 		struct mbox_library_rootdir rootdir;
+		struct mbox_library_localdir localdir;
 		struct mbox_library_emptydir emptydir;
 	} state;
 };
@@ -94,8 +104,8 @@ mbox_library_closedir(struct mbox_library_dir * const dir);
  * Initialize the library backend.
  */
 int
-mbox_library_init(const int launch_avmount,
-	const int launch_mediatomb);
+mbox_library_init(const char * const store,
+	const int launch_avmount, const int launch_mediatomb);
 
 
 /**
