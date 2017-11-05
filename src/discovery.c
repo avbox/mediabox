@@ -28,9 +28,11 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
+#include <fcntl.h>
 
-#define LOG_MODULE		"announce"
+#define LOG_MODULE		"discovery"
 
 #include "lib/log.h"
 #include "lib/debug.h"
@@ -51,6 +53,7 @@ static int iface_index;
 static int sockfd;
 static int timerid;
 static struct sockaddr_in addr;
+static char *hostname = NULL;
 
 
 static const char *
@@ -74,6 +77,46 @@ genid(void)
 
 
 /**
+ * Get the system's hostname.
+ */
+static char *
+mbox_discovery_hostname()
+{
+	int fd;
+	ssize_t ret;
+	char *hostname;
+
+#define BUFSZ			(64)
+
+	if ((hostname = malloc(BUFSZ)) == NULL) {
+		ASSERT(errno == ENOMEM);
+		LOG_PRINT_ERROR("Could not allocate hostname");
+		return NULL;
+	}
+
+	if ((fd = open("/proc/sys/kernel/hostname", O_RDONLY)) == -1) {
+		LOG_VPRINT_ERROR("Could not get hostname: %s",
+			strerror(errno));
+		free(hostname);
+		return NULL;
+	}
+
+	if ((ret = read(fd, hostname, BUFSZ - 1)) == -1) {
+		LOG_VPRINT_ERROR("Could not read hostname: %s",
+			strerror(errno));
+		close(fd);
+		return NULL;
+	}
+
+	close(fd);
+
+	hostname[ret--] = '\0';
+	hostname[ret] = '\0';
+	return hostname;
+}
+
+
+/**
  * Broadcast the interface address.
  */
 static int
@@ -83,24 +126,38 @@ avbox_discovery_broadcast(const char * const iface_name, void *arg)
 	char *ip;
 	const char * id = genid();
 
+	/* get the hostname */
+	if (hostname == NULL) {
+		if ((hostname = mbox_discovery_hostname()) == NULL) {
+			LOG_VPRINT_ERROR("Could not get hostname: %s using default",
+				strerror(errno));
+			if ((hostname = strdup("mediabox")) == NULL) {
+				LOG_VPRINT_ERROR("Could not duplicate default hostname: %s",
+					strerror(errno));
+				return 0;
+			}
+		}
+	}
+
+	/* skip loopback and any interfaces that are not
+	 * configured */
 	if (!strcmp("lo", iface_name)) {
 		return 0;
 	}
-
 	if ((ip = ifaceutil_getip(iface_name)) == NULL) {
 		return 0;
 	}
 
 	/* initialize announcement structure */
 	snprintf(ann, 512, "MediaBox:%s:%s.%i:%s:DLMASTER,PLAYER,SHAREDLIB",
-		id, "mediabox", iface_index++, ip);
+		id, hostname, iface_index++, ip);
 	free(ip);
 
 	/* broadcast announcement 3 times */
 	const size_t len = strlen(ann);
-	if (sendto(sockfd, &ann, len, 0, &addr, sizeof(addr)) == -1 ||
-		sendto(sockfd, &ann, len, 0, &addr, sizeof(addr)) == -1 ||
-		sendto(sockfd, &ann, len, 0, &addr, sizeof(addr)) == -1) {
+	if (sendto(sockfd, &ann, len, 0, (struct sockaddr*) &addr, sizeof(addr)) == -1 ||
+		sendto(sockfd, &ann, len, 0, (struct sockaddr*) &addr, sizeof(addr)) == -1 ||
+		sendto(sockfd, &ann, len, 0, (struct sockaddr*)  &addr, sizeof(addr)) == -1) {
 		LOG_VPRINT_ERROR("Could not broadcast announcement: %s",
 			strerror(errno));
 	}
@@ -125,7 +182,7 @@ avbox_discovery_sendbroadcast(int timer_id, void *data)
  * Start the announce service.
  */
 int
-avbox_discovery_init(void)
+mbox_discovery_init(void)
 {
 	int broadcast = 1;
 	struct timespec tv;
@@ -176,7 +233,7 @@ avbox_discovery_init(void)
 
 
 void
-avbox_discovery_shutdown(void)
+mbox_discovery_shutdown(void)
 {
 	/* cancel timer before closing socket */
 	if (timerid != -1) {
@@ -187,5 +244,8 @@ avbox_discovery_shutdown(void)
 		close(sockfd);
 		sockfd = -1;
 	}
+	if (hostname != NULL) {
+		free(hostname);
+		hostname = NULL;
+	}
 }
-

@@ -23,10 +23,11 @@
 
 
 int
-avbox_discovery_init(void);
+mbox_discovery_init(void);
 
 
 void
-avbox_discovery_shutdown(void);
+mbox_discovery_shutdown(void);
+
 
 #endif

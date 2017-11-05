@@ -574,7 +574,7 @@ mbox_shell_shutdown(void)
 	}
 
 	/* shutdown services */
-	avbox_discovery_shutdown();
+	mbox_discovery_shutdown();
 	mb_downloadmanager_destroy();
 
 	DEBUG_PRINT("shell", "Shell shutdown complete");
@@ -835,7 +835,7 @@ mbox_shell_init(int launch_avmount, int launch_mediatomb)
 	}
 
 	/* initialize the discovery service */
-	if (avbox_discovery_init() == -1) {
+	if (mbox_discovery_init() == -1) {
 		LOG_PRINT_ERROR("Could not start discovery service");
 		mb_downloadmanager_destroy();
 		return -1;
