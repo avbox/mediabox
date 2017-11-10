@@ -24,6 +24,9 @@
 #ifdef ENABLE_BLUETOOTH
 
 
+#define AVBOX_BT_A2DP_UUID	"0000110a-0000-1000-8000-00805f9b34fb"
+
+
 /**
  * Represents a Bluetooth device
  */

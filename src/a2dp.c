@@ -38,7 +38,6 @@
 #include "lib/ui/video.h"
 #include "lib/ui/input.h"
 
-#define BT_A2DP_UUID	"0000110a-0000-1000-8000-00805f9b34fb"
 #define BLUEALSA_APLAY  "/usr/bin/bluealsa-aplay"
 
 
@@ -236,7 +235,7 @@ mbox_a2dp_show(struct mbox_a2dp * const inst)
 
 	/* get all the devices that implement the
 	 * a2dp profile */
-	devices = dev = avbox_bluetooth_getdevices(BT_A2DP_UUID);
+	devices = dev = avbox_bluetooth_getdevices(AVBOX_BT_A2DP_UUID);
 
 	/* iterate through the list until we find a
 	 * device that is connected. */

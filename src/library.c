@@ -54,6 +54,7 @@
 #include "lib/delegate.h"
 #include "lib/thread.h"
 #include "lib/string_util.h"
+#include "lib/bluetooth.h"
 
 
 #define MEDIATOMB_BIN "/usr/bin/mediatomb"
@@ -1447,13 +1448,15 @@ end:
 
 
 static struct mbox_library_dir *
-mbox_library_local_opendir(const char * const path, struct mbox_library_dir *dir)
+mbox_library_local_opendir(const char * const path)
 {
 	int64_t id;
 	int res;
 	struct mbox_library_dir *ret = NULL;
 	const char * const ppath = path + 6;
 	const char * const sql = "SELECT id, name, path FROM local_objects WHERE parent_id = ? ORDER BY name;";
+	struct mbox_library_dir *dir = NULL;
+
 
 	/* get the id of the directory */
 	if ((id = mbox_library_local_getid(ppath, 0)) == -1) {
@@ -1462,6 +1465,12 @@ mbox_library_local_opendir(const char * const path, struct mbox_library_dir *dir
 		errno = ENOENT;
 		return NULL;
 	}
+
+	if ((dir = malloc(sizeof(struct mbox_library_dir))) == NULL) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
 
 	/* open db connection */
 	if (mbox_library_local_open_database(
@@ -1506,6 +1515,9 @@ end:
 		if (dir->state.localdir.db != NULL) {
 			sqlite3_close(dir->state.localdir.db);
 			dir->state.localdir.db = NULL;
+		}
+		if (dir != NULL) {
+			free(dir);
 		}
 	}
 	return ret;
@@ -1587,6 +1599,32 @@ mbox_library_local_readdir(struct mbox_library_dir * const dir)
 }
 
 
+static struct mbox_library_dirent *
+mbox_library_dotdot(struct mbox_library_dir * const dir)
+{
+	struct mbox_library_dirent *ent;
+
+	/* create the directory entry */
+	if ((ent = malloc(sizeof(struct mbox_library_dirent))) == NULL) {
+		ASSERT(errno == ENOMEM);
+		return NULL;
+	}
+	ent->isdir = 0;
+	if ((ent->name = strdup("..")) == NULL) {
+		ASSERT(errno == ENOMEM);
+		free(ent);
+		return NULL;
+	}
+	if ((ent->path = mbox_library_striplastlevel(dir->path)) == NULL) {
+		ASSERT(errno == ENOMEM);
+		free(ent->name);
+		free(ent);
+		return NULL;
+	}
+	return ent;
+}
+
+
 /**
  * Open a library directory
  */
@@ -1595,18 +1633,13 @@ mbox_library_opendir(const char * const path)
 {
 	struct mbox_library_dir *dir;
 
-	if ((dir = malloc(sizeof(struct mbox_library_dir))) == NULL) {
-		errno = ENOMEM;
-		return NULL;
-	}
-
-	if ((dir->path = strdup(path)) == NULL) {
-		errno = ENOMEM;
-		free(dir);
-		return NULL;
-	}
-
 	if (!strcmp("/", path)) {
+
+		if ((dir = malloc(sizeof(struct mbox_library_dir))) == NULL) {
+			errno = ENOMEM;
+			return NULL;
+		}
+
 		dir->type = MBOX_LIBRARY_DIRTYPE_ROOT;
 		dir->state.rootdir.ptr = NULL;
 
@@ -1616,19 +1649,24 @@ mbox_library_opendir(const char * const path)
 		mbox_library_adddirent("UPnP Devices", "/upnp", 1, &dir->state.rootdir.entries);
 		mbox_library_adddirent("TV Tunners", "/tv", 1, &dir->state.rootdir.entries);
 		mbox_library_adddirent("DVD", "/dvd", 1, &dir->state.rootdir.entries);
+#ifdef ENABLE_BLUETOOTH
 		mbox_library_adddirent("Bluetooth Devices", "/bluetooth", 1, &dir->state.rootdir.entries);
-
+#endif
 	} else if (!strncmp("/local", path, 6)) {
-		if (mbox_library_local_opendir(path, dir) == NULL) {
-			free(dir->path);
-			free(dir);
+		if ((dir = mbox_library_local_opendir(path)) == NULL) {
 			return NULL;
 		}
+
 	} else if (!strncmp("/upnp", path, 5)) {
 		char *rpath;
 		char resolved_path[PATH_MAX];
 		const char * const ppath = (path + 5);
 		const int path_len = strlen(path + 5);
+
+		if ((dir = malloc(sizeof(struct mbox_library_dir))) == NULL) {
+			errno = ENOMEM;
+			return NULL;
+		}
 
 		if ((rpath = malloc(sizeof(UPNP_ROOT) + path_len + 2)) == NULL) {
 			free(dir->path);
@@ -1672,14 +1710,47 @@ mbox_library_opendir(const char * const path)
 		free(rpath);
 
 	} else if (!strncmp("/dvd", path, 4)) {
+
+		if ((dir = malloc(sizeof(struct mbox_library_dir))) == NULL) {
+			errno = ENOMEM;
+			return NULL;
+		}
+
 		dir->type = MBOX_LIBRARY_DIRTYPE_DVD;
 		dir->state.emptydir.read = 0;
+
+#ifdef ENABLE_BLUETOOTH
 	} else if (!strncmp("/bluetooth", path, 10)) {
+
+		if ((dir = malloc(sizeof(struct mbox_library_dir))) == NULL) {
+			errno = ENOMEM;
+			return NULL;
+		}
+
 		dir->type = MBOX_LIBRARY_DIRTYPE_BLUETOOTH;
-		dir->state.emptydir.read = 0;
+		dir->state.btdir.read = 0;
+		dir->state.btdir.devs = avbox_bluetooth_getdevices(AVBOX_BT_A2DP_UUID);
+		dir->state.btdir.cur = dir->state.btdir.devs;
+#endif
 	} else if (!strncmp("/tv", path, 3)) {
+
+		if ((dir = malloc(sizeof(struct mbox_library_dir))) == NULL) {
+			errno = ENOMEM;
+			return NULL;
+		}
+
 		dir->type = MBOX_LIBRARY_DIRTYPE_TV;
 		dir->state.emptydir.read = 0;
+
+	} else {
+		DEBUG_PRINT(LOG_MODULE, "Invalid path!");
+		abort();
+	}
+
+	if (dir != NULL && (dir->path = strdup(path)) == NULL) {
+		errno = ENOMEM;
+		/* TODO: WE should closedir() in here */
+		return NULL;
 	}
 
 	return dir;
@@ -1829,38 +1900,71 @@ mbox_library_readdir(struct mbox_library_dir * const dir)
 
 		return NULL;
 	}
-	case MBOX_LIBRARY_DIRTYPE_TV:
-	case MBOX_LIBRARY_DIRTYPE_DVD:
+#ifdef ENABLE_BLUETOOTH
 	case MBOX_LIBRARY_DIRTYPE_BLUETOOTH:
 	{
 		struct mbox_library_dirent *ent;
+		struct avbox_btdev *dev = *dir->state.btdir.cur;
 
-		/* if we already read this directory then return EOF */
-		if (dir->state.emptydir.read) {
+		if (!dir->state.btdir.read) {
+			dir->state.btdir.read = 1;
+			return mbox_library_dotdot(dir);
+		}
+
+		/* skip until the first connected device */
+		while (*dir->state.btdir.cur != NULL) {
+			if ((*dir->state.btdir.cur)->connected) {
+				break;
+			}
+			dir->state.btdir.cur++;
+		}
+
+		if ((dev = *dir->state.btdir.cur) == NULL) {
 			return NULL;
 		}
 
-		/* mark the directory handle as read */
-		dir->state.emptydir.read = 1;
+		const int name_len = strlen(dev->name) + 2 + strlen(dev->address) + 1;
+		const int path_len = 5 + strlen(dev->address);
 
-		/* create the directory entry */
 		if ((ent = malloc(sizeof(struct mbox_library_dirent))) == NULL) {
 			ASSERT(errno == ENOMEM);
 			return NULL;
 		}
-		ent->isdir = 0;
-		if ((ent->name = strdup("..")) == NULL) {
+
+		if ((ent->name = malloc(name_len + 1)) == NULL) {
 			ASSERT(errno == ENOMEM);
 			free(ent);
 			return NULL;
 		}
-		if ((ent->path = mbox_library_striplastlevel(dir->path)) == NULL) {
+
+		if ((ent->path = malloc(path_len + 1)) == NULL) {
 			ASSERT(errno == ENOMEM);
 			free(ent->name);
 			free(ent);
 			return NULL;
 		}
+
+		ent->isdir = 0;
+		snprintf(ent->name, name_len + 1, "%s (%s)",
+			dev->name, dev->address);
+		snprintf(ent->path, path_len + 1, "a2dp:%s",
+			dev->address);
+
+		/* move to next entry */
+		dir->state.btdir.cur++;
+
 		return ent;
+	}
+#endif
+	case MBOX_LIBRARY_DIRTYPE_TV:
+	case MBOX_LIBRARY_DIRTYPE_DVD:
+	{
+		/* if we already read this directory then return EOF */
+		if (!dir->state.emptydir.read) {
+			dir->state.emptydir.read = 1;
+			return mbox_library_dotdot(dir);
+		}
+		return NULL;
 	}
 	default:
 		abort();
@@ -1920,9 +2024,21 @@ mbox_library_closedir(struct mbox_library_dir * const dir)
 		closedir(dir->state.upnpdir.dir);
 		break;
 	}
+#ifdef ENABLE_BLUETOOTH
+	case MBOX_LIBRARY_DIRTYPE_BLUETOOTH:
+	{
+		ASSERT(dir->state.btdir.devs != NULL);
+		dir->state.btdir.cur = dir->state.btdir.devs;
+		while (*dir->state.btdir.cur != NULL) {
+			avbox_bluetooth_freedev(*dir->state.btdir.cur);
+			dir->state.btdir.cur++;
+		}
+		free(dir->state.btdir.devs);
+		break;
+	}
+#endif
 	case MBOX_LIBRARY_DIRTYPE_TV:
 	case MBOX_LIBRARY_DIRTYPE_DVD:
-	case MBOX_LIBRARY_DIRTYPE_BLUETOOTH:
 	{
 		break;
 	}

@@ -205,9 +205,11 @@ __mbox_browser_loadlist(void *ctx)
 	}
 
 	while (!inst->abort) {
-		if ((ent = mbox_library_readdir(dir)) == NULL) {
+		if (!(errno = 0) && (ent = mbox_library_readdir(dir)) == NULL) {
 			if (errno == EAGAIN) {
 				continue;
+			} else if (errno == 0) {
+				break;
 			} else {
 				LOG_VPRINT_ERROR("mbox_library_readdir() error: %s",
 					strerror(errno));

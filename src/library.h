@@ -53,6 +53,15 @@ struct mbox_library_upnpdir
 	char *path;
 };
 
+#ifdef ENABLE_BLUETOOTH
+struct mbox_library_btdir
+{
+	struct avbox_btdev **devs;
+	struct avbox_btdev **cur;
+	int read;
+};
+#endif
+
 struct mbox_library_emptydir
 {
 	int read;
@@ -67,6 +76,9 @@ struct mbox_library_dir
 		struct mbox_library_upnpdir upnpdir;
 		struct mbox_library_rootdir rootdir;
 		struct mbox_library_localdir localdir;
+#ifdef ENABLE_BLUETOOTH
+		struct mbox_library_btdir btdir;
+#endif
 		struct mbox_library_emptydir emptydir;
 	} state;
 };
