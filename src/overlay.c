@@ -45,7 +45,7 @@ struct mbox_overlay
 
 
 static void
-avbox_overlay_formatpos(char *buf, int64_t position, int64_t duration)
+avbox_overlay_formatpos(char *buf, size_t bufsz, int64_t position, int64_t duration)
 {
 	int pos_hours, pos_mins, pos_secs;
 	int dur_hours, dur_mins, dur_secs;
@@ -59,7 +59,7 @@ avbox_overlay_formatpos(char *buf, int64_t position, int64_t duration)
 	dur_mins = duration / (1000L * 1000L * 60);
 	duration -= dur_mins * 1000L * 1000L * 60;
 	dur_secs = duration / (1000L * 1000L);
-	sprintf(buf, "%02d:%02d:%02d/%02d:%02d:%02d",
+	snprintf(buf, bufsz, "%02d:%02d:%02d/%02d:%02d:%02d",
 		pos_hours, pos_mins, pos_secs,
 		dur_hours, dur_mins, dur_secs);
 }
@@ -191,7 +191,7 @@ mbox_overlay_draw(struct avbox_window *window)
 		if ((msg = pango_cairo_create_layout(context)) != NULL) {
 			if ((font_desc = pango_font_description_from_string("Sans Bold 18px")) != NULL) {
 				char duration[20];
-				avbox_overlay_formatpos(duration, inst->position, inst->duration);
+				avbox_overlay_formatpos(duration, sizeof(duration), inst->position, inst->duration);
 				pango_layout_set_font_description(msg, font_desc);
 				pango_layout_set_width(msg, (250) * PANGO_SCALE);
 				pango_layout_set_alignment(msg, mbv_get_pango_alignment(inst->alignment));

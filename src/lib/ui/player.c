@@ -63,7 +63,7 @@
 
 
 /* This is the # of frames to decode ahead of time */
-#define MB_VIDEO_BUFFER_FRAMES  (10)
+#define MB_VIDEO_BUFFER_FRAMES  (40)
 #define MB_VIDEO_BUFFER_PACKETS (1)
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
@@ -239,19 +239,27 @@ avbox_player_scale2display(
 
 #define SCALE (10000)
 	if (in.w > in.h) {
+bw:
 		/* first scale to fit to resolution and then
 		 * adjust to aspect ratio */
 		out->w = screen.w * SCALE;
 		out->h = (((in.h * SCALE) * ((out->w * 100) / (in.w * SCALE))) / 100);
 		out->h += (out->h * ((((screen.h * SCALE) - (((screen.w * SCALE) * inst->aspect_ratio.den)
 			/ inst->aspect_ratio.num)) * 100) / (screen.h * SCALE))) / 100;
+		if ((out->h / SCALE) > screen.h) {
+			goto bh;
+		}
 	} else {
+bh:
 		/* first scale to fit to resolution and then
 		 * adjust to aspect ratio */
 		out->h = screen.h * SCALE;
 		out->w = (((in.w * SCALE) * ((out->h * 100) / (in.h * SCALE))) / 100);
-		out->w += (out->w * ((((screen.w * SCALE) - (((screen.h * SCALE) * inst->aspect_ratio.den)
-			/ inst->aspect_ratio.num)) * 100) / (screen.w * SCALE))) / 100;
+		out->w += (out->w * ((((screen.w * SCALE) - (((screen.h * SCALE) * inst->aspect_ratio.num)
+			/ inst->aspect_ratio.den)) * 100) / (screen.w * SCALE))) / 100;
+		if ((out->w / SCALE) > screen.w) {
+			goto bw;
+		}
 	}
 
 	/* scale result */
@@ -468,6 +476,7 @@ avbox_player_video(void *arg)
 			ASSERT(ALIGNED(*frame->data, 16));
 			ASSERT(ALIGNED(buf, 16));
 			buf += pitch * ((target_height - inst->video_size.h) / 2);
+			buf += (pitch / target_width) * ((target_width - inst->video_size.w) / 2);
 			sws_scale(swscale_ctx, (uint8_t const * const *) frame->data,
 				&linesize, 0, height, &buf, &pitch);
 			avbox_window_unlock(inst->video_window);
