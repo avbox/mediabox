@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+#	include "config.h"
 #endif
 #include <stdlib.h>
 #include <stdio.h>
@@ -41,7 +41,6 @@
 #include "shell.h"
 #include "about.h"
 #include "downloads.h"
-#include "mediasearch.h"
 #include "a2dp.h"
 
 
@@ -56,7 +55,6 @@ struct mbox_mainmenu
 	struct mbox_browser *library;
 	struct mbox_about *about;
 	struct mbox_downloads *downloads;
-	struct mbox_mediasearch *search;
 #ifdef ENABLE_BLUETOOTH
 	struct mbox_a2dp *a2dp;
 #endif
@@ -142,20 +140,6 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 						}
 					}
 				}
-			} else if (!memcmp("MEDIASEARCH", selected, 11)) {
-				if (inst->search != NULL) {
-					DEBUG_PRINT("mainmenu", "Search already visible!");
-				} else {
-					if ((inst->search = mbox_mediasearch_new(avbox_window_object(inst->window))) == NULL) {
-						LOG_PRINT_ERROR("Could not create search window!");
-					} else {
-						if (mbox_mediasearch_show(inst->search) == -1) {
-							LOG_PRINT_ERROR("Could not show search window!");
-							mbox_mediasearch_destroy(inst->search);
-							inst->search = NULL;
-						}
-					}
-				}
 #ifdef ENABLE_BLUETOOTH
 			} else if (!strcmp("A2DP", selected)) {
 				DEBUG_PRINT("mainmenu", "Selected bluetooth audio");
@@ -213,10 +197,6 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 				ASSERT(inst->downloads != NULL);
 				mbox_downloads_destroy(inst->downloads);
 				inst->downloads = NULL;
-			} else if (payload == inst->search) {
-				ASSERT(inst->search != NULL);
-				mbox_mediasearch_destroy(inst->search);
-				inst->search = NULL;
 			}
 #ifdef ENABLE_BLUETOOTH
 			else if (payload == inst->a2dp) {
@@ -256,9 +236,6 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 			avbox_object_destroy(
 				avbox_window_object(
 					mbox_browser_window(inst->library)));
-		}
-		if (inst->search != NULL) {
-			mbox_mediasearch_destroy(inst->search);
 		}
 		if (inst->downloads != NULL) {
 			mbox_downloads_destroy(inst->downloads);
@@ -357,7 +334,6 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	/* initialize instance object */
 	inst->notify_object = notify_object;
 	inst->library = NULL;
-	inst->search = NULL;
 	inst->about = NULL;
 	inst->downloads = NULL;
 #ifdef ENABLE_BLUETOOTH
