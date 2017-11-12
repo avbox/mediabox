@@ -32,11 +32,15 @@ struct mbox_mainmenu*
 mbox_mainmenu_new(struct avbox_object *parent);
 
 
+/**
+ * Get the underlying window
+ */
+struct avbox_window *
+mbox_mainmenu_window(struct mbox_mainmenu * const inst);
+
+
 int
 mbox_mainmenu_show(struct mbox_mainmenu * const inst);
 
-
-void
-mbox_mainmenu_destroy(struct mbox_mainmenu * const inst);
 
 #endif

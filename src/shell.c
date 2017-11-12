@@ -362,7 +362,10 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 					avbox_settings_setstring("last_file", last_file);
 					free(last_file);
 				}
-				mbox_mainmenu_destroy(mainmenu);
+				avbox_object_destroy(
+					avbox_window_object(
+						mbox_mainmenu_window(mainmenu)));
+
 				mainmenu = NULL;
 			}
 		}
@@ -527,7 +530,9 @@ mbox_shell_shutdown(void)
 	}
 
 	/* dismiss the overlay */
-	mbox_overlay_destroy(overlay);
+	avbox_object_destroy(
+		avbox_window_object(
+			mbox_overlay_window(overlay)));
 
 	/* destroy player */
 	if (player != NULL) {
@@ -623,7 +628,9 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			/* attempt to show the main menu */
 			if (mbox_mainmenu_show(mainmenu) == -1) {
 				LOG_PRINT_ERROR("Could not show main menu!");
-				mbox_mainmenu_destroy(mainmenu);
+				avbox_object_destroy(
+					avbox_window_object(
+						mbox_mainmenu_window(mainmenu)));
 			}
 			break;
 		}
@@ -794,7 +801,9 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 		DEBUG_PRINT("shell", "Received DISMISSED message");
 
 		if (avbox_message_payload(msg) == mainmenu) {
-			mbox_mainmenu_destroy(mainmenu);
+			avbox_object_destroy(
+				avbox_window_object(
+					mbox_mainmenu_window(mainmenu)));
 			mainmenu = NULL;
 		}
 		break;

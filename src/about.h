@@ -18,8 +18,8 @@
  */
 
 
-#ifndef __MB_ABOUT_H__
-#define __MB_ABOUT_H__
+#ifndef __MBOX_ABOUT_H__
+#define __MBOX_ABOUT_H__
 
 #include "lib/dispatch.h"
 
@@ -31,14 +31,14 @@ struct mbox_about;
  * Initialize the MediaBox about box.
  */
 struct mbox_about*
-mbox_about_new(struct avbox_object *parent);
+mbox_about_new(struct avbox_object * const parent);
 
 
-int
-mbox_about_show(struct mbox_about *inst);
+/**
+ * Get the underlying window.
+ */
+struct avbox_window *
+mbox_about_window(const struct mbox_about * const inst);
 
-
-void
-mbox_about_destroy(struct mbox_about *inst);
 
 #endif

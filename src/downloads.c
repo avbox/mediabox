@@ -643,8 +643,11 @@ mbox_downloads_show(struct mbox_downloads * const inst)
 }
 
 
-void
-mbox_downloads_destroy(struct mbox_downloads * const inst)
+/**
+ * Gets the underlying window.
+ */
+struct avbox_window *
+mbox_downloads_window(const struct mbox_downloads * const inst)
 {
-	avbox_window_destroy(inst->window);
+	return inst->window;
 }

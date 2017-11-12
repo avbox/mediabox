@@ -119,11 +119,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 					if ((inst->about = mbox_about_new(avbox_window_object(inst->window))) == NULL) {
 						LOG_PRINT_ERROR("Could not create about box!");
 					} else {
-						if (mbox_about_show(inst->about) == -1) {
-							LOG_PRINT_ERROR("Could not show about box!");
-							mbox_about_destroy(inst->about);
-							inst->about = NULL;
-						}
+						avbox_window_show(mbox_about_window(inst->about));
 					}
 				}
 			} else if (!memcmp("DOWN", selected, 4)) {
@@ -135,7 +131,9 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 					} else {
 						if (mbox_downloads_show(inst->downloads) == -1) {
 							LOG_PRINT_ERROR("Could not show downloads window!");
-							mbox_downloads_destroy(inst->downloads);
+							avbox_object_destroy(
+								avbox_window_object(
+									mbox_downloads_window(inst->downloads)));
 							inst->downloads = NULL;
 						}
 					}
@@ -190,12 +188,18 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 			} else if (payload == inst->about) {
 				DEBUG_PRINT("mainmenu", "Destroying about box");
 				ASSERT(inst->about != NULL);
-				mbox_about_destroy(inst->about);
+				avbox_object_destroy(
+					avbox_window_object(
+						mbox_about_window(inst->about)));
+
 				inst->about = NULL;
 
 			} else if (payload == inst->downloads) {
 				ASSERT(inst->downloads != NULL);
-				mbox_downloads_destroy(inst->downloads);
+				avbox_object_destroy(
+					avbox_window_object(
+						mbox_downloads_window(inst->downloads)));
+
 				inst->downloads = NULL;
 			}
 #ifdef ENABLE_BLUETOOTH
@@ -238,10 +242,16 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 					mbox_browser_window(inst->library)));
 		}
 		if (inst->downloads != NULL) {
-			mbox_downloads_destroy(inst->downloads);
+			avbox_object_destroy(
+				avbox_window_object(
+					mbox_downloads_window(inst->downloads)));
+
 		}
 		if (inst->about != NULL) {
-			mbox_about_destroy(inst->about);
+			avbox_object_destroy(
+				avbox_window_object(
+					mbox_about_window(inst->about)));
+
 		}
 		if (inst->menu != NULL) {
 			avbox_listview_destroy(inst->menu);
@@ -365,6 +375,16 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 
 
 /**
+ * Get the underlying window
+ */
+struct avbox_window *
+mbox_mainmenu_window(struct mbox_mainmenu * const inst)
+{
+	return inst->window;
+}
+
+
+/**
  * Show window.
  */
 int
@@ -380,15 +400,4 @@ mbox_mainmenu_show(struct mbox_mainmenu * const inst)
 	}
 
 	return 0;
-}
-
-
-/**
- * Destroy the main menu.
- */
-void
-mbox_mainmenu_destroy(struct mbox_mainmenu * const inst)
-{
-	DEBUG_PRINT("mainmenu", "Destructor for main menu called");
-	avbox_window_destroy(inst->window);
 }

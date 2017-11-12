@@ -144,7 +144,7 @@ mbox_about_msghandler(void *context, struct avbox_message *msg)
  * Initialize the MediaBox about box.
  */
 struct mbox_about*
-mbox_about_new(struct avbox_object *parent)
+mbox_about_new(struct avbox_object * const parent)
 {
 	int xres, yres;
 	int font_height;
@@ -194,20 +194,11 @@ mbox_about_new(struct avbox_object *parent)
 }
 
 
-int
-mbox_about_show(struct mbox_about * const inst)
-{
-	/* show the window */
-        avbox_window_show(inst->window);
-	return 0;
-}
-
-
 /**
- * Destroy the about box.
+ * Get the underlying window.
  */
-void
-mbox_about_destroy(struct mbox_about * const inst)
+struct avbox_window *
+mbox_about_window(const struct mbox_about * const inst)
 {
-	avbox_window_destroy(inst->window);
+	return inst->window;
 }

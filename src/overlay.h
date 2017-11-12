@@ -44,10 +44,10 @@ mbox_overlay_new(struct avbox_player * player);
 
 
 /**
- * Destroy overlay instance.
+ * Get the underlying window.
  */
-void
-mbox_overlay_destroy(struct mbox_overlay * const inst);
+struct avbox_window *
+mbox_overlay_window(const struct mbox_overlay * const inst);
 
 
 #endif
