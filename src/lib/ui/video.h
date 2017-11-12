@@ -71,7 +71,7 @@ struct mbv_font;
  * Function that handles window painting.
  */
 typedef int (*avbox_video_draw_fn)(
-	struct avbox_window * const window);
+	struct avbox_window * const window, void * context);
 
 /**
  * Represents a rectangle.
@@ -144,13 +144,6 @@ avbox_window_unlock(struct avbox_window * const window);
 int
 avbox_window_blit(struct avbox_window * const dest,
 	struct avbox_window * const src, int flags, int x, int y);
-
-
-/**
- * Gets the window's user context
- */
-void *
-avbox_window_getusercontext(const struct avbox_window * const window);
 
 
 /**
@@ -235,11 +228,12 @@ avbox_window_new(
 	avbox_video_draw_fn paint, void *context);
 
 
-struct avbox_window*
-avbox_window_getchildwindow(struct avbox_window *window,
-	const char * const identifier,
-	const int x, const int y, int w, int h,
-	avbox_video_draw_fn paint, void *user_context);
+/**
+ * Sets the drawing function.
+ */
+void
+avbox_window_setdrawfunc(struct avbox_window * const window,
+	avbox_video_draw_fn func, void * const context);
 
 
 void

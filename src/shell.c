@@ -90,12 +90,14 @@ mbox_shell_getqueue(void)
  * Draws the welcome screen.
  */
 static int
-mbox_shell_draw(struct avbox_window *window)
+mbox_shell_draw(struct avbox_window *window, void * const ctx)
 {
 	int w, h;
 	cairo_t *context;
 	PangoLayout *layout_time, *layout_date;
 	PangoFontDescription *font_desc;
+
+	(void) ctx;
 
 	/* DEBUG_VPRINT("shell", "mbox_shell_draw(0x%p)",
 		window); */
@@ -152,12 +154,14 @@ mbox_shell_draw(struct avbox_window *window)
 /**
  * Draws the shutdown dialog */
 static int
-mbox_shell_shutdowndraw(struct avbox_window *window)
+mbox_shell_shutdowndraw(struct avbox_window *window, void * const ctx)
 {
 	int w, h;
 	cairo_t *context;
 	PangoLayout *msg;
 	PangoFontDescription *font_desc;
+
+	(void) ctx;
 
 	DEBUG_PRINT("shell", "Drawing shutdown dialog");
 
@@ -481,7 +485,6 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 		case MB_PLAYER_STATUS_PAUSED:
 			assert(progress == NULL);
 			DEBUG_PRINT("shell", "Player state changed to PAUSED");
-			avbox_player_update(inst);
 			break;
 		}
 	}

@@ -81,6 +81,7 @@ struct avbox_window
 	uint32_t foreground_color;
 	uint32_t background_color;
 	void *user_context;
+	void *draw_context;
 	LIST_DECLARE(children);
 };
 
@@ -117,6 +118,23 @@ avbox_rect_overlaps(const struct avbox_rect * const rect1,
 	const struct avbox_rect * const rect2)
 {
 	return 1;
+}
+
+
+/**
+ * Checks if rect1 covers rect2.
+ */
+static int
+avbox_rect_covers(const struct avbox_rect * const rect1,
+	const struct avbox_rect * const rect2)
+{
+	if (rect1->x <= rect2->x && rect1->y <= rect2->y) {
+		if (rect1->w >= (rect2->w + (rect2->x - rect1->x)) &&
+			rect1->h >= (rect2->h + (rect2->y - rect1->y))) {
+			return 1;
+		}
+	}
+	return 0;
 }
 
 
@@ -263,16 +281,6 @@ void avbox_window_clear(struct avbox_window * const window)
 {
 	assert(window != NULL);
 	__window_clear(window, window->background_color);
-}
-
-
-/**
- * Gets the window's user context
- */
-void *
-avbox_window_getusercontext(const struct avbox_window * const window)
-{
-	return window->user_context;
 }
 
 
@@ -469,6 +477,7 @@ avbox_window_paint(struct avbox_window * const window, int update)
 {
 	int blitflags = MBV_BLITFLAGS_NONE;
 	struct avbox_window_node *damaged_window;
+	struct avbox_window_node *child;
 
 	/* DEBUG_VPRINT("video", "avbox_window_paint(\"%s\")",
 		window->identifier); */
@@ -484,19 +493,18 @@ avbox_window_paint(struct avbox_window * const window, int update)
 	/* if the window has no repaint handler then
 	 * just invoke the repaint handler for all child
 	 * windows */
-	if (window->paint == NULL) {
-		struct avbox_window_node *child;
-		LIST_FOREACH(struct avbox_window_node *, child, &window->children) {
-			avbox_window_paint(child->window, update);
-		}
-
-		/* blit window */
-		driver.surface_update(window->surface, blitflags, update);
-	} else {
+	if (window->paint != NULL) {
 		/* invoke the user-defined repaint handler */
-		window->paint(window);
-		driver.surface_update(window->surface, blitflags, update);
+		window->paint(window, window->draw_context);
 	}
+
+	/* invoke repaint handler for all subwindows */
+	LIST_FOREACH(struct avbox_window_node *, child, &window->children) {
+		avbox_window_paint(child->window, update);
+	}
+
+	/* blit window */
+	driver.surface_update(window->surface, blitflags, update);
 
 	if (window->parent == &root_window) {
 		/* redraw all windows damaged by this window, that is
@@ -506,6 +514,9 @@ avbox_window_paint(struct avbox_window * const window, int update)
 		while (!LIST_ISNULL(&window_stack, damaged_window)) {
 			if (avbox_rect_overlaps(&window->rect, &damaged_window->window->rect)) {
 				avbox_window_update(damaged_window->window);
+				if (avbox_rect_covers(&damaged_window->window->rect, &window->rect)) {
+					break;
+				}
 				damaged_window = LIST_NEXT(struct avbox_window_node*,
 					damaged_window);
 			}
@@ -519,7 +530,7 @@ avbox_window_paint(struct avbox_window * const window, int update)
  * Repaints the window decoration
  */
 static int
-avbox_window_paintdecor(struct avbox_window * const window)
+avbox_window_paintdecor(struct avbox_window * const window, void * const ctx)
 {
 	cairo_t *context;
 	PangoLayout *layout;
@@ -761,6 +772,7 @@ avbox_window_subwindow(struct avbox_window * const window,
 	new_window->node = window_node;
 	new_window->paint = paint;
 	new_window->user_context = user_context;
+	new_window->draw_context = user_context;
 	new_window->cairo_context = NULL;
 	new_window->parent = window;
 	new_window->visible = 1;
@@ -873,6 +885,7 @@ avbox_window_new(
 	window->background_color = MBV_DEFAULT_BACKGROUND;
 	window->cairo_context = NULL;
 	window->user_context = context;
+	window->draw_context = context;
 	window->parent = &root_window;
 	window->visible = 0;
 	window->decor_dirty = 1;
@@ -949,6 +962,19 @@ avbox_window_new(
 	}
 
 	return window;
+}
+
+
+/**
+ * Sets the drawing function.
+ */
+void
+avbox_window_setdrawfunc(struct avbox_window * const window, avbox_video_draw_fn func, void * const context)
+{
+	ASSERT(window != NULL);
+	ASSERT(window->content_window != NULL);
+	window->content_window->paint = func;
+	window->draw_context = context;
 }
 
 
@@ -1158,7 +1184,7 @@ avbox_window_hide(struct avbox_window *window)
 	/* DEBUG_VPRINT("video", "avbox_window_hide(\"%s\")",
 		window->identifier); */
 
-	assert(window != &root_window);
+	ASSERT(window != &root_window);
 
 	/* if the window is already hidden print a debug message */
 	if (!window->visible) {
@@ -1170,7 +1196,7 @@ avbox_window_hide(struct avbox_window *window)
 
 	/* if the window has input release it */
 	if (window->flags & AVBOX_WNDFLAGS_INPUT) {
-		assert(window->object != NULL);
+		ASSERT(window->object != NULL);
 		avbox_input_release(window->object);
 	}
 
@@ -1183,6 +1209,9 @@ avbox_window_hide(struct avbox_window *window)
 			/* DEBUG_VPRINT("video", "Repainting damaged window \"%s\"",
 				damaged_window->window->identifier); */
 			avbox_window_update(damaged_window->window);
+			if (avbox_rect_covers(&damaged_window->window->rect, &window->rect)) {
+				break;
+			}
 		}
 	}
 }

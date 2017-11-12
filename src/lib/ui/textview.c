@@ -38,13 +38,12 @@ struct mb_ui_textview
 
 
 static int
-mb_ui_textview_repaint(struct avbox_window *window)
+mb_ui_textview_repaint(struct avbox_window *window, void * const ctx)
 {
 	int w, h;
 	cairo_t *context;
 	PangoLayout *layout;
-	struct mb_ui_textview * const inst = (struct mb_ui_textview*)
-		avbox_window_getusercontext(window);
+	struct mb_ui_textview * const inst = (struct mb_ui_textview*) ctx;
 
 	/* if there's nothing to draw return success */
 	if (inst->text == NULL || strlen(inst->text) == 0) {

@@ -90,10 +90,9 @@ avbox_listview_getwindowitem(struct avbox_listview *inst, struct avbox_window *w
  * Paints the menu item.
  */
 static int
-avbox_listitem_paint(struct avbox_window * const window)
+avbox_listitem_paint(struct avbox_window * const window, void * const ctx)
 {
-	struct avbox_listview * const inst = (struct avbox_listview*)
-		avbox_window_getusercontext(window);
+	struct avbox_listview * const inst = (struct avbox_listview*) ctx;
 	struct avbox_listitem * const item = (struct avbox_listitem*)
 		avbox_listview_getwindowitem(inst, window);
 	struct avbox_rect rect;

@@ -60,16 +60,15 @@ avbox_progressview_setvalue(struct avbox_progressview *inst, int value)
  * Repaint the progressbar.
  */
 static int
-avbox_progressview_paint(struct avbox_window *window)
+avbox_progressview_paint(struct avbox_window *window, void *ctx)
 {
 	int bar_width;
 	int w, h;
-	struct avbox_progressview *inst = (struct avbox_progressview*)
-		avbox_window_getusercontext(window);
+	struct avbox_progressview *inst = (struct avbox_progressview*) ctx;
 
-	assert(inst != NULL);
-	assert(inst->window != NULL);
-	assert(inst->min == 0);	/* TODO: Support min < 0 */
+	ASSERT(inst != NULL);
+	ASSERT(inst->window != NULL);
+	ASSERT(inst->min == 0);	/* TODO: Support min < 0 */
 
 	avbox_window_getcanvassize(inst->window, &w, &h);
 

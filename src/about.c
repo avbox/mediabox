@@ -52,14 +52,13 @@ struct mbox_about
  * Handles manual drawing of the about window
  */
 static int
-mbox_about_draw(struct avbox_window * const window)
+mbox_about_draw(struct avbox_window * const window, void * ctx)
 {
 	cairo_t *context;
 	PangoLayout *layout;
-	struct mbox_about * const inst =
-		avbox_window_getusercontext(window);
+	struct mbox_about * const inst = (struct mbox_about *) ctx;
 
-	assert(inst != NULL);
+	ASSERT(inst != NULL);
 
 	if (!inst->dirty) {
 		return 0;

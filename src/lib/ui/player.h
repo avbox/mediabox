@@ -140,10 +140,9 @@ void
 avbox_player_seek(struct avbox_player *inst, int flags, int64_t pos);
 
 
-void
-avbox_player_update(struct avbox_player* inst);
-
-
+/**
+ * Play a file.
+ */
 void
 avbox_player_play(struct avbox_player* inst, const char * const path);
 

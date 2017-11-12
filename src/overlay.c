@@ -86,13 +86,12 @@ stripext(char * filename)
  * Draws the overlay window.
  */
 static int
-mbox_overlay_draw(struct avbox_window *window)
+mbox_overlay_draw(struct avbox_window *window, void * const ctx)
 {
 	cairo_t *context;
 	PangoLayout *msg;
 	PangoFontDescription *font_desc;
-	struct mbox_overlay * const inst =
-		avbox_window_getusercontext(window);
+	struct mbox_overlay * const inst = ctx;
 	struct avbox_rect rect;
 	struct avbox_rect bar_rect;
 

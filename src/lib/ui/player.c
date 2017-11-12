@@ -364,13 +364,24 @@ avbox_player_getsystemtime(struct avbox_player *inst)
 
 
 /**
+ * Draw handler for the target window.
+ */
+static int
+avbox_player_draw(struct avbox_window * const window, void * const context)
+{
+	struct avbox_player * const inst = context;
+	avbox_window_blit(window, inst->video_window, MBV_BLITFLAGS_NONE, 0, 0);
+	return 0;
+}
+
+
+/**
  * Update the display from main thread.
  */
 static void *
 avbox_player_doupdate(void *arg)
 {
 	struct avbox_player * const inst = (struct avbox_player*) arg;
-	avbox_window_blit(inst->window, inst->video_window, MBV_BLITFLAGS_NONE, 0, 0);
 	avbox_window_update(inst->window);
 	return NULL;
 }
@@ -410,8 +421,11 @@ avbox_player_video(void *arg)
 		goto video_exit;
 	}
 
+	/* clear the off-screen window and set a draw handler
+	 * for the target window */
 	avbox_window_setbgcolor(inst->video_window, AVBOX_COLOR(0x000000ff));
 	avbox_window_clear(inst->video_window);
+	avbox_window_setdrawfunc(inst->window, avbox_player_draw, inst);
 
 	/* calculate how to scale the video */
 	avbox_player_scale2display(inst,
@@ -552,6 +566,8 @@ video_exit:
 	} else {
 		avbox_delegate_wait(del, NULL);
 	}
+
+	avbox_window_setdrawfunc(inst->window, NULL, NULL);
 
 	return NULL;
 }
@@ -2497,20 +2513,6 @@ avbox_player_gettime(struct avbox_player * const inst, int64_t *time)
 	}
 	pthread_mutex_unlock(&inst->state_lock);
 
-}
-
-
-/**
- * Update the player window
- */
-void
-avbox_player_update(struct avbox_player *inst)
-{
-	if (inst->play_state == AVBOX_PLAYER_PLAYSTATE_PLAYING) {
-		avbox_player_doupdate(inst);
-	} else {
-		LOG_PRINT_ERROR("avbox_player_update() called while not playing. Ignoring for now.");
-	}
 }
 
 

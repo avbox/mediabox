@@ -57,12 +57,11 @@ struct mbox_a2dp
  * Handles manual drawing of the a2dp window
  */
 static int
-mbox_a2dp_draw(struct avbox_window * const window)
+mbox_a2dp_draw(struct avbox_window * const window, void * const ctx)
 {
 	cairo_t *context;
 	PangoLayout *layout;
-	struct mbox_a2dp * const inst =
-		avbox_window_getusercontext(window);
+	struct mbox_a2dp * const inst = (struct mbox_a2dp*) ctx;
 	char msg[2048];
 
 	assert(inst != NULL);
