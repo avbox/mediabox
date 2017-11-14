@@ -28,6 +28,12 @@ EMU_VIDEO=std
 NCORES=2
 SDL=1
 
+
+# switch to the script directory
+SCRIPTPATH=$( cd $(dirname $0) ; pwd -P )
+cd $SCRIPTPATH
+
+
 echo_e()
 {
 	echo -e "$@"
@@ -94,6 +100,12 @@ else
 	warn "QEMU build does not support SDL backend!!"
 fi
 
+if [ ! -e "store.img" ]; then
+	echo_e "Creating storage partition..."
+	dd if=/dev/zero of=store.img bs=8M count=1024
+	mkfs.ext4 store.img
+fi
+
 KARGS=
 KARGS="${KARGS} video=mode:1024x600x32"
 KARGS="${KARGS} root=/dev/sda rw"
@@ -103,6 +115,7 @@ KARGS="${KARGS} console=ttyS0 mediabox.avbox:noloxg"
 if [ ${BUSYBOX_INIT} -eq 0 ]; then
 	KARGS="${KARGS} init=/bin/mediabox"
 	KARGS="${KARGS} mediabox.video:driver=${VIDEO}"
+	KARGS="${KARGS} mediabox.store=/dev/sdb"
 	KARGS="${KARGS} coredump_filter=255"
 fi
 
@@ -126,7 +139,7 @@ ${QEMU_BIN} \
 	-device ich9-ahci,id=ahci \
 	-drive file=${ROOTFS},format=raw,if=none,id=a1 \
 	-device ide-drive,drive=a1,bus=ahci.0 \
-	-drive file=hd.img,format=raw,if=none,id=a2 \
+	-drive file=store.img,format=raw,if=none,id=a2 \
 	-device ide-drive,drive=a2,bus=ahci.1 \
 	-net nic,model=virtio \
 	-net tap,ifname=vtap0,script=no,downscript=no \

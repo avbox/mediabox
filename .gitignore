@@ -19,6 +19,7 @@ src/lib/ui/.deps/
 sdk/build/
 sdk/packages/
 sdk/temp/
+sdk/store.img
 *.swp
 *.pyc
 Makefile
