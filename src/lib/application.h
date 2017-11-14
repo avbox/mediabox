@@ -61,6 +61,13 @@ avbox_application_unsubscribe(avbox_application_eventhandler handler, void *cont
 
 
 /**
+ * Gets the command line arguments
+ */
+const char **
+avbox_application_args(int * const argc);
+
+
+/**
  * Initialize application.
  */
 int

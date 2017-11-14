@@ -72,9 +72,6 @@ int
 main (int argc, char **argv)
 {
 	int i, ret;
-	int launch_avmount = 1;
-	int launch_mediatomb = 1;
-	char *store = NULL;
 
 	/* parse command line */
 	for (i = 1; i < argc; i++) {
@@ -97,16 +94,13 @@ main (int argc, char **argv)
 		} else if (!strncmp(argv[i], "--input:", 8)) {
 			/* let input args pass */
 		} else if (!strcmp(argv[i], "--no-avmount")) {
-			launch_avmount = 0;
+			/* pass through */
 		} else if (!strcmp(argv[i], "--no-mediatomb")) {
-			launch_mediatomb = 0;
+			/* pass through */
 		} else if (!strcmp(argv[i], "--init")) {
 			/* pass through */
 		} else if (!strncmp(argv[i], "--store=", 8)) {
-			if ((store = strdup(argv[i] + 8)) == NULL) {
-				fprintf(stderr, "No way! Out of memory\n");
-				exit(EXIT_FAILURE);
-			}
+			/* pass through */
 		} else {
 			fprintf(stderr, "%s: Invalid argument %s\n",
 				argv[0], argv[i]);
@@ -130,7 +124,7 @@ main (int argc, char **argv)
 	}
 
 	/* initialize the shell */
-	if (mbox_shell_init(store, launch_avmount, launch_mediatomb) != 0) {
+	if (mbox_shell_init() != 0) {
 		fprintf(stderr, "%s: Could not initialize shell\n",
 			argv[0]);
 		exit(EXIT_FAILURE);
@@ -144,10 +138,6 @@ main (int argc, char **argv)
 
 	/* run the application loop */
 	ret = avbox_application_run();
-
-	if (store != NULL) {
-		free(store);
-	}
 
 	return ret;
 }

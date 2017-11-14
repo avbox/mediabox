@@ -116,8 +116,7 @@ mbox_library_closedir(struct mbox_library_dir * const dir);
  * Initialize the library backend.
  */
 int
-mbox_library_init(const char * const store,
-	const int launch_avmount, const int launch_mediatomb);
+mbox_library_init(void);
 
 
 /**

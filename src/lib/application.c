@@ -64,6 +64,8 @@ static int pid1 = 0;
 static int result = 0;
 static struct avbox_object *dispatch_object;
 static LIST subscribers;
+static int app_argc = 0;
+static char **app_argv = NULL;
 
 
 /**
@@ -342,6 +344,17 @@ avbox_application_unsubscribe(avbox_application_eventhandler handler, void *cont
 
 
 /**
+ * Gets the command line arguments
+ */
+const char **
+avbox_application_args(int * const argc)
+{
+	*argc = app_argc;
+	return (const char **) app_argv;
+}
+
+
+/**
  * Initialize application.
  */
 int
@@ -368,6 +381,10 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 	} else {
 		argv = cargv;
 	}
+
+	/* save arguments */
+	app_argv = argv;
+	app_argc = argc;
 
 	if (logf != NULL) {
 		logfile = logf;
@@ -465,12 +482,6 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 	}
 #endif
 
-	/* if we're running as pid 1 free the list
-	 * of kernel arguments */
-	if (pid1) {
-		free_kernel_args(argc, argv);
-	}
-
 	LIST_INIT(&subscribers);
 
 	/* drop root prividges after initializing framebuffer */
@@ -548,8 +559,12 @@ avbox_application_run(void)
 	DEBUG_VPRINT("application", "Exiting (status=%i)",
 		result);
 
-	/* if we're running as pid 1 then reboot */
+	/* if we're running as pid 1 then free kernel args
+	 * and reboot */
 	if (pid1) {
+		free_kernel_args(app_argc, app_argv);
+
+
 		DEBUG_PRINT("application", "Rebooting");
 		if (reboot(LINUX_REBOOT_CMD_RESTART) == -1) {
 			abort();

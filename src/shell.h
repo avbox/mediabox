@@ -40,8 +40,7 @@ mbox_shell_getqueue(void);
  * Initialize the MediaBox shell
  */
 int
-mbox_shell_init(const char * const store,
-	const int launch_avmount, const int launch_mediatomb);
+mbox_shell_init(void);
 
 
 int

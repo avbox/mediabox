@@ -55,6 +55,7 @@
 #include "lib/thread.h"
 #include "lib/string_util.h"
 #include "lib/bluetooth.h"
+#include "lib/application.h"
 
 
 #define MEDIATOMB_BIN "/usr/bin/mediatomb"
@@ -2333,16 +2334,51 @@ mbox_library_local_init(const char * const store)
 		DEBUG_VPRINT(LOG_MODULE, "Mounting %s on %s",
 			store, MBOX_STORE_MOUNTPOINT);
 
+		/* check that mountpoint exists and create it if it doesn't */
 		if (stat(MBOX_STORE_MOUNTPOINT, &st) == -1) {
 			mkdir_p(MBOX_STORE_MOUNTPOINT,
 				S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 		}
 
+		/* mount the store partition */
 		if (mount(store, MBOX_STORE_MOUNTPOINT, "ext4", 0, "") == -1) {
 			LOG_VPRINT_ERROR("Could not mount proc: %s",
 				strerror(errno));
 			return -1;
 		}
+
+		/* check that the video directory exists in the store
+		 * and create it if it doesn't */
+		if (stat(MBOX_STORE_VIDEO, &st) == -1) {
+			if (mkdir_p(MBOX_STORE_VIDEO, S_IRWXU | S_IRWXG | S_IRWXO) == -1) {
+				LOG_VPRINT_ERROR("Could not create 'Video' directory!: %s",
+					strerror(errno));
+				return -1;
+			}
+		} else {
+			if (!S_ISDIR(st.st_mode)) {
+				LOG_VPRINT_ERROR("'%s' exists but it's not a directory!",
+					MBOX_STORE_VIDEO);
+				return -1;
+			}
+		}
+
+		/* check that the video directory exists in the store
+		 * and create it if it doesn't */
+		if (stat(MBOX_STORE_AUDIO, &st) == -1) {
+			if (mkdir_p(MBOX_STORE_AUDIO, S_IRWXU | S_IRWXG | S_IRWXO) == -1) {
+				LOG_VPRINT_ERROR("Could not create 'Audio' directory!: %s",
+					strerror(errno));
+				return -1;
+			}
+		} else {
+			if (!S_ISDIR(st.st_mode)) {
+				LOG_VPRINT_ERROR("'%s' exists but it's not a directory!",
+					MBOX_STORE_VIDEO);
+				return -1;
+			}
+		}
+
 	}
 
 	/* create the library database if it doesn't exist */
@@ -2372,8 +2408,6 @@ mbox_library_local_init(const char * const store)
 			MBOX_STORE_VIDEO, strerror(errno));
 		return -1;
 	}
-
-
 
 	/* start inotify thread */
 	if (pthread_create(&local_inotify_thread, NULL,
@@ -2414,16 +2448,35 @@ mbox_library_local_shutdown(void)
  * Initialize the library backend.
  */
 int
-mbox_library_init(const char * const store,
-	const int launch_avmount, const int launch_mediatomb)
+mbox_library_init(void)
 {
+	int argc, i, launch_avmount = 1, launch_mediatomb = 1, ret = -1;
+	const char **argv;
 	char exe_path_mem[255];
 	char *exe_path = exe_path_mem;
 	char *avmount_logfile = NULL;
+	char *store = NULL;
 	int config_setup = 0;
 	struct stat st;
 
 	DEBUG_PRINT(LOG_MODULE, "Starting library backend");
+
+	/* parse command line arguments */
+	for (i = 0, argv = avbox_application_args(&argc); i < argc; i++) {
+		DEBUG_VPRINT(LOG_MODULE, "Got argument: '%s'",
+			argv[i]);
+
+		if (!strncmp(argv[i], "--store=", 8)) {
+			if ((store = strdup(argv[i] + 8)) == NULL) {
+				ASSERT(errno == ENOMEM);
+				goto end;
+			}
+		} else if (!strcmp(argv[i], "--no-avmount")) {
+			launch_avmount = 0;
+		} else if (!strcmp(argv[i], "--no-mediatomb")) {
+			launch_mediatomb = 0;
+		}
+	}
 
 	/* Figure out which config file template to use.
 	 * If we're running on the build directory we use
@@ -2453,7 +2506,7 @@ mbox_library_init(const char * const store,
 				if ((mediatomb_home = mb_library_backend_mediaboxsetup(conf_path)) == NULL) {
 					LOG_PRINT(LOGLEVEL_ERROR, "library-backend",
 						"Could not setup mediatomb config.");
-					return -1;
+						goto end;
 				}
 				config_setup = 1;
 			} else {
@@ -2469,7 +2522,7 @@ mbox_library_init(const char * const store,
 			STRINGIZE(DATADIR) "/mediabox/mediatomb")) == NULL) {
 			LOG_PRINT(LOGLEVEL_ERROR, "library-backend",
 				"Could not setup mediatomb config (2).");
-			return -1;
+			goto end;
 		}
 	}
 
@@ -2499,19 +2552,6 @@ mbox_library_init(const char * const store,
 	/* initialize a linked list to hold mediatomb instances */
 	LIST_INIT(&mediatomb_instances);
 
-	/* launch a mediabox process for each interface */
-	if (launch_mediatomb) {
-		struct mt_init_state state;
-		state.port = 49163;
-		state.err = 0;
-		state.gotone = 0;
-		ifaceutil_enumifaces(mb_library_backend_startmediatomb, &state);
-		if (state.err != 0) {
-			LOG_PRINT_ERROR("An error occurred while launching mediatomb!");
-			return -1;
-		}
-	}
-
 	/* launch the avmount process */
 	if (launch_avmount) {
 		struct stat st;
@@ -2540,7 +2580,7 @@ mbox_library_init(const char * const store,
 			if (mkdir_p(AVMOUNT_MOUNTPOINT, S_IRWXU)) {
 				DEBUG_VPRINT("library-backend", "Could not create mountpoint "
 					AVMOUNT_MOUNTPOINT ": %s", strerror(errno));
-				return -1;
+				goto end;
 			}
 		}
 
@@ -2553,7 +2593,7 @@ mbox_library_init(const char * const store,
 			AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE | AVBOX_PROCESS_SUPERUSER,
 			"avmount", avbox_avmount_exit, NULL)) == -1) {
 			LOG_PRINT(MB_LOGLEVEL_ERROR, "library-backend", "Could not start avmount daemon");
-			return -1;
+			goto end;
 		}
 	}
 
@@ -2561,10 +2601,29 @@ mbox_library_init(const char * const store,
 	if (mbox_library_local_init(store) == -1) {
 		LOG_VPRINT_ERROR("Could not start local library provider: %s",
 			strerror(errno));
-		return -1;
+		goto end;
 	}
 
-	return 0;
+	/* launch a mediabox process for each interface */
+	if (launch_mediatomb) {
+		struct mt_init_state state;
+		state.port = 49163;
+		state.err = 0;
+		state.gotone = 0;
+		ifaceutil_enumifaces(mb_library_backend_startmediatomb, &state);
+		if (state.err != 0) {
+			LOG_PRINT_ERROR("An error occurred while launching mediatomb!");
+			goto end;
+		}
+	}
+
+	ret = 0;
+end:
+	if (store != NULL) {
+		free(store);
+	}
+
+	return ret;
 }
 
 
