@@ -33,6 +33,7 @@
 #include "lib/log.h"
 #include "lib/debug.h"
 #include "lib/dispatch.h"
+#include "lib/bluetooth.h"
 #include "lib/ui/video.h"
 #include "lib/ui/listview.h"
 #include "lib/ui/input.h"
@@ -284,7 +285,9 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	int n_entries = 5;
 
 #ifdef ENABLE_BLUETOOTH
-	n_entries++;
+	if (avbox_bluetooth_ready()) {
+		n_entries++;
+	}
 #endif
 
 	/* allocate memory for main menu */
@@ -353,7 +356,7 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	/* populate the list */
 	if (avbox_listview_additem(inst->menu, "BROWSE MEDIA", "LIB") == -1 ||
 #ifdef ENABLE_BLUETOOTH
-		avbox_listview_additem(inst->menu, "BLUETOOTH AUDIO", "A2DP") == -1 ||
+		(avbox_bluetooth_ready() && avbox_listview_additem(inst->menu, "BLUETOOTH AUDIO", "A2DP") == -1) ||
 #endif
 		avbox_listview_additem(inst->menu, "DOWNLOADS", "DOWN") == -1 ||
 		avbox_listview_additem(inst->menu, "GAMING CONSOLES", "CONSOLES") == -1 ||

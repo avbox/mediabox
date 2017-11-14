@@ -41,6 +41,7 @@
 #include "../debug.h"
 #include "../log.h"
 #include "../dispatch.h"
+#include "../bluetooth.h"
 
 
 LISTABLE_STRUCT(avbox_input_endpoint,
@@ -293,11 +294,15 @@ avbox_input_init(int argc, char **argv)
 	}
 
 #ifdef ENABLE_BLUETOOTH
-	/* initialize the bluetooth input provider */
-	if (mbi_bluetooth_init() == -1) {
-		LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "Could not start Bluetooth provider");
+	if (avbox_bluetooth_ready()) {
+		/* initialize the bluetooth input provider */
+		if (mbi_bluetooth_init() == -1) {
+			LOG_PRINT(MB_LOGLEVEL_ERROR, "input", "Could not start Bluetooth provider");
+		} else {
+			using_bluetooth = 1;
+		}
 	} else {
-		using_bluetooth = 1;
+		using_bluetooth = 0;
 	}
 #endif
 
@@ -317,6 +322,7 @@ avbox_input_shutdown(void)
 #ifdef ENABLE_BLUETOOTH
 	if (using_bluetooth) {
 		mbi_bluetooth_destroy();
+		using_bluetooth = 0;
 	}
 #endif
 	if (using_libinput) {

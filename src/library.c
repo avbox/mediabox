@@ -1651,7 +1651,9 @@ mbox_library_opendir(const char * const path)
 		mbox_library_adddirent("TV Tunners", "/tv", 1, &dir->state.rootdir.entries);
 		mbox_library_adddirent("DVD", "/dvd", 1, &dir->state.rootdir.entries);
 #ifdef ENABLE_BLUETOOTH
-		mbox_library_adddirent("Bluetooth Devices", "/bluetooth", 1, &dir->state.rootdir.entries);
+		if (avbox_bluetooth_ready()) {
+			mbox_library_adddirent("Bluetooth Devices", "/bluetooth", 1, &dir->state.rootdir.entries);
+		}
 #endif
 	} else if (!strncmp("/local", path, 6)) {
 		if ((dir = mbox_library_local_opendir(path)) == NULL) {
@@ -1732,6 +1734,11 @@ mbox_library_opendir(const char * const path)
 		dir->state.btdir.read = 0;
 		dir->state.btdir.devs = avbox_bluetooth_getdevices(AVBOX_BT_A2DP_UUID);
 		dir->state.btdir.cur = dir->state.btdir.devs;
+		if (dir->state.btdir.devs == NULL) {
+			errno = ENOTSUP;
+			free(dir);
+			return NULL;
+		}
 #endif
 	} else if (!strncmp("/tv", path, 3)) {
 
@@ -1906,6 +1913,9 @@ mbox_library_readdir(struct mbox_library_dir * const dir)
 	{
 		struct mbox_library_dirent *ent;
 		struct avbox_btdev *dev = *dir->state.btdir.cur;
+
+		ASSERT(dir->state.btdir.devs != NULL);
+		ASSERT(dir->state.btdir.cur != NULL);
 
 		if (!dir->state.btdir.read) {
 			dir->state.btdir.read = 1;

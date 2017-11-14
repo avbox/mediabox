@@ -65,6 +65,13 @@ avbox_bluetooth_setpower(int state);
 
 
 /**
+ * Checks if the Bluetooth adapter is ready.
+ */
+int
+avbox_bluetooth_ready();
+
+
+/**
  * Initialize bluetooth subsystem.
  */
 int
