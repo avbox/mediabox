@@ -33,6 +33,7 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <signal.h>
 
 #define LOG_MODULE "process"
 
@@ -44,6 +45,8 @@
 #include "process.h"
 #include "math_util.h"
 #include "file_util.h"
+#include "delegate.h"
+#include "thread.h"
 
 
 #ifdef ENABLE_IONICE
@@ -56,9 +59,8 @@ struct avbox_process;
 
 struct callback_state {
 	int result;
-	int returned;
-	int timer;
 	struct avbox_process *process;
+	struct avbox_delegate *worker;
 };
 
 /**
@@ -92,7 +94,7 @@ static pthread_mutex_t process_list_lock = PTHREAD_MUTEX_INITIALIZER;
 static int nextid = 1;
 static pthread_t monitor_thread;
 static pthread_t io_thread;
-static int quit = 0, io_quit = 0;
+static int quit = 0;
 
 
 /**
@@ -455,7 +457,7 @@ avbox_process_io_thread(void *arg)
 	MB_DEBUG_SET_THREAD_NAME("proc-io");
 	DEBUG_PRINT("process", "Starting IO thread");
 
-	while (!io_quit) {
+	while (!quit || LIST_SIZE(&process_list) > 0) {
 
 		fd_max = 0;
 		FD_ZERO(&fds);
@@ -543,15 +545,14 @@ avbox_process_io_thread(void *arg)
 /**
  * Invokes the callback function from another thread.
  */
-static enum avbox_timer_result
-avbox_process_callback_helper(int id, void *data)
+static void *
+avbox_process_callback_helper(void * const data)
 {
 	struct avbox_process * const proc =
 		(struct avbox_process*) data;
 	proc->cbstate->result = proc->exit_callback(proc->id,
 		proc->exit_status, proc->exit_callback_data);
-	proc->cbstate->returned = 1;
-	return AVBOX_TIMER_CALLBACK_RESULT_STOP;
+	return NULL;
 }
 
 
@@ -567,27 +568,27 @@ avbox_process_monitor_thread(void *arg)
 	int status, found = 0, cbresult;
 	struct avbox_process *proc;
 
-	MB_DEBUG_SET_THREAD_NAME("proc-mon");
+	DEBUG_SET_THREAD_NAME("process-iomon");
 	DEBUG_PRINT("process", "Starting process monitor thread");
 
 	while (!quit || LIST_SIZE(&process_list) > 0) {
 		if ((pid = waitpid(-1, &status, WNOHANG)) <= 0) {
-			if (errno == EINTR) {
-				usleep(500 * 1000L);
-			} else if (errno == ECHILD) {
-				usleep(500 * 1000L);
+			if (pid == 0 || errno == EINTR || errno == ECHILD) {
+				usleep(100 * 1000L);
 			} else {
 				LOG_VPRINT_ERROR("Could not wait() for process: %s",
 					strerror(errno));
 				break;
 			}
 
-			/* since processes may have pid set to -1
-			 * we need to change to something else to avoid
-			 * a false match bellow */
+			/* since avbox_process may have the pid field set to -1
+			 * when the underlying process has crashed we need to change
+			 * the pid value to something else to avoid a match bellow.
+			 *
+			 * NOTE: The loop bellow needs to run even when no process has
+			 * exitted in order to handle the process completed callbacks. */
 			pid = -2;
 		}
-
 
 		pthread_mutex_lock(&process_list_lock);
 
@@ -595,7 +596,7 @@ avbox_process_monitor_thread(void *arg)
 			if (proc->pid == pid || proc->cbstate != NULL) {
 				if (proc->pid == pid) {
 
-					assert(proc->cbstate == NULL);
+					ASSERT(proc->cbstate == NULL);
 
 					/* close file descriptors */
 					if (proc->stdin != -1) close(proc->stdin);
@@ -629,29 +630,26 @@ avbox_process_monitor_thread(void *arg)
 							abort();
 						}
 						proc->cbstate->result = 0;
-						proc->cbstate->returned = 0;
 
-						/* for now we use a 0 interval oneshot timer to invoke the
-						 * callback from another thread */
-						struct timespec tv;
-						tv.tv_sec = 0;
-						tv.tv_nsec = 0;
-						if ((proc->cbstate->timer = avbox_timer_register(&tv,
-							AVBOX_TIMER_TYPE_ONESHOT, NULL, avbox_process_callback_helper, proc)) == -1) {
-							LOG_PRINT_ERROR("Could not fire callback!");
-							abort();
+						if ((proc->cbstate->worker =
+							avbox_thread_delegate(avbox_process_callback_helper, proc)) == NULL) {
+							free(proc->cbstate);
+							proc->cbstate = NULL;
+							cbresult = 0;
+							LOG_VPRINT_ERROR("Could not delegate callback helper: %s",
+								strerror(errno));
+						} else {
+							continue;
 						}
-						continue;
 					} else {
 						cbresult = 0;
 					}
 				} else if (proc->cbstate != NULL) {
-					if (!proc->cbstate->returned) {
+					if (!avbox_delegate_finished(proc->cbstate->worker)) {
 						continue;
 					}
 
-					/* at this point we're back from the callback
-					 * so we can continue */
+					avbox_delegate_wait(proc->cbstate->worker, NULL);
 					cbresult = proc->cbstate->result;
 					free(proc->cbstate);
 					proc->cbstate = NULL;
@@ -710,7 +708,7 @@ avbox_process_monitor_thread(void *arg)
 		}
 	}
 
-	io_quit = 1;
+	DEBUG_PRINT(LOG_MODULE, "Process monitor thread exitting");
 
 	return NULL;
 }
@@ -1011,12 +1009,11 @@ avbox_process_stop(int id)
 int
 avbox_process_init(void)
 {
-	DEBUG_PRINT("process", "Initializing process monitor");
+	DEBUG_PRINT(LOG_MODULE, "Initializing process monitor");
 
 	LIST_INIT(&process_list);
 
 	quit = 0;
-	io_quit = 0;
 
 	if (pthread_create(&monitor_thread, NULL, avbox_process_monitor_thread, NULL) != 0) {
 		LOG_PRINT_ERROR("Could not create monitor thread!");
@@ -1067,6 +1064,7 @@ avbox_process_shutdown(void)
 	/* wait for threads */
 	DEBUG_PRINT("process", "Waiting for monitor threads");
 	pthread_join(monitor_thread, 0);
+	pthread_kill(io_thread, SIGUSR1);
 	pthread_join(io_thread, 0);
 
 	DEBUG_PRINT("process", "Process monitor down");
