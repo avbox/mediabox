@@ -143,6 +143,8 @@ ${QEMU_BIN} \
 	-device ide-drive,drive=a2,bus=ahci.1 \
 	-net nic,model=virtio \
 	-net tap,ifname=vtap0,script=no,downscript=no \
+	-device ide-drive,drive=a4,bus=ahci.3 \
+	-drive file=anabelle.iso,media=cdrom,if=none,id=a4 \
 	-boot c \
 	-m 1024 \
 	-serial stdio \

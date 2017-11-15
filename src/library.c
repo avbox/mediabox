@@ -21,6 +21,7 @@
 #ifdef HAVE_CONFIG_H
 #	include "config.h"
 #endif
+
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -117,6 +118,10 @@ static int local_inotify_fd = -1;
 static int local_inotify_quit = 0;
 static pthread_t local_inotify_thread;
 static LIST local_inotify_watches;
+
+#if defined(ENABLE_DVD) || defined(ENABLE_USB)
+static struct udev *udev = NULL;
+#endif
 
 
 #if 0
@@ -1651,7 +1656,9 @@ mbox_library_opendir(const char * const path)
 		mbox_library_adddirent("Local Files", "/local", 1, &dir->state.rootdir.entries);
 		mbox_library_adddirent("UPnP Devices", "/upnp", 1, &dir->state.rootdir.entries);
 		mbox_library_adddirent("TV Tunners", "/tv", 1, &dir->state.rootdir.entries);
-		mbox_library_adddirent("DVD", "/dvd", 1, &dir->state.rootdir.entries);
+#if defined(ENABLE_DVD)
+		mbox_library_adddirent("Optical Discs", "/dvd", 1, &dir->state.rootdir.entries);
+#endif
 #ifdef ENABLE_BLUETOOTH
 		if (avbox_bluetooth_ready()) {
 			mbox_library_adddirent("Bluetooth Devices", "/bluetooth", 1, &dir->state.rootdir.entries);
@@ -1714,16 +1721,32 @@ mbox_library_opendir(const char * const path)
 
 		free(rpath);
 
+#if defined(ENABLE_DVD)
 	} else if (!strncmp("/dvd", path, 4)) {
 
+		struct udev_enumerate *udev_enum;
 		if ((dir = malloc(sizeof(struct mbox_library_dir))) == NULL) {
 			errno = ENOMEM;
 			return NULL;
 		}
 
 		dir->type = MBOX_LIBRARY_DIRTYPE_DVD;
-		dir->state.emptydir.read = 0;
-
+		dir->state.discdir.read = 0;
+		if ((udev_enum = udev_enumerate_new(udev)) == NULL) {
+			errno = EFAULT;
+			free(dir);
+			return NULL;
+		}
+		if (udev_enumerate_scan_devices(udev_enum) == -1) {
+			errno = EFAULT;
+			LOG_PRINT_ERROR("Could not enumerate devices!");
+			free(dir);
+			return NULL;
+		}
+		dir->state.discdir.udev_enum = udev_enum;
+		dir->state.discdir.list =
+			udev_enumerate_get_list_entry(udev_enum);
+#endif
 #ifdef ENABLE_BLUETOOTH
 	} else if (!strncmp("/bluetooth", path, 10)) {
 
@@ -1969,8 +1992,101 @@ mbox_library_readdir(struct mbox_library_dir * const dir)
 		return ent;
 	}
 #endif
-	case MBOX_LIBRARY_DIRTYPE_TV:
+#if defined(ENABLE_DVD)
 	case MBOX_LIBRARY_DIRTYPE_DVD:
+	{
+		struct mbox_library_dirent *ent;
+		struct udev_list_entry *udev_ent;
+
+		if (!dir->state.discdir.read) {
+			dir->state.discdir.read = 1;
+			return mbox_library_dotdot(dir);
+		} else if (dir->state.discdir.read == 1) {
+			dir->state.discdir.read = 2;
+			if ((ent = malloc(sizeof(struct mbox_library_dirent))) == NULL) {
+				ASSERT(errno == ENOMEM);
+				return NULL;
+			}
+			if ((ent->name = strdup("Play DVD")) == NULL) {
+				free(ent);
+				return NULL;
+			}
+			if ((ent->path = strdup("dvd:/dev/sr0")) == NULL) {
+				free(ent->name);
+				free(ent);
+				return  NULL;
+			}
+			return ent;
+		} else if (dir->state.discdir.read == 2) {
+			return NULL;
+		}
+
+		while (dir->state.discdir.list != NULL) {
+			struct udev_device *dev;
+
+			/* move iterator to next item */
+			udev_ent = dir->state.discdir.list;
+			dir->state.discdir.list = udev_list_entry_get_next(
+				dir->state.discdir.list);
+
+			if ((dev = udev_device_new_from_syspath(udev,
+				udev_list_entry_get_name(udev_ent))) == NULL) {
+				LOG_VPRINT_ERROR("Could not get device structure for: %s",
+					udev_list_entry_get_name(udev_ent));
+				continue;
+			}
+
+			if (0 && udev_device_get_devnum(dev) != 11) {
+				udev_device_unref(dev);
+				continue;
+			}
+			if (0 & strcmp(udev_device_get_subsystem(dev), "block")) {
+				udev_device_unref(dev);
+				continue;
+			}
+
+			const char * type = udev_device_get_devtype(dev);
+			const char * node = udev_device_get_devnode(dev);
+			const char * subs = udev_device_get_subsystem(dev);
+			const char * path = "dvd1";
+
+			if (type == NULL) {
+				type = "unknown";
+			}
+			if (node == NULL) {
+				node = udev_device_get_devpath(dev);
+				if (node == NULL) {
+					node = "";
+				}
+			}
+
+			if ((ent = malloc(sizeof(struct mbox_library_dirent))) == NULL) {
+				ASSERT(errno == ENOMEM);
+				udev_device_unref(dev);
+				return NULL;
+			}
+
+			if ((ent->name = malloc(6+ strlen(subs) + 1 + strlen(type) + 2 + strlen(node) + 2)) == NULL) {
+				ASSERT(errno == ENOMEM);
+				free(ent);
+				return NULL;
+			}
+			sprintf(ent->name, "%li %s %s (%s)",
+				udev_device_get_devnum(dev), subs, type, node);
+			if ((ent->path = strdup(path)) == NULL) {
+				ASSERT(errno == ENOMEM);
+				free(ent->name);
+				free(ent);
+				return NULL;
+			}
+			ent->isdir = 0;
+			udev_device_unref(dev);
+			return ent;
+		}
+		return NULL;
+	}
+#endif
+	case MBOX_LIBRARY_DIRTYPE_TV:
 	{
 		/* if we already read this directory then return EOF */
 		if (!dir->state.emptydir.read) {
@@ -2050,8 +2166,14 @@ mbox_library_closedir(struct mbox_library_dir * const dir)
 		break;
 	}
 #endif
-	case MBOX_LIBRARY_DIRTYPE_TV:
+#if defined(ENABLE_DVD)
 	case MBOX_LIBRARY_DIRTYPE_DVD:
+	{
+		udev_enumerate_unref(dir->state.discdir.udev_enum);
+		break;
+	}
+#endif
+	case MBOX_LIBRARY_DIRTYPE_TV:
 	{
 		break;
 	}
@@ -2644,6 +2766,12 @@ mbox_library_init(void)
 		}
 	}
 
+#if defined(ENABLE_DVD) || defined(ENABLE_USB)
+	if ((udev = udev_new()) == NULL) {
+		LOG_PRINT_ERROR("Could not create udev intance!");
+	}
+#endif
+
 	ret = 0;
 end:
 	if (store != NULL) {
@@ -2670,4 +2798,10 @@ mbox_library_shutdown(void)
 	}
 
 	mbox_library_local_shutdown();
+
+#if defined(ENABLE_DVD) || defined(ENABLE_USB)
+	ASSERT(udev != NULL);
+	udev_unref(udev);
+	udev = NULL;
+#endif
 }

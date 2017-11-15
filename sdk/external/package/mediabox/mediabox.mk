@@ -30,6 +30,11 @@ ifeq ($(BR2_PACKAGE_MEDIABOX_LIBDRM),y)
 MEDIABOX_CONF_OPTS += --enable-libdrm
 endif
 
+ifeq ($(BR2_PACKAGE_MEDIABOX_DVD),y)
+MEDIABOX_CONF_OPTS += --enable-dvd
+MEDIABOX_DEPENDENCIES += libdvdnav
+endif
+
 # remove from package cache
 define MEDIABOX_UNCACHE
 rm -f $(DL_DIR)/mediabox-staging.tar.gz

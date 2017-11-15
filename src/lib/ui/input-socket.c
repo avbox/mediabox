@@ -193,6 +193,8 @@ mbi_socket_connection(void *arg)
 			} else {
 				avbox_input_sendevent(MBI_EVENT_URL, url);
 			}
+		} else if (!strncmp("CONTEXT", buffer, 7)) {
+			avbox_input_sendevent(MBI_EVENT_CONTEXT, NULL);
 		} else {
 			DEBUG_VPRINT(LOG_MODULE, "Unknown command '%s'", buffer);
 		}

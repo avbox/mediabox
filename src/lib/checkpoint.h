@@ -27,6 +27,7 @@
 
 #include "debug.h"
 #include "compiler.h"
+#include "time_util.h"
 
 #define AVBOX_CHECKPOINT_ENABLED	(0x1)
 #define AVBOX_CHECKPOINT_HALTED 	(0x2) 
@@ -95,17 +96,27 @@ avbox_checkpoint_halt(avbox_checkpoint_t * const checkpoint)
 }
 
 
-static inline void
-avbox_checkpoint_wait(avbox_checkpoint_t * const checkpoint)
+static inline int
+avbox_checkpoint_wait(avbox_checkpoint_t * const checkpoint, int64_t timeout)
 {
+	int ret = 0;
+
 	/* block while we are enabled but not halted */
-	while (checkpoint->state == AVBOX_CHECKPOINT_ENABLED) {
-		pthread_mutex_lock(&checkpoint->mutex);
-		if (checkpoint->state == AVBOX_CHECKPOINT_ENABLED) {
-			pthread_cond_wait(&checkpoint->halted, &checkpoint->mutex);
+	pthread_mutex_lock(&checkpoint->mutex);
+	if (checkpoint->state == AVBOX_CHECKPOINT_ENABLED) {
+		struct timespec tv;
+		tv.tv_sec = 0;
+		tv.tv_nsec = timeout;
+		delay2abstime(&tv);
+		pthread_cond_timedwait(&checkpoint->halted, &checkpoint->mutex, &tv);
+		if (checkpoint->state != AVBOX_CHECKPOINT_ENABLED) {
+			ret = 1;
 		}
-		pthread_mutex_unlock(&checkpoint->mutex);
+	} else {
+		ret = 1;
 	}
+	pthread_mutex_unlock(&checkpoint->mutex);
+	return ret;
 }
 
 
@@ -117,6 +128,13 @@ avbox_checkpoint_continue(avbox_checkpoint_t * const checkpoint)
 	checkpoint->count--;
 	pthread_cond_signal(&checkpoint->released);
 	pthread_mutex_unlock(&checkpoint->mutex);
+}
+
+
+static inline int
+avbox_checkpoint_halted(avbox_checkpoint_t * const checkpoint)
+{
+	return (checkpoint->state & AVBOX_CHECKPOINT_HALTED) != 0;
 }
 
 

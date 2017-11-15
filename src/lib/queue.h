@@ -36,6 +36,13 @@ avbox_queue_wake(struct avbox_queue * inst);
 
 
 /**
+ * Wait for any IO events on the queue
+ */
+void
+avbox_queue_wait(struct avbox_queue * const inst);
+
+
+/**
  * Locks the queue.
  */
 void
@@ -61,6 +68,22 @@ avbox_queue_count(struct avbox_queue * const inst);
  */
 void *
 avbox_queue_peek(struct avbox_queue * const inst, const int block);
+
+
+/**
+ * Peeks and block only for timeout micro seconds.
+ */
+void *
+avbox_queue_timedpeek(struct avbox_queue * const inst, const int64_t timeout);
+
+
+/**
+ * Sets the queue size limit. NOTE: If the queue is currently
+ * above the newly set limit all calls to avbox_queue_put() will
+ * continue to block until the size is reduced bellow the new
+ * size */
+void
+avbox_queue_setsize(struct avbox_queue * const inst, size_t sz);
 
 
 /**

@@ -417,7 +417,9 @@ mbox_browser_messagehandler(void *context, struct avbox_message *msg)
 		struct mbox_browser_playlist_item *selected =
 			avbox_listview_getselected(inst->menu);
 
-		ASSERT(selected != NULL);
+		if (selected == NULL) {
+			return AVBOX_DISPATCH_OK;
+		}
 
 		/* if there's already a SELECTED message pending
 		 * ignore this one */

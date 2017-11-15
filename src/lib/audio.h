@@ -1,11 +1,19 @@
 #ifndef __MB_AUDIO_H__
 #define __MB_AUDIO_H__
 
+#include <stdint.h>
 
 /**
  * Opaque stream structure
  */
 struct avbox_audiostream;
+
+
+/**
+ * Stream dried callback.
+ */
+typedef void (*avbox_audiostream_dried_callback)(
+	struct avbox_audiostream * const inst, void * const context);
 
 
 /**
@@ -35,7 +43,7 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst);
 /**
  * Resume audio playback
  */
-void
+int
 avbox_audiostream_resume(struct avbox_audiostream * const inst);
 
 
@@ -76,10 +84,18 @@ avbox_audiostream_setclock(struct avbox_audiostream * const stream, const int64_
 
 
 /**
+ * Waits for the buffer to be empty and pauses
+ * the stream.
+ */
+int
+avbox_audiostream_drain(struct avbox_audiostream * const inst);
+
+
+/**
  * Create a new sound stream.
  */
 struct avbox_audiostream *
-avbox_audiostream_new(void);
+avbox_audiostream_new(int max_frames, avbox_audiostream_dried_callback dried_callback, void * const callback_context);
 
 
 /**

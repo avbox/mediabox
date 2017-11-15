@@ -16,7 +16,10 @@ AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
 	@GLIB_CFLAGS@ \
 	@GIO_CFLAGS@ \
 	@LIBINPUT_CFLAGS@ \
-	@SQLITE3_CFLAGS@
+	@SQLITE3_CFLAGS@ \
+	@LIBUDEV_CFLAGS@ \
+	@LIBDVDCSS_CFLAGS@ \
+	@LIBDVDNAV_CFLAGS@
 
 AM_LDFLAGS = -lz -lm -lswscale \
 	@LIBS@ \
@@ -32,7 +35,10 @@ AM_LDFLAGS = -lz -lm -lswscale \
 	@GLIB_LIBS@ \
 	@GIO_LIBS@ \
 	@LIBINPUT_LIBS@ \
-	@SQLITE3_LIBS@
+	@SQLITE3_LIBS@ \
+	@LIBUDEV_LIBS@ \
+	@LIBDVDCSS_LIBS@ \
+	@LIBDVDNAV_LIBS@
 
 bin_PROGRAMS = mediabox
 
@@ -60,6 +66,7 @@ mediabox_SOURCES = \
 	lib/ffmpeg_util.c \
 	lib/db_util.c \
 	lib/stream.c \
+	lib/stopwatch.c \
 	lib/ui/video.c \
 	lib/ui/video-directfb.c \
 	lib/ui/listview.c \
@@ -92,6 +99,10 @@ if ENABLE_LIBDRM
 mediabox_SOURCES += lib/ui/video-drm.c
 AM_CFLAGS += @LIBDRM_CFLAGS@
 AM_LDFLAGS += @LIBDRM_LIBS@
+endif
+
+if ENABLE_DVD
+mediabox_SOURCES += lib/dvdio.c
 endif
 
 systemddir = /usr/lib/systemd/system

@@ -37,6 +37,7 @@
 #include "time_util.h"
 #include "math_util.h"
 #include "queue.h"
+#include "audio.h"
 
 
 /**
@@ -61,12 +62,16 @@ struct avbox_audiostream
 	int paused;
 	int running;
 	int started;
+	int max_frames;
+	int queued_frames;
 	int64_t frames;
 	int64_t clock_start;
 	int64_t clock_offset;
 	snd_pcm_uframes_t buffer_size;
 	unsigned int framerate;
 	struct avbox_queue *packets;
+	avbox_audiostream_dried_callback stream_dried_callback;
+	void *callback_context;
 };
 
 
@@ -103,9 +108,11 @@ __avbox_audiostream_drop(struct avbox_audiostream * const stream)
 	struct avbox_audio_packet *packet;
 	while (avbox_queue_count(stream->packets) > 0) {
 		packet = avbox_queue_get(stream->packets);
-		assert(packet != NULL);
+		ASSERT(packet != NULL);
+		stream->queued_frames -= packet->n_frames;
 		free(packet);
 	}
+	ASSERT(stream->queued_frames == 0);
 }
 
 
@@ -373,7 +380,7 @@ end:
 static void*
 avbox_audiostream_output(void *arg)
 {
-	int ret;
+	int ret, dried = 1;
 	size_t n_frames;
 	struct avbox_audiostream * const inst = (struct avbox_audiostream * const) arg;
 	struct avbox_audio_packet * packet;
@@ -505,19 +512,54 @@ avbox_audiostream_output(void *arg)
 
 	DEBUG_PRINT("audio", "Audio thread ready");
 
+
 	/* start audio IO */
 	while (1) {
-
 		/* get the next packet */
-		if ((packet = avbox_queue_peek(inst->packets, 1)) == NULL) {
-			switch (errno) {
-			case EAGAIN: continue;
-			case ESHUTDOWN: goto end;
-			default:
-				LOG_VPRINT_ERROR("Could not peek packet from queue: %s",
-					strerror(errno));
-				goto end;
+		if (!dried) {
+			/* calculate how long until the stream dries out
+			 * and wait up to that long for new packets */
+			if ((frames = snd_pcm_avail(inst->pcm_handle)) < 0) {
+				continue;
 			}
+			const int64_t timeout = FRAMES2TIME(inst, inst->buffer_size - frames);
+			if ((packet = avbox_queue_timedpeek(inst->packets, timeout)) == NULL) {
+				if (errno == EAGAIN) {
+					snd_pcm_state_t state = snd_pcm_state(inst->pcm_handle);
+
+					if (state == SND_PCM_STATE_RUNNING ||
+						state == SND_PCM_STATE_PAUSED ||
+						state == SND_PCM_STATE_SUSPENDED) {
+						DEBUG_VPRINT(LOG_MODULE, "PCM state after timedpeed: %s",
+							avbox_pcm_state_getstring(state));
+						continue;
+					}
+
+					dried = 1;
+					if (inst->stream_dried_callback != NULL) {
+						inst->stream_dried_callback(inst, inst->callback_context);
+					}
+					continue;
+				} else if (errno == ESHUTDOWN) {
+					goto end;
+				} else {
+					LOG_VPRINT_ERROR("Could not timedpeek packet from queue: %s",
+						strerror(errno));
+					goto end;
+				}
+			}
+		} else {
+			if ((packet = avbox_queue_peek(inst->packets, 1)) == NULL) {
+				switch (errno) {
+				case EAGAIN: continue;
+				case ESHUTDOWN: goto end;
+				default:
+					LOG_VPRINT_ERROR("Could not peek packet from queue: %s",
+						strerror(errno));
+					goto end;
+				}
+			}
+			dried = 0;
 		}
 
 		/* wait for the pcm to be ready to receive a fragment */
@@ -582,6 +624,7 @@ avbox_audiostream_output(void *arg)
 		}
 
 		/* update frame counts */
+		inst->queued_frames -= frames;
 		inst->frames += frames;
 		packet->data += avbox_audiostream_frames2size(inst, frames);
 		packet->n_frames -= frames;
@@ -629,10 +672,20 @@ avbox_audiostream_write(struct avbox_audiostream * const stream,
 	struct avbox_audio_packet *packet;
 	const int sz = avbox_audiostream_frames2size(stream, n_frames);
 
-	assert(stream != NULL);
+	ASSERT(stream != NULL);
 
 	if (n_frames == 0) {
 		return 0;
+	}
+
+	/* if the queue is full wait once and return EAGAIN
+	 * if it's still full */
+	if ((stream->queued_frames + n_frames) > stream->max_frames) {
+		avbox_queue_wait(stream->packets);
+		if ((stream->queued_frames + n_frames) > stream->max_frames) {
+			errno = EAGAIN;
+			return -1;
+		}
 	}
 
 	/* allocate memory for packet */
@@ -647,12 +700,18 @@ avbox_audiostream_write(struct avbox_audiostream * const stream,
 	packet->data = (uint8_t*) (packet + 1);
 	memcpy(packet->data, data, sz);
 
+	pthread_mutex_lock(&stream->lock);
+
+	stream->queued_frames += n_frames;
+
 	/* add packet to queue */
 	if (avbox_queue_put(stream->packets, packet) == -1) {
 		LOG_VPRINT_ERROR("Could not add packet to queue: %s",
 			strerror(errno));
 		return -1;
 	}
+
+	pthread_mutex_unlock(&stream->lock);
 
 	return 0;
 }
@@ -753,10 +812,24 @@ end:
 
 
 /**
+ * Waits for the buffer to be empty and pauses
+ * the stream.
+ */
+int
+avbox_audiostream_drain(struct avbox_audiostream * const inst)
+{
+	while (avbox_queue_count(inst->packets)) {
+		usleep(100L * 1000L);
+	}
+	return avbox_audiostream_pause(inst);
+}
+
+
+/**
  * Create a new sound stream
  */
 struct avbox_audiostream *
-avbox_audiostream_new(void)
+avbox_audiostream_new(int max_frames, avbox_audiostream_dried_callback dried_callback, void * const callback_context)
 {
 	struct avbox_audiostream *stream;
 
@@ -772,6 +845,10 @@ avbox_audiostream_new(void)
 	/* initialize stream object */
 	memset(stream, 0, sizeof(struct avbox_audiostream));
 	stream->packets = avbox_queue_new(0);
+	if (stream->packets == NULL) {
+		free(stream);
+		return NULL;
+	}
 
 	/* initialize pthread primitives */
 	if (pthread_mutex_init(&stream->lock, NULL) != 0 ||
@@ -780,6 +857,11 @@ avbox_audiostream_new(void)
 		errno = EFAULT;
 		return NULL;
 	}
+
+	stream->max_frames = max_frames;
+	stream->queued_frames = 0;
+	stream->stream_dried_callback = dried_callback;
+	stream->callback_context = callback_context;
 
 	return stream;
 }

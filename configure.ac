@@ -92,6 +92,24 @@ if test x"$enable_libdrm" = xyes; then
 fi
 
 
+AC_ARG_ENABLE([dvd], [DVD Disc support])
+AM_CONDITIONAL(ENABLE_DVD, test x"$enable_dvd" = xyes)
+if test x"$enable_dvd" = xyes; then
+	AC_DEFINE([ENABLE_DVD],1,[Define to 1 to enable DVD support])
+fi
+
+AC_ARG_ENABLE([dvdcss], [DVD decryption support])
+AM_CONDITIONAL(ENABLE_DVDCSS, test x"$enable_dvdcss" = xyes)
+if test x"$enable_dvdcss" = xyes; then
+	AC_DEFINE([ENABLE_DVDCSS],1,[Define to 1 to enable DVD support])
+fi
+
+if test x"$enable_dvdcss" = xyes; then
+	if test x"$enable_dvd" != xyes; then
+		AC_MSG_ERROR([Cannot enable dvdcss without dvd!])
+	fi
+fi
+
 
 #AC_SUBST(DAEMON_ARGS)
 
@@ -138,6 +156,20 @@ AC_CHECK_HEADER([magic.h], [], [
 AC_SEARCH_LIBS([magic_open], [magic], [], [
 	AC_MSG_ERROR([required library libmagic not found])
 ])
+
+if test x"$enable_dvd" = xyes; then
+	PKG_CHECK_MODULES(LIBUDEV, [libudev], ,
+		AC_MSG_ERROR('Unable to find libudev. Please make sure library and header files are installed.'))
+	PKG_CHECK_MODULES(LIBDVDNAV, [dvdnav], ,
+		AC_MSG_ERROR('Unable to find libdvdnav. Please make sure library and header files are installed.'))
+
+fi
+
+if test x"$enable_dvdcss" = xyes; then
+	PKG_CHECK_MODULES(LIBDVDCSS, [libdvdcss], ,
+		AC_MSG_ERROR('Unable to find libdvdcss. Please make sure library and header files are installed.'))
+fi
+
 
 #
 # libdrm support

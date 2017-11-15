@@ -35,4 +35,10 @@ config BR2_PACKAGE_MEDIABOX_LIBDRM
 	help
 	  Enable libdrm video driver.
 
+config BR2_PACKAGE_MEDIABOX_DVD
+	bool "mediabox DVD support"
+	select BR2_PACKAGE_LIBDVDNAV
+	help
+	  Enable DVD playback
+
 endif # BR2_PACKAGE_MEDIABOX

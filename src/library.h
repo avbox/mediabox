@@ -24,6 +24,10 @@
 #include <dirent.h>
 #include <sqlite3.h>
 
+#if defined(ENABLE_DVD) || defined(ENABLE_USB)
+#	include <libudev.h>
+#endif
+
 #include "lib/linkedlist.h"
 
 
@@ -62,6 +66,15 @@ struct mbox_library_btdir
 };
 #endif
 
+#ifdef ENABLE_DVD
+struct mbox_library_discdir
+{
+	int read;
+	struct udev_enumerate *udev_enum;
+	struct udev_list_entry *list;
+};
+#endif
+
 struct mbox_library_emptydir
 {
 	int read;
@@ -78,6 +91,9 @@ struct mbox_library_dir
 		struct mbox_library_localdir localdir;
 #ifdef ENABLE_BLUETOOTH
 		struct mbox_library_btdir btdir;
+#endif
+#if defined(ENABLE_DVD)
+		struct mbox_library_discdir discdir;
 #endif
 		struct mbox_library_emptydir emptydir;
 	} state;

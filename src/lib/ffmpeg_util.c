@@ -22,6 +22,10 @@
 #	include "../config.h"
 #endif
 
+#ifdef ENABLE_DVD
+#	include <dvdnav/dvdnav.h>
+#endif
+
 #define LOG_MODULE "ffmpegutil"
 
 #include "log.h"
@@ -140,7 +144,7 @@ avbox_ffmpegutil_initaudiofilters(
 	AVFilterContext **buffersrc_ctx,
 	AVFilterGraph **filter_graph,
 	const char *filters_descr,
-	int audio_stream_index)
+	int audio_stream_index, void *dvdnav)
 {
 	char args[512];
 	int ret = 0;
@@ -167,10 +171,24 @@ avbox_ffmpegutil_initaudiofilters(
 		dec_ctx->channel_layout = av_get_default_channel_layout(dec_ctx->channels);
 	}
 
+#ifdef ENABLE_DVD
+	if (dvdnav != NULL) {
+		dec_ctx->channels = dvdnav_audio_stream_channels(dvdnav,
+			dvdnav_get_active_audio_stream(dvdnav));
+		if (dec_ctx->channels == 6) {
+			dec_ctx->channel_layout = 0x60f;
+		} else {
+			dec_ctx->channel_layout = av_get_default_channel_layout(dec_ctx->channels);
+		}
+		DEBUG_VPRINT(LOG_MODULE, "Audio channels: %i", dec_ctx->channels);
+	}
+#endif
+
 	snprintf(args, sizeof(args),
 		"time_base=%d/%d:sample_rate=%d:sample_fmt=%s:channel_layout=0x%"PRIx64,
 		time_base.num, time_base.den, dec_ctx->sample_rate,
 		av_get_sample_fmt_name(dec_ctx->sample_fmt), dec_ctx->channel_layout);
+	DEBUG_VPRINT(LOG_MODULE, "Audio filtergraph args: %s", args);
 	ret = avfilter_graph_create_filter(buffersrc_ctx, abuffersrc, "in",
 		args, NULL, *filter_graph);
 	if (ret < 0) {

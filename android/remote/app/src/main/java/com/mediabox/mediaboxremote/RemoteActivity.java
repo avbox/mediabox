@@ -237,6 +237,14 @@ public class RemoteActivity extends AppCompatActivity
             /* Nothing */
         }
 
+        this.findViewById(R.id.btnMenu).setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                sendMessage("CONTEXT");
+                return true;
+            }
+        });
+
         /* Capture keyboard input */
         this.findViewById(R.id.btnKeyboard).setOnKeyListener(new View.OnKeyListener()
         {

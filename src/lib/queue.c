@@ -32,6 +32,7 @@
 #include "log.h"
 #include "debug.h"
 #include "linkedlist.h"
+#include "time_util.h"
 
 
 /**
@@ -106,7 +107,7 @@ avbox_queue_count(struct avbox_queue * const inst)
  * Gets the next node on the queue.
  */
 static struct avbox_queue_node *
-avbox_queue_getnode(struct avbox_queue * const inst, const int block)
+avbox_queue_getnode(struct avbox_queue * const inst, const int block, const int64_t timeout)
 {
 	struct avbox_queue_node *node = NULL;
 	assert(inst != NULL);
@@ -124,7 +125,15 @@ avbox_queue_getnode(struct avbox_queue * const inst, const int block)
 			errno = EAGAIN;
 			goto end;
 		}
-		pthread_cond_wait(&inst->cond, &inst->lock);
+		if (timeout == 0) {
+			pthread_cond_wait(&inst->cond, &inst->lock);
+		} else {
+			struct timespec tv;
+			tv.tv_sec = 0;
+			tv.tv_nsec = timeout * 1000L;
+			delay2abstime(&tv);
+			pthread_cond_timedwait(&inst->cond, &inst->lock, &tv);
+		}
 		if ((node = LIST_TAIL(struct avbox_queue_node*, &inst->items)) == NULL) {
 			errno = EAGAIN;
 			goto end;
@@ -148,13 +157,44 @@ avbox_queue_peek(struct avbox_queue * const inst, const int block)
 	void *ret = NULL;
 	struct avbox_queue_node *node;
 	pthread_mutex_lock(&inst->lock);
-	if ((node = avbox_queue_getnode(inst, block)) == NULL) {
+	if ((node = avbox_queue_getnode(inst, block, 0)) == NULL) {
 		goto end;
 	}
 	ret = node->value;
 end:
 	pthread_mutex_unlock(&inst->lock);
 	return ret;
+}
+
+
+/**
+ * Peeks and block only for timeout micro seconds.
+ */
+void *
+avbox_queue_timedpeek(struct avbox_queue * const inst, const int64_t timeout)
+{
+	void *ret = NULL;
+	struct avbox_queue_node *node;
+	pthread_mutex_lock(&inst->lock);
+	if ((node = avbox_queue_getnode(inst, 1, timeout)) == NULL) {
+		goto end;
+	}
+	ret = node->value;
+end:
+	pthread_mutex_unlock(&inst->lock);
+	return ret;
+}
+
+
+/**
+ * Wait for any IO events on the queue
+ */
+void
+avbox_queue_wait(struct avbox_queue * const inst)
+{
+	pthread_mutex_lock(&inst->lock);
+	pthread_cond_wait(&inst->cond, &inst->lock);
+	pthread_mutex_unlock(&inst->lock);
 }
 
 
@@ -170,7 +210,7 @@ avbox_queue_get(struct avbox_queue *inst)
 	assert(inst != NULL);
 
 	pthread_mutex_lock(&inst->lock);
-	if ((node = avbox_queue_getnode(inst, 1)) == NULL) {
+	if ((node = avbox_queue_getnode(inst, 1, 0)) == NULL) {
 		goto end;
 	}
 
@@ -255,6 +295,18 @@ avbox_queue_isclosed(struct avbox_queue * const inst)
 
 
 /**
+ * Sets the queue size limit. NOTE: If the queue is currently
+ * above the newly set limit all calls to avbox_queue_put() will
+ * continue to block until the size is reduced bellow the new
+ * size */
+void
+avbox_queue_setsize(struct avbox_queue * const inst, size_t sz)
+{
+	inst->sz = sz;
+}
+
+
+/**
  * Creates a new queue object.
  */
 struct avbox_queue *
@@ -291,6 +343,7 @@ avbox_queue_new(const size_t sz)
 
 	return inst;
 }
+
 
 /**
  * Close the queue. After the queue is closed all attempts to write
