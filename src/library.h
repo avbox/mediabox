@@ -113,6 +113,13 @@ mbox_library_closedir(struct mbox_library_dir * const dir);
 
 
 /**
+ * Gets the list of watched directories.
+ */
+const char **
+mbox_library_watchdirs(void);
+
+
+/**
  * Initialize the library backend.
  */
 int

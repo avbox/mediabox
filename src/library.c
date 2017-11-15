@@ -58,19 +58,25 @@
 #include "lib/application.h"
 
 
-#define MEDIATOMB_BIN "/usr/bin/mediatomb"
-#define MEDIATOMB_RUN "/tmp/mediabox/mediatomb"
-#define MEDIATOMB_VAR "/var/lib/mediabox/mediatomb"
-#define AVMOUNT_BIN "/usr/bin/avmount"
-#define AVMOUNT_MOUNTPOINT "/media/UPnP"
-#define DEFAULT_LOGFILE "/var/log/avmount-mediabox.log"
-#define FUSERMOUNT_BIN "/usr/bin/fusermount"
 
-#define MBOX_STORE_MOUNTPOINT	"/var/lib/mediabox/store"
-#define MBOX_STORE_VIDEO	"/var/lib/mediabox/store/Video"
-#define MBOX_STORE_AUDIO	"/var/lib/mediabox/store/Audio"
+#define STRINGIZE2(x)	#x
+#define STRINGIZE(x)	STRINGIZE2(x)
 
-#define UPNP_ROOT	"/media/UPnP"
+
+#define MEDIATOMB_BIN		"/usr/bin/mediatomb"
+#define MEDIATOMB_RUN		"/tmp/mediabox/mediatomb"
+#define MEDIATOMB_VAR 		STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/mediatomb"
+
+#define FUSERMOUNT_BIN		"/usr/bin/fusermount"
+#define AVMOUNT_BIN		"/usr/bin/avmount"
+#define AVMOUNT_MOUNTPOINT	"/media/UPnP"
+#define UPNP_ROOT		"/media/UPnP"
+#define DEFAULT_LOGFILE		STRINGIZE(LOCALSTATEDIR) "/log/avmount-mediabox.log"
+
+#define MBOX_STORE_MOUNTPOINT	STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/store"
+#define MBOX_STORE_VIDEO	STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/store/Video"
+#define MBOX_STORE_AUDIO	STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/store/Audio"
+
 
 #define MBOX_LIBRARY_LOCAL_DIRECTORY_AUDIO	(1)
 #define MBOX_LIBRARY_LOCAL_DIRECTORY_MOVIES	(3)
@@ -83,10 +89,6 @@
 #define MBOX_LIBRARY_DIRTYPE_DVD	(3)
 #define MBOX_LIBRARY_DIRTYPE_BLUETOOTH	(4)
 #define MBOX_LIBRARY_DIRTYPE_TV		(5)
-
-#define STRINGIZE2(x)	#x
-#define STRINGIZE(x)	STRINGIZE2(x)
-
 
 LISTABLE_STRUCT(mb_mediatomb_inst,
 	int procid;
@@ -2451,6 +2453,21 @@ mbox_library_local_shutdown(void)
 		close(local_inotify_fd);
 		local_inotify_fd = -1;
 	}
+}
+
+
+/**
+ * Gets the list of watched directories.
+ */
+const char **
+mbox_library_watchdirs(void)
+{
+	static const char * watchdirs[] = {
+		MBOX_STORE_AUDIO,
+		MBOX_STORE_VIDEO,
+		NULL
+	};
+	return watchdirs;
 }
 
 

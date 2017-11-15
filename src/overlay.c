@@ -26,6 +26,7 @@
 #define LOG_MODULE "overlay"
 
 #include "lib/avbox.h"
+#include "library.h"
 #include "overlay.h"
 
 
@@ -259,6 +260,26 @@ mbox_overlay_settitle(struct mbox_overlay * const inst, char * const title)
 
 
 /**
+ * Checks if a path is in the library watch list.
+ */
+static const char *
+mbox_overlay_is_in_watchdir(const char * const path)
+{
+	const char **paths = mbox_library_watchdirs();
+
+	while (*paths != NULL) {
+		const size_t len = strlen(*paths);
+		if (!strncmp(*paths, path, len)) {
+			return path + len;
+		}
+		paths++;
+	}
+
+	return NULL;
+}
+
+
+/**
  * Message handler.
  */
 static int
@@ -314,7 +335,11 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 		{
 			char *title;
 			if ((title = avbox_player_gettitle(inst->player)) != NULL) {
-				if (!strncmp(title, "/media/UPnP", 11)) {
+				const char *short_title;
+
+				/* if the title is a path to a file on a watched
+				 * directory format it as best as possible */
+				if ((short_title = mbox_overlay_is_in_watchdir(title)) != NULL) {
 					char *copy;
 					if ((copy = strdup(title)) != NULL) {
 						char *base = basename(copy);
@@ -330,7 +355,7 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 							}
 						} else {
 							char *tmp;
-							if ((tmp = strdup(title + 11)) != NULL) {
+							if ((tmp = strdup(short_title)) != NULL) {
 								stripext(tmp);
 								free(title);
 								title = tmp;
