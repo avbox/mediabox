@@ -3124,8 +3124,17 @@ vts_change_end:
 		case MBI_EVENT_BACK:
 		{
 			if (inst->dvdio != NULL) {
-				DEBUG_PRINT(LOG_MODULE, "Enter pressed. Activating.");
-				dvdnav_go_up(avbox_dvdio_dvdnav(inst->dvdio));
+				dvdnav_t * const dvdnav = avbox_dvdio_dvdnav(inst->dvdio);
+				ASSERT(dvdnav != NULL);
+
+				/* if we're in a menu go up one level */
+				if (!dvdnav_is_domain_vts(dvdnav) && !dvdnav_is_domain_fp(dvdnav)) {
+					DEBUG_PRINT(LOG_MODULE, "BACK pressed. Going one level up.");
+					dvdnav_go_up(avbox_dvdio_dvdnav(inst->dvdio));
+				}
+
+				/* let the shell process the event */
+				return AVBOX_DISPATCH_CONTINUE;
 			}
 			break;
 		}

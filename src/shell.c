@@ -707,6 +707,15 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			}
 			break;
 		}
+		case MBI_EVENT_BACK:
+		{
+			struct avbox_window * const overlay_window = mbox_overlay_window(overlay);
+			ASSERT(overlay_window != NULL);
+			if (avbox_window_isvisible(overlay_window)) {
+				avbox_window_hide(overlay_window);
+			}
+			break;
+		}
 		case MBI_EVENT_KBD_I:
 		case MBI_EVENT_INFO:
 		{
