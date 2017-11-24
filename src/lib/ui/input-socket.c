@@ -120,7 +120,9 @@ mbi_socket_connection(void *arg)
 		}
 
 		/* process the command */
-		if (!strncmp("MENU", buffer, 4)) {
+		if (!strncmp("MENU_LONG", buffer, 9)) {
+			avbox_input_sendevent(MBI_EVENT_CONTEXT, NULL);
+		} else if (!strncmp("MENU", buffer, 4)) {
 			avbox_input_sendevent(MBI_EVENT_MENU, NULL);
 		} else if (!strncmp("LEFT", buffer, 4)) {
 			avbox_input_sendevent(MBI_EVENT_ARROW_LEFT, NULL);
@@ -193,8 +195,10 @@ mbi_socket_connection(void *arg)
 			} else {
 				avbox_input_sendevent(MBI_EVENT_URL, url);
 			}
-		} else if (!strncmp("CONTEXT", buffer, 7)) {
-			avbox_input_sendevent(MBI_EVENT_CONTEXT, NULL);
+		} else if (!strncmp("TRACK", buffer, 5)) {
+			avbox_input_sendevent(MBI_EVENT_TRACK, NULL);
+		} else if (!strncmp("TRACK_LONG", buffer, 10)) {
+			avbox_input_sendevent(MBI_EVENT_TRACK_LONG, NULL);
 		} else {
 			DEBUG_VPRINT(LOG_MODULE, "Unknown command '%s'", buffer);
 		}

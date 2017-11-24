@@ -414,7 +414,7 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 	}
 
 	/* initializing thread pool */
-	if (avbox_thread_init() == -1) {
+	if (avbox_workqueue_init() == -1) {
 		LOG_PRINT_ERROR("Could not initialize thread pool");
 		return -1;
 	}
@@ -552,7 +552,7 @@ avbox_application_run(void)
 #ifdef ENABLE_BLUETOOTH
 	avbox_bluetooth_shutdown();
 #endif
-	avbox_thread_shutdown();
+	avbox_workqueue_shutdown();
 	avbox_dispatch_shutdown();
 	avbox_video_shutdown();
 

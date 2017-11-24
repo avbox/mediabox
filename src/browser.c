@@ -357,7 +357,7 @@ mbox_browser_loadlist(struct mbox_browser * const inst, const char * const path)
 	ctx->inst = inst;
 	ctx->path = selected_copy;
 	inst->abort = 0;
-	if ((inst->worker = avbox_thread_delegate(__mbox_browser_loadlist, ctx)) == NULL) {
+	if ((inst->worker = avbox_workqueue_delegate(__mbox_browser_loadlist, ctx)) == NULL) {
 		LOG_VPRINT_ERROR("Could not delegate to main thread: %s",
 			strerror(errno));
 		free(ctx);

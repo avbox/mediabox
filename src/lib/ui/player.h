@@ -141,6 +141,13 @@ avbox_player_seek(struct avbox_player *inst, int flags, int64_t pos);
 
 
 /**
+ * Tell the player to switch audio stream.
+ */
+void
+avbox_player_changeaudiotrack(struct avbox_player * const inst, int track_id);
+
+
+/**
  * Play a file.
  */
 void

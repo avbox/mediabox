@@ -21,6 +21,11 @@
 #ifndef __AVBOX_H__
 #define __AVBOX_H__
 
+#ifdef HAVE_CONFIG_H
+#	include "../config.h"
+#endif
+
+
 #include "log.h"
 #include "debug.h"
 #include "queue.h"
@@ -29,5 +34,26 @@
 #include "ui/video.h"
 #include "ui/input.h"
 #include "ui/player.h"
+
+#include "su.h"
+#include "time_util.h"
+#include "timers.h"
+#include "linkedlist.h"
+#include "audio.h"
+#include "compiler.h"
+#include "queue.h"
+#include "dispatch.h"
+#include "application.h"
+#include "math_util.h"
+#include "ffmpeg_util.h"
+#include "checkpoint.h"
+#include "thread.h"
+#include "stopwatch.h"
+#include "syncarg.h"
+
+#ifdef ENABLE_DVD
+#	include "dvdio.h"
+#endif
+
 
 #endif

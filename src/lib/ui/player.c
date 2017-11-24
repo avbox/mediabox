@@ -37,38 +37,12 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#ifdef ENABLE_DVD
-#	include <dvdnav/dvdnav.h>
-#endif
 #ifdef HAVE_MALLOC_TRIM
-#include <malloc.h>
+#	include <malloc.h>
 #endif
 
 #define LOG_MODULE "player"
-
-#include "video.h"
-#include "player.h"
-#include "../debug.h"
-#include "../log.h"
-#include "../su.h"
-#include "../time_util.h"
-#include "../timers.h"
-#include "../linkedlist.h"
-#include "../audio.h"
-#include "../compiler.h"
-#include "../queue.h"
-#include "../dispatch.h"
-#include "../application.h"
-#include "../math_util.h"
-#include "../ffmpeg_util.h"
-#include "../checkpoint.h"
-#include "../thread.h"
-#include "../stopwatch.h"
-
-#ifdef ENABLE_DVD
-#	include "../dvdio.h"
-#	include "input.h"
-#endif
+#include "../avbox.h"
 
 
 /* This is the # of frames to decode ahead of time */
@@ -95,7 +69,10 @@
 #define AVBOX_PLAYERCTL_VIDEOOUT_READY 			(0x0A)
 #define AVBOX_PLAYERCTL_STREAM_EXIT			(0x0B)
 #define AVBOX_PLAYERCTL_BUFFER_UNDERRUN			(0x0C)
-#define AVBOX_PLAYERCTL_AUDIO_STREAM_DRIED		(0x0D)
+#define AVBOX_PLAYERCTL_AUDIO_STREAM_UNDERRUN		(0x0D)
+#define AVBOX_PLAYERCTL_RESTART_AUDIO_DEC		(0x0E)
+#define AVBOX_PLAYERCTL_CHANGE_AUDIO_TRACK		(0x0F)
+
 
 
 #ifdef ENABLE_DVD
@@ -157,28 +134,18 @@ struct avbox_player_seekargs
 };
 
 
-struct avbox_player_waiter
-{
-	pthread_mutex_t mutex;
-	pthread_cond_t cond;
-	void *data;
-};
-
-
 struct avbox_player_state_info
 {
 	int64_t pos;
 	int64_t duration;
 	char *title;
+	struct avbox_size video_res;
+	struct avbox_size scaled_res;	/* this is the scaled video size */
 };
 
 
-struct avbox_audio_decoder_args
-{
-	pthread_mutex_t mutex;
-	pthread_cond_t cond;
-	struct avbox_player *inst;
-};
+typedef int64_t (*avbox_player_time_fn)(
+	struct avbox_player * const inst);
 
 
 /**
@@ -186,35 +153,38 @@ struct avbox_audio_decoder_args
  */
 struct avbox_player
 {
-	struct avbox_player_state_info state_info;
+	struct avbox_object *object;
 	struct avbox_window *window;
 	struct avbox_window *video_window;
-	struct avbox_object *object;
-	struct avbox_object *control_object;
 	struct avbox_queue *video_packets_q;
 	struct avbox_queue *audio_packets_q;
 	struct avbox_queue *video_frames_q;
 	struct avbox_audiostream *audio_stream;
+	struct avbox_stopwatch *video_time;
+	struct avbox_checkpoint video_decoder_checkpoint;
+	struct avbox_checkpoint video_output_checkpoint;
+	struct avbox_checkpoint audio_decoder_checkpoint;
+	struct avbox_checkpoint stream_parser_checkpoint;
+	struct avbox_delegate *video_output_worker;
+	struct avbox_delegate *video_decoder_worker;
+	struct avbox_delegate *audio_decoder_worker;
+	struct avbox_delegate *stream_input_worker;
+	struct avbox_thread *video_output_thread;
+	struct avbox_thread *video_decoder_thread;
+	struct avbox_thread *audio_decoder_thread;
+	struct avbox_thread *stream_input_thread;
+	struct avbox_thread *control_thread;
+	struct avbox_rational aspect_ratio;
+	struct avbox_player_state_info state_info;
 
 #ifdef ENABLE_DVD
 	struct avbox_dvdio *dvdio;
 	struct avbox_rect highlight;
-	int logical_audio_stream;
-	int flushing;
 #endif
-	struct avbox_rational aspect_ratio;
-	struct avbox_size video_size;
-	struct timespec systemreftime;
-	enum avbox_player_status status;
-
-	AVFormatContext *fmt_ctx;
-	AVCodecContext *audio_codec_ctx;
-	AVCodecContext *video_codec_ctx;
-	AVPacket packet;
 
 	const char *media_file;
 	const char *next_file;
-
+	enum avbox_player_status status;
 	int underrun_timer_id;
 	int stream_exit_timer_id;
 	int audio_stream_index;
@@ -226,23 +196,13 @@ struct avbox_player
 	int stream_exiting;
 	int video_decoder_flushed;
 	int audio_decoder_flushed;
-
-	/* i don't think these are needed anymore */
+	int flushing;
 	int audio_time_set;
 
-	struct avbox_stopwatch *video_time;
-	int64_t (*getmastertime)(struct avbox_player *inst);
-
-	avbox_checkpoint_t video_decoder_checkpoint;
-	avbox_checkpoint_t video_output_checkpoint;
-	avbox_checkpoint_t audio_decoder_checkpoint;
-	avbox_checkpoint_t stream_parser_checkpoint;
-	pthread_t video_decoder_thread;
-	pthread_t video_output_thread;
-	struct avbox_delegate *audio_decoder_worker;
-	pthread_t control_thread;
+	avbox_player_time_fn getmastertime;
+	AVPacket packet;
+	AVFormatContext *fmt_ctx;
 	pthread_mutex_t state_lock;
-	pthread_t stream_thread;
 	LIST subscribers;
 
 	/* playlist stuff */
@@ -259,6 +219,9 @@ avbox_player_sendctl(struct avbox_player * const inst,
 	const int ctl, void * const data)
 {
 	struct avbox_player_ctlmsg * msg;
+	struct avbox_object * control_object =
+		avbox_thread_object(inst->control_thread);
+
 	if ((msg = malloc(sizeof(struct avbox_player_ctlmsg))) == NULL) {
 		LOG_PRINT_ERROR("Could not send control message: Out of memory");
 		return;
@@ -267,7 +230,7 @@ avbox_player_sendctl(struct avbox_player * const inst,
 	msg->id = ctl;
 	msg->data = data;
 
-	if (avbox_object_sendmsg(&inst->control_object,
+	if (avbox_object_sendmsg(&control_object,
 		AVBOX_MESSAGETYPE_USER, AVBOX_DISPATCH_UNICAST, msg) == NULL) {
 		LOG_VPRINT_ERROR("Could not send control message: %s",
 			strerror(errno));
@@ -290,8 +253,8 @@ avbox_player_scale2display(
 	struct avbox_size in;
 	screen.w = w;
 	screen.h = h;
-	in.w = inst->video_codec_ctx->width;
-	in.h = inst->video_codec_ctx->height;
+	in.w = inst->state_info.video_res.w;
+	in.h = inst->state_info.video_res.h;
 
 	ASSERT(screen.w >= screen.h);
 
@@ -393,10 +356,10 @@ avbox_player_draw(struct avbox_window * const window, void * const context)
 
 		avbox_window_getcanvassize(inst->window, &target_width, &target_height);
 
-		const int wpc = (100 * inst->video_size.w) / width;
-		const int hpc = (100 * inst->video_size.h) / height;
-		const int wos = (target_width > inst->video_size.w) ? (target_width - inst->video_size.w) / 2 : 0;
-		const int hos = (target_height > inst->video_size.h) ? (target_height - inst->video_size.h) / 2 : 0;
+		const int wpc = (100 * inst->state_info.scaled_res.w) / width;
+		const int hpc = (100 * inst->state_info.scaled_res.h) / height;
+		const int wos = (target_width > inst->state_info.scaled_res.w) ? (target_width - inst->state_info.scaled_res.w) / 2 : 0;
+		const int hos = (target_height > inst->state_info.scaled_res.h) ? (target_height - inst->state_info.scaled_res.h) / 2 : 0;
 
 		avbox_window_fillrectangle(inst->window,
 			((inst->highlight.x * wpc) / 100) + wos, ((inst->highlight.y * hpc) / 100) + hos,
@@ -438,8 +401,8 @@ avbox_player_video(void *arg)
 	ASSERT(inst != NULL);
 	ASSERT(inst->video_window == NULL);
 
-	linesize = av_image_get_linesize(MB_DECODER_PIX_FMT, inst->video_codec_ctx->width, 0);
-	height = inst->video_codec_ctx->height;
+	linesize = av_image_get_linesize(MB_DECODER_PIX_FMT, inst->state_info.video_res.w, 0);
+	height = inst->state_info.video_res.h;
 
 	/* get the size of the target window */
 	avbox_window_getcanvassize(inst->window, &target_width, &target_height);
@@ -460,21 +423,20 @@ avbox_player_video(void *arg)
 
 	/* calculate how to scale the video */
 	avbox_player_scale2display(inst,
-		target_width, target_height, &inst->video_size);
+		target_width, target_height, &inst->state_info.scaled_res);
 
 	/* initialize the software scaler */
 	if ((swscale_ctx = sws_getContext(
-		inst->video_codec_ctx->width,
-		inst->video_codec_ctx->height,
+		inst->state_info.video_res.w,
+		inst->state_info.video_res.h,
 		MB_DECODER_PIX_FMT,
-		inst->video_size.w,
-		inst->video_size.h,
+		inst->state_info.scaled_res.w,
+		inst->state_info.scaled_res.h,
 		MB_DECODER_PIX_FMT,
 		SWS_PRINT_INFO | SWS_FAST_BILINEAR,
 		NULL, NULL, NULL)) == NULL) {
 		LOG_PRINT_ERROR("Could not create swscale context!");
-		avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT,
-			&inst->video_output_thread);
+		avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 		goto video_exit;
 	}
 
@@ -551,8 +513,8 @@ avbox_player_video(void *arg)
 		} else {
 			ASSERT(ALIGNED(*frame->data, 16));
 			ASSERT(ALIGNED(buf, 16));
-			buf += pitch * ((target_height - inst->video_size.h) / 2);
-			buf += (pitch / target_width) * ((target_width - inst->video_size.w) / 2);
+			buf += pitch * ((target_height - inst->state_info.scaled_res.h) / 2);
+			buf += (pitch / target_width) * ((target_width - inst->state_info.scaled_res.w) / 2);
 			sws_scale(swscale_ctx, (uint8_t const * const *) frame->data,
 				&linesize, 0, height, &buf, &pitch);
 			avbox_window_unlock(inst->video_window);
@@ -613,6 +575,7 @@ avbox_player_video_decode(void *arg)
 	int ret, flushed, just_flushed = 0, keep_going;
 	struct avbox_player *inst = (struct avbox_player*) arg;
 	char video_filters[512];
+	AVCodecContext *dec_ctx;
 	AVPacket *packet = NULL;
 	AVFrame *video_frame_nat = NULL, *video_frame_flt = NULL;
 	AVFilterGraph *video_filter_graph = NULL;
@@ -624,22 +587,24 @@ avbox_player_video_decode(void *arg)
 
 	ASSERT(inst != NULL);
 	ASSERT(inst->fmt_ctx != NULL);
-	ASSERT(inst->video_codec_ctx == NULL);
 	ASSERT(inst->video_stream_index != -1);
 
 	/* open the video codec */
-	if ((inst->video_codec_ctx = avbox_ffmpegutil_opencodeccontext(
+	if ((dec_ctx = avbox_ffmpegutil_opencodeccontext(
 		&inst->video_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_VIDEO)) == NULL) {
 		LOG_PRINT_ERROR("Could not open video codec context");
 		goto decoder_exit;
 	}
 
+	inst->state_info.video_res.w = dec_ctx->width;
+	inst->state_info.video_res.h = dec_ctx->height;
+
 	/* initialize video filter graph */
 	strcpy(video_filters, "null");
 	DEBUG_VPRINT("player", "Video width: %i height: %i",
-		inst->video_codec_ctx->width, inst->video_codec_ctx->height);
+		dec_ctx->width, dec_ctx->height);
 	DEBUG_VPRINT("player", "Video filters: %s", video_filters);
-	if (avbox_ffmpegutil_initvideofilters(inst->fmt_ctx, inst->video_codec_ctx,
+	if (avbox_ffmpegutil_initvideofilters(inst->fmt_ctx, dec_ctx,
 		&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
 		video_filters, inst->video_stream_index) < 0) {
 		LOG_PRINT_ERROR("Could not initialize filtergraph!");
@@ -669,7 +634,7 @@ avbox_player_video_decode(void *arg)
 		if (!flushed && (packet = avbox_queue_timedpeek(inst->video_packets_q, 500L * 1000L)) == NULL) {
 			if (errno == EAGAIN || errno == ESHUTDOWN) {
 				DEBUG_PRINT(LOG_MODULE, "Sending flush packet to video decoder");
-				ret = avcodec_send_packet(inst->video_codec_ctx, NULL);
+				ret = avcodec_send_packet(dec_ctx, NULL);
 				flushed = just_flushed = 1;
 				/* fall through */
 			} else {
@@ -690,7 +655,7 @@ avbox_player_video_decode(void *arg)
 				}
 			} else {
 				/* send packet to codec for decoding */
-				if (UNLIKELY((ret  = avcodec_send_packet(inst->video_codec_ctx, packet)) < 0)) {
+				if (UNLIKELY((ret  = avcodec_send_packet(dec_ctx, packet)) < 0)) {
 					if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
 						/* fall through */
 						ret = 0;
@@ -716,7 +681,7 @@ avbox_player_video_decode(void *arg)
 		for (keep_going = 1; keep_going;) {
 
 			/* grab the next frame and add it to the filtergraph */
-			if (LIKELY((ret = avcodec_receive_frame(inst->video_codec_ctx, video_frame_nat))) == 0) {
+			if (LIKELY((ret = avcodec_receive_frame(dec_ctx, video_frame_nat))) == 0) {
 				if (video_frame_nat->pkt_dts == AV_NOPTS_VALUE) {
 					video_frame_nat->pts = 0;
 				} else {
@@ -802,7 +767,7 @@ avbox_player_video_decode(void *arg)
 		 * buffers so we can keep using it */
 		if (just_flushed) {
 			DEBUG_PRINT(LOG_MODULE, "Flushing video codec");
-			avcodec_flush_buffers(inst->video_codec_ctx);
+			avcodec_flush_buffers(dec_ctx);
 			inst->video_decoder_flushed = 1;
 			just_flushed = 0;
 		}
@@ -842,13 +807,16 @@ decoder_exit:
 	if (video_filter_graph != NULL) {
 		avfilter_graph_free(&video_filter_graph);
 	}
-	if (inst->video_codec_ctx != NULL) {
+	if (dec_ctx != NULL) {
 		DEBUG_PRINT("player", "Flushing video decoder");
-		while (avcodec_receive_frame(inst->video_codec_ctx, video_frame_nat) == 0) {
+		while (avcodec_receive_frame(dec_ctx, video_frame_nat) == 0) {
 			av_frame_unref(video_frame_nat);
 		}
-		avcodec_flush_buffers(inst->video_codec_ctx);
-		/* TODO: Close codec here */
+		avcodec_flush_buffers(dec_ctx);
+		if (dec_ctx != NULL) {
+			avcodec_close(dec_ctx);
+			avcodec_free_context(&dec_ctx);
+		}
 	}
 	if (video_frame_nat != NULL) {
 		av_free(video_frame_nat);
@@ -860,6 +828,23 @@ decoder_exit:
 }
 
 
+#ifdef ENABLE_DVD
+/**
+ * Handles DVDNAV events
+ */
+static void
+avbox_player_dvdnav_handler(void * const context, int event, void *data)
+{
+	struct avbox_player * const inst = context;
+	struct avbox_syncarg arg;
+
+	avbox_syncarg_init(&arg, data);
+	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_DVD | event, &arg);
+	avbox_syncarg_wait(&arg);
+}
+#endif
+
+
 /**
  * Decodes the audio stream.
  */
@@ -867,30 +852,34 @@ static void *
 avbox_player_audio_decode(void * arg)
 {
 	int ret, keep_going, flushed, just_flushed = 0;
-	struct avbox_audio_decoder_args *args = arg;
-	struct avbox_player * const inst = args->inst;
+	struct avbox_syncarg * const syncarg = arg;
+	struct avbox_player * const inst = avbox_syncarg_data(syncarg);
 	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
+	AVCodecContext *dec_ctx;
 	AVFrame *audio_frame_nat = NULL;
 	AVFrame *audio_frame = NULL;
 	AVFilterGraph *audio_filter_graph = NULL;
 	AVFilterContext *audio_buffersink_ctx = NULL;
 	AVFilterContext *audio_buffersrc_ctx;
 	AVPacket *packet = NULL;
+	uint64_t channel_layout;
+	const char *sample_fmt_name;
+	AVRational time_base;
 
 	DEBUG_SET_THREAD_NAME("audio_decoder");
 
 	ASSERT(inst != NULL);
 	ASSERT(inst->fmt_ctx != NULL);
-	ASSERT(inst->audio_codec_ctx == NULL);
 	ASSERT(inst->audio_packets_q != NULL);
 	ASSERT(inst->audio_stream_index != -1);
 
 	DEBUG_PRINT("player", "Audio decoder starting");
 
 	/* open the audio codec */
-	if ((inst->audio_codec_ctx = avbox_ffmpegutil_opencodeccontext(
+	if ((dec_ctx = avbox_ffmpegutil_opencodeccontext(
 		&inst->audio_stream_index, inst->fmt_ctx, AVMEDIA_TYPE_AUDIO)) == NULL) {
 		LOG_PRINT_ERROR("Could not open audio codec!");
+		avbox_syncarg_return(syncarg, NULL);
 		goto end;
 	}
 
@@ -899,29 +888,63 @@ avbox_player_audio_decode(void * arg)
 	audio_frame = av_frame_alloc();
 	if (audio_frame_nat == NULL || audio_frame == NULL) {
 		LOG_PRINT_ERROR("Could not allocate audio frames");
+		avbox_syncarg_return(syncarg, NULL);
 		goto end;
 	}
 
 	/* initialize audio filter graph */
 	DEBUG_VPRINT("player", "Audio filters: %s", audio_filters);
-	if (avbox_ffmpegutil_initaudiofilters(inst->fmt_ctx, inst->audio_codec_ctx,
-		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
-		audio_filters, inst->audio_stream_index,
+
 #ifdef ENABLE_DVD
-		(inst->dvdio != NULL) ? avbox_dvdio_dvdnav(inst->dvdio) : NULL
-#else
-		NULL
+	if (inst->dvdio != NULL) {
+		int dvdnav_stream = avbox_dvdio_dvdnavstream(
+			inst->fmt_ctx->streams[ inst->audio_stream_index]->id);
+		int channels = dvdnav_audio_stream_channels(
+			avbox_dvdio_dvdnav(inst->dvdio), dvdnav_stream);
+		DEBUG_VPRINT(LOG_MODULE, "Audio channels: %i", channels);
+		if (channels == 6) {
+			channel_layout = 0x60f;
+		} else {
+			channel_layout = av_get_default_channel_layout(channels);
+		}
+
+		sample_fmt_name = av_get_sample_fmt_name(dec_ctx->sample_fmt);
+		if (sample_fmt_name == NULL) {
+			DEBUG_VPRINT(LOG_MODULE, "Invalid sample format: %i",
+				dec_ctx->sample_fmt);
+			sample_fmt_name = "fltp";
+		} else {
+			DEBUG_VPRINT(LOG_MODULE, "Sample format %d: %s",
+				dec_ctx->sample_fmt, sample_fmt_name);
+		}
+		time_base.num = 1;
+		time_base.den = 90000;
+	} else
 #endif
-		) < 0) {
+	{
+		if (!dec_ctx->channel_layout) {
+			channel_layout = av_get_default_channel_layout(dec_ctx->channels);
+		} else {
+			channel_layout = dec_ctx->channel_layout;
+		}
+
+		sample_fmt_name = av_get_sample_fmt_name(dec_ctx->sample_fmt);
+		time_base = dec_ctx->time_base;
+	}
+
+	/* initialize audio filtergraph */
+	if (avbox_ffmpegutil_initaudiofilters(
+		&audio_buffersink_ctx, &audio_buffersrc_ctx, &audio_filter_graph,
+		audio_filters, inst->audio_stream_index, dec_ctx->sample_rate,
+		time_base, channel_layout, sample_fmt_name) < 0) {
 		LOG_PRINT_ERROR("Could not init filter graph!");
+		avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
+		avbox_syncarg_return(syncarg, NULL);
 		goto end;
 	}
 
 	avbox_checkpoint_enable(&inst->audio_decoder_checkpoint);
-
-	pthread_mutex_lock(&args->mutex);
-	pthread_cond_signal(&args->cond);
-	pthread_mutex_unlock(&args->mutex);
+	avbox_syncarg_return(syncarg, NULL);
 
 	/* signl control thread that we're ready */
 	if (inst->play_state == AVBOX_PLAYER_PLAYSTATE_AUDIODEC) {
@@ -935,10 +958,10 @@ avbox_player_audio_decode(void * arg)
 		avbox_checkpoint_here(&inst->audio_decoder_checkpoint);
 
 		if (!flushed &&
-			(packet = avbox_queue_timedpeek(inst->audio_packets_q, 500L * 1000L)) == NULL) {
+			(packet = avbox_queue_timedpeek(inst->audio_packets_q, 100L * 1000L)) == NULL) {
 			if (errno == EAGAIN || errno == ESHUTDOWN) {
 				DEBUG_PRINT(LOG_MODULE, "Sending audio flush packet");
-				ret = avcodec_send_packet(inst->audio_codec_ctx, NULL);
+				ret = avcodec_send_packet(dec_ctx, NULL);
 				flushed = just_flushed = 1;
 				/* fall through */
 			} else {
@@ -965,7 +988,7 @@ avbox_player_audio_decode(void * arg)
 				}
 			} else {
 				/* send packets to codec for decoding */
-				if ((ret = avcodec_send_packet(inst->audio_codec_ctx, packet)) < 0) {
+				if ((ret = avcodec_send_packet(dec_ctx, packet)) < 0) {
 					if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
 						packet = NULL;
 						/* fall through */
@@ -982,8 +1005,7 @@ avbox_player_audio_decode(void * arg)
 						av_strerror(ret, err, sizeof(err));
 						LOG_VPRINT_ERROR("Error decoding audio(%i): %s",
 							ret, err);
-						avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT,
-							&inst->audio_decoder_worker);
+						avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 						goto end;
 					}
 				}
@@ -992,8 +1014,7 @@ avbox_player_audio_decode(void * arg)
 					if (avbox_queue_get(inst->audio_packets_q) != packet) {
 						LOG_VPRINT_ERROR("BUG: avbox_queue_get() returned an unexpected result (%p): %s",
 							packet, strerror(errno));
-						avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT,
-							&inst->audio_decoder_worker);
+						avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 						goto end;
 					}
 					/* free packet */
@@ -1008,7 +1029,7 @@ avbox_player_audio_decode(void * arg)
 		for (keep_going = 1; keep_going;) {
 
 			/* get the next frame from the decoder */
-			if ((ret = avcodec_receive_frame(inst->audio_codec_ctx, audio_frame_nat)) != 0) {
+			if ((ret = avcodec_receive_frame(dec_ctx, audio_frame_nat)) != 0) {
 				if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
 					LOG_VPRINT_ERROR("ERROR!: avcodec_receive_frame() returned %d (audio)",
 						AVERROR(ret));
@@ -1023,8 +1044,7 @@ avbox_player_audio_decode(void * arg)
 					LOG_VPRINT_ERROR("Error while feeding the audio filtergraph: %s (channels=%i|layout=0x%"PRIx64")",
 						err, audio_frame_nat->channels, audio_frame_nat->channel_layout);
 					av_frame_unref(audio_frame_nat);
-					avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT,
-						&inst->audio_decoder_worker);
+					avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 				}
 				keep_going = 1;
 			}
@@ -1040,8 +1060,7 @@ avbox_player_audio_decode(void * arg)
 				if (UNLIKELY(ret < 0)) {
 					LOG_PRINT_ERROR("Error reading from buffersink");
 					av_frame_unref(audio_frame);
-					avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT,
-						&inst->audio_decoder_worker);
+					avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 
 					goto end;
 				}
@@ -1083,8 +1102,7 @@ avbox_player_audio_decode(void * arg)
 			if (avbox_queue_get(inst->audio_packets_q) != packet) {
 				LOG_VPRINT_ERROR("BUG: avbox_queue_get() returned an unexpected result (%p): %s",
 					packet, strerror(errno));
-				avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT,
-					&inst->audio_decoder_worker);
+				avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 				goto end;
 			}
 			/* free packet */
@@ -1095,7 +1113,7 @@ avbox_player_audio_decode(void * arg)
 
 		if (just_flushed) {
 			DEBUG_PRINT(LOG_MODULE, "Flushing audio codec");
-			avcodec_flush_buffers(inst->audio_codec_ctx);
+			avcodec_flush_buffers(dec_ctx);
 			inst->audio_decoder_flushed = 1;
 			just_flushed = 0;
 		}
@@ -1129,12 +1147,12 @@ end:
 	if (audio_frame != NULL) {
 		av_free(audio_frame);
 	}
-	if (inst->audio_codec_ctx != NULL) {
+	if (dec_ctx != NULL) {
 		DEBUG_PRINT("player", "Flushing audio decoder");
-		avcodec_flush_buffers(inst->audio_codec_ctx);
-		avcodec_close(inst->audio_codec_ctx);
-		avcodec_free_context(&inst->audio_codec_ctx);
-		inst->audio_codec_ctx = NULL; /* avcodec_free_context() already does this */
+		avcodec_flush_buffers(dec_ctx);
+		avcodec_close(dec_ctx);
+		avcodec_free_context(&dec_ctx);
+		dec_ctx = NULL; /* avcodec_free_context() already does this */
 	}
 
 	DEBUG_PRINT("player", "Audio decoder bailing out");
@@ -1143,30 +1161,37 @@ end:
 }
 
 
-#ifdef ENABLE_DVD
-/**
- * Handles DVDNAV events
- */
 static void
-avbox_player_dvdnav_handler(void * const context, int event, void *data)
+avbox_player_restart_audio_dec(struct avbox_player * const inst)
 {
-	struct avbox_player * const inst = context;
-	struct avbox_player_waiter waiter;
+	/* stop the audio decode thread */
+	avbox_queue_close(inst->audio_packets_q);
+	do {
+		avbox_queue_wake(inst->audio_packets_q);
+		usleep(50L * 1000L);
+	} while (!avbox_delegate_finished(inst->audio_decoder_worker));
 
-	if (pthread_mutex_init(&waiter.mutex, NULL) != 0 ||
-		pthread_cond_init(&waiter.cond, NULL) != 0) {
-		abort();
+	avbox_delegate_wait(inst->audio_decoder_worker, NULL);
+	avbox_queue_destroy(inst->audio_packets_q);
+	inst->audio_decoder_worker = NULL;
+	inst->audio_packets_q = NULL;
+
+	if ((inst->audio_packets_q = avbox_queue_new(MB_AUDIO_BUFFER_PACKETS)) == NULL) {
+		avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
+	} else {
+		/* start the audio decoder thread and wait until it's ready to decode */
+		struct avbox_syncarg arg;
+		avbox_syncarg_init(&arg, inst);
+		ASSERT(inst->audio_decoder_worker == NULL);
+		ASSERT(inst->audio_decoder_thread != NULL);
+		if ((inst->audio_decoder_worker = avbox_thread_delegate(
+			inst->audio_decoder_thread,
+			avbox_player_audio_decode, &arg)) == NULL) {
+			abort();
+		}
+		avbox_syncarg_wait(&arg);
 	}
-
-	/* send the DVDNAV event to the control thread and wait
-	 * for it to react */
-	waiter.data = data;
-	pthread_mutex_lock(&waiter.mutex);
-	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_DVD | event, &waiter);
-	pthread_cond_wait(&waiter.cond, &waiter.mutex);
-	pthread_mutex_unlock(&waiter.mutex);
 }
-#endif
 
 
 static void
@@ -1185,11 +1210,11 @@ avbox_player_settitle(struct avbox_player * const inst, const char * const title
 
 
 static void
-avbox_player_audiostream_dried(struct avbox_audiostream * stream, void * const context)
+avbox_player_audiostream_underrun(struct avbox_audiostream * stream, void * const context)
 {
 	struct avbox_player * const inst = context;
 	ASSERT(inst->audio_stream == stream);
-	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_AUDIO_STREAM_DRIED, NULL);
+	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_AUDIO_STREAM_UNDERRUN, NULL);
 }
 
 
@@ -1255,9 +1280,9 @@ avbox_player_stream_parse(void *arg)
 			goto decoder_exit;
 		}
 		file_to_open = inst->media_file + 4;
-		inst->logical_audio_stream = -1;
+		inst->fmt_ctx->ctx_flags |= AVFMTCTX_NOHEADER;
 
-		if (avbox_input_grab(inst->control_object) == -1) {
+		if (avbox_input_grab(avbox_thread_object(inst->control_thread)) == -1) {
 			abort();
 		}
 	}
@@ -1294,27 +1319,25 @@ avbox_player_stream_parse(void *arg)
 		inst->state_info.duration = inst->fmt_ctx->duration;
 	}
 
+	/* create audio stream */
+	if ((inst->audio_stream = avbox_audiostream_new(
+		AVBOX_BUFFER_AUDIO,
+		avbox_player_audiostream_underrun, inst)) == NULL) {
+		goto decoder_exit;
+	}
+
+	if ((inst->audio_packets_q = avbox_queue_new(MB_AUDIO_BUFFER_PACKETS)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create audio packets queue: %s!",
+			strerror(errno));
+		goto decoder_exit;
+	}
+
 	/* if there's an audio stream start the audio decoder */
 	if ((inst->audio_stream_index =
 		av_find_best_stream(inst->fmt_ctx, AVMEDIA_TYPE_AUDIO, -1, prefered_video_stream, NULL, 0)) >= 0) {
-
-		DEBUG_PRINT("player", "Audio stream found");
-
-		/* allocate filtered audio frames */
+		DEBUG_VPRINT("player", "Audio stream found %i", inst->audio_stream_index);
 		inst->getmastertime = avbox_player_getaudiotime; /* video is slave to audio */
 
-		/* create audio stream */
-		if ((inst->audio_stream = avbox_audiostream_new(
-			AVBOX_BUFFER_AUDIO,
-			avbox_player_audiostream_dried, inst)) == NULL) {
-			goto decoder_exit;
-		}
-
-		if ((inst->audio_packets_q = avbox_queue_new(MB_AUDIO_BUFFER_PACKETS)) == NULL) {
-			LOG_VPRINT_ERROR("Could not create audio packets queue: %s!",
-				strerror(errno));
-			goto decoder_exit;
-		}
 	} else {
 		if (inst->audio_stream_index == AVERROR_DECODER_NOT_FOUND) {
 			LOG_PRINT_ERROR("Could not find decoder for audio stream!");
@@ -1364,8 +1387,7 @@ avbox_player_stream_parse(void *arg)
 	avbox_checkpoint_halt(&inst->stream_parser_checkpoint);
 
 	/* notify control thread that we're ready */
-	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_STREAM_READY,
-		&inst->stream_thread);
+	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_STREAM_READY, NULL);
 
 	DEBUG_PRINT("player", "Stream decoder ready");
 
@@ -1376,12 +1398,17 @@ avbox_player_stream_parse(void *arg)
 
 		if (!inst->gotpacket) {
 			if (UNLIKELY((res = av_read_frame(inst->fmt_ctx, &inst->packet)) < 0)) {
-				char buf[256];
-				av_strerror(res, buf, sizeof(buf));
-				LOG_VPRINT_ERROR("Could not read frame: %s", buf);
-				goto decoder_exit;
+				if (res == AVERROR_EOF) {
+					goto decoder_exit;
+				} else {
+					char buf[256];
+					av_strerror(res, buf, sizeof(buf));
+					LOG_VPRINT_ERROR("Could not read frame: %s", buf);
+					goto decoder_exit;
+				}
+			} else {
+				inst->gotpacket = 1;
 			}
-			inst->gotpacket = 1;
 		}
 
 #ifdef ENABLE_DVD
@@ -1391,6 +1418,64 @@ avbox_player_stream_parse(void *arg)
 			inst->state_info.pos = av_rescale_q(inst->packet.pts,
 				inst->fmt_ctx->streams[inst->packet.stream_index]->time_base,
 				AV_TIME_BASE_Q);
+		}
+
+		/* if we're waiting for the audio stream... */
+		if (inst->audio_stream_index == -2) {
+#ifdef ENABLE_DVD
+			if (inst->dvdio != NULL) {
+				int next_stream;
+
+				next_stream = dvdnav_get_active_audio_stream(
+					avbox_dvdio_dvdnav(inst->dvdio));
+
+				DEBUG_VPRINT(LOG_MODULE, "Waiting for audio stream (current=%d|next(dvd)=%d)",
+					inst->audio_stream_index, next_stream);
+
+				if (next_stream != -1) {
+					for (res = 0; res < inst->fmt_ctx->nb_streams; res++) {
+
+						int i_id;
+
+						/* process only audio streams */
+						if (inst->fmt_ctx->streams[res]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) {
+							continue;
+						}
+
+						i_id = avbox_dvdio_dvdnavstream(
+							inst->fmt_ctx->streams[res]->id);
+						if (i_id == -1) {
+							continue;
+						}
+
+						#if 0
+						DEBUG_VPRINT(LOG_MODULE, "Stream codec=%s index=%d, id=%x, i_id=%d",
+							scodec,
+							res,
+							inst->fmt_ctx->streams[res]->id,
+							i_id);
+						#endif
+
+						if (i_id == next_stream) {
+							struct avbox_syncarg arg;
+							DEBUG_VPRINT(LOG_MODULE, "Selecting stream: %i",
+								res);
+							inst->audio_stream_index = res;
+
+							avbox_syncarg_init(&arg, NULL);
+							avbox_player_sendctl(inst, AVBOX_PLAYERCTL_RESTART_AUDIO_DEC, &arg);
+							avbox_syncarg_wait(&arg);
+							break;
+						}
+					}
+				} else {
+					inst->audio_stream_index = -1;
+				}
+			} else
+#endif
+			{
+				inst->audio_stream_index = -1;
+			}
 		}
 
 		if (inst->packet.stream_index == inst->video_stream_index) {
@@ -1471,10 +1556,9 @@ decoder_exit:
 		ASSERT(inst->video_packets_q != NULL);
 		avbox_queue_close(inst->video_packets_q);
 	}
-	if (inst->audio_stream_index != -1) {
-		ASSERT(inst->audio_packets_q != NULL);
-		avbox_queue_close(inst->audio_packets_q);
-	}
+
+	ASSERT(inst->audio_packets_q != NULL);
+	avbox_queue_close(inst->audio_packets_q);
 
 	if (stream_opts != NULL) {
 		av_dict_free(&stream_opts);
@@ -1497,8 +1581,7 @@ decoder_exit:
 	inst->stream_exiting = 0;
 	pthread_mutex_unlock(&inst->state_lock);
 
-	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_STREAM_EXIT,
-		&inst->stream_thread);
+	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_STREAM_EXIT, NULL);
 
 	DEBUG_PRINT("player", "Stream parser thread bailing out");
 
@@ -1536,13 +1619,11 @@ avbox_player_halt(struct avbox_player * const inst)
 		avbox_queue_wake(inst->video_packets_q);
 	} while (!avbox_player_stream_checkpoint_wait(inst, 50L * 1000L));
 
-	if (inst->audio_stream_index != -1) {
-		avbox_checkpoint_halt(&inst->audio_decoder_checkpoint);
-		do {
-			avbox_queue_wake(inst->audio_packets_q);
-		} while (!avbox_checkpoint_wait(&inst->audio_decoder_checkpoint, 50L * 1000L));
-		avbox_audiostream_pause(inst->audio_stream);
-	}
+	avbox_checkpoint_halt(&inst->audio_decoder_checkpoint);
+	do {
+		avbox_queue_wake(inst->audio_packets_q);
+	} while (!avbox_checkpoint_wait(&inst->audio_decoder_checkpoint, 50L * 1000L));
+	avbox_audiostream_pause(inst->audio_stream);
 
 	if (inst->video_stream_index != -1) {
 		avbox_checkpoint_halt(&inst->video_decoder_checkpoint);
@@ -1571,10 +1652,9 @@ avbox_player_continue(struct avbox_player * const inst)
 
 	avbox_checkpoint_continue(&inst->stream_parser_checkpoint);
 
-	if (inst->audio_stream_index != -1) {
-		avbox_checkpoint_continue(&inst->audio_decoder_checkpoint);
-		avbox_audiostream_resume(inst->audio_stream);
-	}
+	avbox_checkpoint_continue(&inst->audio_decoder_checkpoint);
+	avbox_audiostream_resume(inst->audio_stream);
+
 	if (inst->video_stream_index != -1) {
 		avbox_checkpoint_continue(&inst->video_output_checkpoint);
 		avbox_checkpoint_continue(&inst->video_decoder_checkpoint);
@@ -1747,9 +1827,7 @@ static void
 avbox_player_dopause(struct avbox_player * const inst)
 {
 	/* wait for player to pause */
-	if (inst->audio_stream_index != -1) {
-		avbox_audiostream_pause(inst->audio_stream);
-	}
+	avbox_audiostream_pause(inst->audio_stream);
 	if (inst->video_stream_index != -1) {
 		avbox_checkpoint_halt(&inst->video_output_checkpoint);
 		do {
@@ -1767,10 +1845,8 @@ static void
 avbox_player_doresume(struct avbox_player * const inst)
 {
 	avbox_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
-	if (inst->audio_stream_index != -1) {
-		if (avbox_audiostream_ispaused(inst->audio_stream)) {
-			avbox_audiostream_resume(inst->audio_stream);
-		}
+	if (avbox_audiostream_ispaused(inst->audio_stream)) {
+		avbox_audiostream_resume(inst->audio_stream);
 	}
 	if (inst->video_stream_index != -1) {
 		avbox_stopwatch_start(inst->video_time);
@@ -1854,12 +1930,16 @@ avbox_player_doplay(struct avbox_player * const inst,
 	inst->play_state = AVBOX_PLAYER_PLAYSTATE_STREAM;
 	avbox_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
 
-	/* start the main decoder thread */
+	/* start the main decoder worker */
 	inst->stream_quit = 0;
-	if (pthread_create(&inst->stream_thread, NULL, avbox_player_stream_parse, inst) != 0) {
+	ASSERT(inst->stream_input_worker == NULL);
+	ASSERT(inst->stream_input_thread != NULL);
+	if ((inst->stream_input_worker = avbox_thread_delegate(
+		inst->stream_input_thread, avbox_player_stream_parse, inst)) == NULL) {
+		LOG_VPRINT_ERROR("Could not start input thread: %s",
+			strerror(errno));
+		inst->play_state = AVBOX_PLAYER_PLAYSTATE_READY;
 		avbox_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
-		avbox_player_throwexception(inst, "Could not fire decoder thread");
-		return;
 	}
 }
 
@@ -1889,37 +1969,54 @@ avbox_player_drop(struct avbox_player * const inst)
 		}
 
 		/* Drop all decoded video frames */
-		while (avbox_queue_count(inst->video_frames_q) > 0) {
-			frame = avbox_queue_get(inst->video_frames_q);
-			av_frame_unref(frame);
-			av_free(frame);
+		while (!inst->video_decoder_flushed ||
+			avbox_queue_count(inst->video_frames_q) > 0) {
+			if ((frame = avbox_queue_peek(inst->video_frames_q, 0)) != NULL) {
+				if (avbox_queue_get(inst->video_frames_q) != frame) {
+					LOG_PRINT_ERROR("Frame went missing!");
+					abort();
+				}
+				av_frame_unref(frame);
+				av_free(frame);
+			} else {
+				avbox_checkpoint_continue(&inst->video_decoder_checkpoint);
+				avbox_checkpoint_halt(&inst->video_decoder_checkpoint);
+				sched_yield();
+				do {
+					avbox_queue_wake(inst->video_frames_q);
+				} while (!avbox_checkpoint_wait(&inst->video_decoder_checkpoint, 1000L));
+			}
 		}
-
-		/* flush video decoder */
-		avcodec_flush_buffers(inst->video_codec_ctx);
 	}
 
 	/* drop all decoded audio frames */
-	if (inst->audio_stream_index != -1) {
-		/* drop all audio packets */
-		while (avbox_queue_count(inst->audio_packets_q) > 0) {
-			packet = avbox_queue_get(inst->audio_packets_q);
+	while (!inst->audio_decoder_flushed ||
+		avbox_queue_count(inst->audio_packets_q) > 0) {
+		if ((packet = avbox_queue_peek(inst->audio_packets_q, 0)) != NULL) {
+			if (avbox_queue_get(inst->audio_packets_q) != packet) {
+				LOG_PRINT_ERROR("Packet went missing!");
+				abort();
+			}
 			av_packet_unref(packet);
 			free(packet);
-		}
-
-		/* drop all decoded audio frames */
-		avbox_audiostream_drop(inst->audio_stream);
-		if (!avbox_delegate_finished(inst->audio_decoder_worker)) {
-			avcodec_flush_buffers(inst->audio_codec_ctx);
 		} else {
-			ASSERT(inst->audio_decoder_flushed);
+			avbox_checkpoint_continue(&inst->audio_decoder_checkpoint);
+			avbox_checkpoint_halt(&inst->audio_decoder_checkpoint);
+			sched_yield();
+			do {
+				/* nothing to do...the audio decoder can only
+				 * be waiting on the audio stream */
+			} while (!avbox_checkpoint_wait(&inst->audio_decoder_checkpoint, 1000L));
 		}
-		inst->audio_time_set = 0;
-
-		DEBUG_VPRINT("player", "Audio time: %li",
-			avbox_audiostream_gettime(inst->audio_stream));
 	}
+
+	/* drop all decoded audio frames */
+	avbox_audiostream_drop(inst->audio_stream);
+	ASSERT(inst->audio_decoder_flushed);
+	inst->audio_time_set = 0;
+
+	DEBUG_VPRINT("player", "Audio time: %li",
+		avbox_audiostream_gettime(inst->audio_stream));
 
 	DEBUG_VPRINT("player", "Frames dropped. (time=%li,v_packets=%i,a_packets=%i,v_frames=%i)",
 		inst->getmastertime(inst), avbox_queue_count(inst->video_packets_q),
@@ -1930,9 +2027,6 @@ avbox_player_drop(struct avbox_player * const inst)
 	ASSERT(avbox_queue_count(inst->audio_packets_q) == 0);
 	ASSERT(avbox_queue_count(inst->video_frames_q) == 0);
 	ASSERT(avbox_audiostream_count(inst->audio_stream) == 0);
-
-	DEBUG_VPRINT("player", "Seeking (newpos=%li)",
-		inst->getmastertime(inst));
 
 	/* flush stream buffers */
 	avformat_flush(inst->fmt_ctx);
@@ -2098,7 +2192,11 @@ avbox_player_doseek(struct avbox_player * const inst,
 			(flags & AVSEEK_FLAG_BACKWARD) ? "BACKWARD" : "FORWARD",
 			seek_from, seek_to);
 
-		avbox_player_halt(inst);
+		avbox_checkpoint_halt(&inst->stream_parser_checkpoint);
+		do {
+			avbox_queue_wake(inst->audio_packets_q);
+			avbox_queue_wake(inst->video_packets_q);
+		} while (!avbox_checkpoint_wait(&inst->stream_parser_checkpoint, 10L * 1000L));
 
 		/* do the seeking */
 		if ((err = av_seek_frame(inst->fmt_ctx, -1, seek_to, flags)) < 0) {
@@ -2119,14 +2217,12 @@ avbox_player_doseek(struct avbox_player * const inst,
 			}
 
 			/* reset audio time */
-			if (inst->audio_stream_index != -1) {
-				avbox_audiostream_pause(inst->audio_stream);
-				avbox_audiostream_setclock(inst->audio_stream, seek_to);
-				avbox_audiostream_resume(inst->audio_stream);
-				inst->audio_time_set = 0;
-				DEBUG_VPRINT("player", "Audio time: %li",
-					avbox_audiostream_gettime(inst->audio_stream));
-			}
+			avbox_audiostream_pause(inst->audio_stream);
+			avbox_audiostream_setclock(inst->audio_stream, seek_to);
+			avbox_audiostream_resume(inst->audio_stream);
+			inst->audio_time_set = 0;
+			DEBUG_VPRINT("player", "Audio time: %li",
+				avbox_audiostream_gettime(inst->audio_stream));
 
 			/* make sure everything is ok */
 			ASSERT(avbox_queue_count(inst->video_packets_q) == 0);
@@ -2142,7 +2238,7 @@ avbox_player_doseek(struct avbox_player * const inst,
 		}
 
 		/* resume playback */
-		avbox_player_continue(inst);
+		avbox_checkpoint_continue(&inst->stream_parser_checkpoint);
 	}
 
 }
@@ -2198,7 +2294,7 @@ avbox_player_handle_underrun(struct avbox_player * const inst)
 	tv.tv_nsec = 500L * 1000L;
 	inst->underrun_timer_id = avbox_timer_register(&tv,
 		AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
-		inst->control_object, NULL, inst);
+		avbox_thread_object(inst->control_thread), NULL, inst);
 	if (inst->underrun_timer_id == -1) {
 		avbox_player_throwexception(inst,
 			"Could not start buffering timer");
@@ -2221,7 +2317,7 @@ avbox_player_delay_stream_exit(struct avbox_player * const inst)
 	tv.tv_nsec = 500L * 1000L;
 	inst->stream_exit_timer_id = avbox_timer_register(&tv,
 		AVBOX_TIMER_TYPE_ONESHOT | AVBOX_TIMER_MESSAGE,
-		inst->control_object, NULL, inst);
+		avbox_thread_object(inst->control_thread), NULL, inst);
 	if (inst->stream_exit_timer_id == -1) {
 		LOG_PRINT_ERROR("Could not start stream exit timer. Blocking thread!!");
 		usleep(500L * 1000L);
@@ -2230,7 +2326,6 @@ avbox_player_delay_stream_exit(struct avbox_player * const inst)
 }
 
 
-#ifdef ENABLE_DVD
 static int
 avbox_player_flush(struct avbox_player * const inst)
 {
@@ -2251,20 +2346,21 @@ avbox_player_flush(struct avbox_player * const inst)
 
 		/* if there's any packets on the audio pipeline
 		 * return 0 */
-		if (inst->audio_stream_index != -1) {
-			if (!inst->audio_decoder_flushed) {
-				return 0;
-			}
-			if (avbox_audiostream_count(inst->audio_stream) > 0 ||
-				avbox_queue_count(inst->audio_packets_q) > 0) {
-				return 0;
-			}
+		if (!inst->audio_decoder_flushed) {
+			return 0;
+		}
+		if (avbox_audiostream_count(inst->audio_stream) > 0 ||
+			avbox_queue_count(inst->audio_packets_q) > 0) {
+			return 0;
 		}
 
 		/* if there's any packets or frames on the video pipeline
 		 * then rturn zero. */
 		if (inst->video_stream_index != -1) {
-			if (inst->logical_audio_stream == -1) {
+			if (inst->getmastertime == avbox_player_getsystemtime) {
+				/* we're running by the video clock so there's no
+				 * change of deadlock here so just return 0 until the
+				 * video buffers are empty */
 				if (avbox_queue_count(inst->video_packets_q) != 0 ||
 					avbox_queue_count(inst->video_frames_q) != 0) {
 					return 0;
@@ -2274,10 +2370,8 @@ avbox_player_flush(struct avbox_player * const inst)
 				}
 
 				/* make sure that the audio ring buffer is also flushed */
-				if (inst->audio_stream_index != -1) {
-					avbox_audiostream_pause(inst->audio_stream);
-					avbox_audiostream_resume(inst->audio_stream);
-				}
+				avbox_audiostream_pause(inst->audio_stream);
+				avbox_audiostream_resume(inst->audio_stream);
 
 			} else {
 				if (avbox_queue_count(inst->video_packets_q) > 0 ||
@@ -2362,6 +2456,7 @@ avbox_player_flush(struct avbox_player * const inst)
 }
 
 
+#ifdef ENABLE_DVD
 static void
 avbox_player_process_menus(struct avbox_player * const inst)
 {
@@ -2427,19 +2522,16 @@ avbox_player_control(void * context, struct avbox_message * msg)
 				avbox_player_sendctl(inst, AVBOX_PLAYERCTL_AUDIODEC_READY, NULL);
 			} else {
 				/* start the audio decoder thread and wait until it's ready to decode */
-				struct avbox_audio_decoder_args args;
-				if (pthread_mutex_init(&args.mutex, NULL) != 0 ||
-					pthread_cond_init(&args.cond, NULL) != 0) {
-					abort();
-				}
-				args.inst = inst;
-				pthread_mutex_lock(&args.mutex);
+				struct avbox_syncarg arg;
+				avbox_syncarg_init(&arg, inst);
+				ASSERT(inst->audio_decoder_worker == NULL);
+				ASSERT(inst->audio_decoder_thread != NULL);
 				if ((inst->audio_decoder_worker = avbox_thread_delegate(
-					avbox_player_audio_decode, &args)) == NULL) {
+					inst->audio_decoder_thread,
+					avbox_player_audio_decode, &arg)) == NULL) {
 					abort();
 				}
-				pthread_cond_wait(&args.cond, &args.mutex);
-				pthread_mutex_unlock(&args.mutex);
+				avbox_syncarg_wait(&arg);
 			}
 			break;
 		}
@@ -2454,9 +2546,13 @@ avbox_player_control(void * context, struct avbox_message * msg)
 			if (inst->video_stream_index == -1) {
 				avbox_player_sendctl(inst, AVBOX_PLAYERCTL_VIDEODEC_READY, NULL);
 			} else {
-				if (pthread_create(&inst->video_decoder_thread, NULL, avbox_player_video_decode, inst) != 0) {
-					LOG_PRINT_ERROR("Could not create video decoder thread!");
-					abort();
+				ASSERT(inst->video_decoder_worker == NULL);
+				ASSERT(inst->video_decoder_thread != NULL);
+				if ((inst->video_decoder_worker = avbox_thread_delegate(
+					inst->video_decoder_thread, avbox_player_video_decode, inst)) == NULL) {
+					LOG_VPRINT_ERROR("Could not start video decoder: %s",
+						strerror(errno));
+					avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 				}
 			}
 			break;
@@ -2494,8 +2590,13 @@ avbox_player_control(void * context, struct avbox_message * msg)
 			if (inst->video_stream_index == -1) {
 				avbox_player_sendctl(inst, AVBOX_PLAYERCTL_VIDEOOUT_READY, NULL);
 			} else {
-				if (pthread_create(&inst->video_output_thread, NULL, avbox_player_video, inst) != 0) {
-					abort();
+				ASSERT(inst->video_output_worker == NULL);
+				ASSERT(inst->video_output_thread != NULL);
+				if ((inst->video_output_worker = avbox_thread_delegate(
+					inst->video_output_thread, avbox_player_video, inst)) == NULL) {
+					LOG_VPRINT_ERROR("Could not start video output worker: %s",
+						strerror(errno));
+					avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 				}
 			}
 
@@ -2536,55 +2637,31 @@ avbox_player_control(void * context, struct avbox_message * msg)
 
 			/* if this is a user requested stop (as opposed to a
 			 * stream reaching EOF) lets drop the pipelines to stop
-			 * fast */
+			 * fast, otherwise wait for the pipeline to flush on it's
+			 * own */
 			if (inst->play_state == AVBOX_PLAYER_PLAYSTATE_STOPPING) {
 				avbox_player_drop(inst);
+			} else if (!avbox_player_flush(inst)) {
+				avbox_player_delay_stream_exit(inst);
+				free(ctlmsg);
+				return AVBOX_DISPATCH_OK;
 			}
 
-			if (inst->audio_stream_index != -1) {
-				ASSERT(inst->audio_stream != NULL);
-				if (avbox_audiostream_count(inst->audio_stream) > 0 ||
-					avbox_queue_count(inst->audio_packets_q) > 0) {
-					avbox_player_delay_stream_exit(inst);
-					free(ctlmsg);
-					return AVBOX_DISPATCH_OK;
-				}
-				if (inst->play_state >= AVBOX_PLAYER_PLAYSTATE_AUDIOOUT) {
-					avbox_stopwatch_reset(inst->video_time,
-						avbox_audiostream_gettime(inst->audio_stream));
-					avbox_stopwatch_start(inst->video_time);
-					inst->getmastertime = avbox_player_getsystemtime;
-				}
-				if (inst->play_state >= AVBOX_PLAYER_PLAYSTATE_AUDIODEC) {
-					avbox_delegate_wait(inst->audio_decoder_worker, NULL);
-				}
-				avbox_queue_destroy(inst->audio_packets_q);
-				inst->audio_packets_q = NULL;
-				inst->audio_stream_index = -1;
-				inst->audio_time_set = 0;
-			}
+			ASSERT(inst->audio_stream != NULL);
+			ASSERT(avbox_audiostream_count(inst->audio_stream) == 0);
+			ASSERT(avbox_queue_count(inst->audio_packets_q) == 0);
 
 			if (inst->video_stream_index != -1) {
-				if (avbox_queue_count(inst->video_frames_q) > 0 ||
-					avbox_queue_count(inst->video_packets_q) > 0) {
-					avbox_player_delay_stream_exit(inst);
-					free(ctlmsg);
-					return AVBOX_DISPATCH_OK;
-				}
+				ASSERT(avbox_queue_count(inst->video_frames_q) == 0);
+				ASSERT(avbox_queue_count(inst->video_packets_q) == 0);
 
 				if (inst->play_state >= AVBOX_PLAYER_PLAYSTATE_VIDEOOUT) {
-					pthread_join(inst->video_output_thread, NULL);
+					avbox_delegate_wait(inst->video_output_worker, NULL);
+					inst->video_output_worker = NULL;
 				}
 				if (inst->play_state >= AVBOX_PLAYER_PLAYSTATE_VIDEODEC) {
-					pthread_join(inst->video_decoder_thread, NULL);
-				}
-
-				/* TODO: This should be done by the video decoder thread,
-				 * however it is currently used by the output thread */
-				if (inst->video_codec_ctx != NULL) {
-					avcodec_close(inst->video_codec_ctx);
-					avcodec_free_context(&inst->video_codec_ctx);
-					inst->video_codec_ctx = NULL; /* avcodec_free_context() already does this */
+					avbox_delegate_wait(inst->video_decoder_worker, NULL);
+					inst->video_decoder_worker = NULL;
 				}
 
 				if (inst->video_window != NULL) {
@@ -2599,13 +2676,27 @@ avbox_player_control(void * context, struct avbox_message * msg)
 				inst->video_stream_index = -1;
 			}
 
+			/* cleanup audio decoder thread */
+			if (inst->play_state >= AVBOX_PLAYER_PLAYSTATE_AUDIODEC) {
+				avbox_delegate_wait(inst->audio_decoder_worker, NULL);
+				inst->audio_decoder_worker = NULL;
+			}
+
+			/* join the stream thread */
+			avbox_delegate_wait(inst->stream_input_worker, NULL);
+			inst->stream_input_worker = NULL;
+
+			/* cleanup audio stuff */
 			if (inst->audio_stream != NULL) {
 				avbox_audiostream_destroy(inst->audio_stream);
 				inst->audio_stream = NULL;
 			}
-
-			/* join the stream thread */
-			pthread_join(inst->stream_thread, NULL);
+			if (inst->audio_packets_q != NULL) {
+				avbox_queue_destroy(inst->audio_packets_q);
+				inst->audio_packets_q = NULL;
+			}
+			inst->audio_stream_index = -1;
+			inst->audio_time_set = 0;
 
 			/* clean other stuff */
 			if (inst->fmt_ctx != NULL) {
@@ -2615,8 +2706,9 @@ avbox_player_control(void * context, struct avbox_message * msg)
 			}
 
 #ifdef ENABLE_DVD
+			/* cleanup dvdnav stuff */
 			if (inst->dvdio != NULL) {
-				avbox_input_release(inst->control_object);
+				avbox_input_release(avbox_thread_object(inst->control_thread));
 				inst->highlight.x = inst->highlight.y = 0;
 				avbox_dvdio_close(inst->dvdio);
 				avbox_dvdio_destroy(inst->dvdio);
@@ -2643,6 +2735,8 @@ avbox_player_control(void * context, struct avbox_message * msg)
 			}
 
 			inst->play_state = AVBOX_PLAYER_PLAYSTATE_READY;
+
+			DEBUG_PRINT(LOG_MODULE, "Player stopped");
 
 			break;
 		}
@@ -2741,6 +2835,55 @@ avbox_player_control(void * context, struct avbox_message * msg)
 			free(args);
 			break;
 		}
+		case AVBOX_PLAYERCTL_CHANGE_AUDIO_TRACK:
+		{
+			int stream, first_stream = -1, found_active = 0,
+				next_stream = -1;
+
+			DEBUG_PRINT(LOG_MODULE, "AVBOX_PLAYERCTL_CHANGE_AUDIO_TRACK");
+
+			for (stream = 0; stream < inst->fmt_ctx->nb_streams; stream++) {
+				if (inst->fmt_ctx->streams[stream]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) {
+					continue;
+				}
+				if (first_stream == -1) {
+					first_stream = stream;
+				}
+				if (stream == inst->audio_stream_index) {
+					found_active = 1;
+					continue;
+				}
+				if (found_active) {
+					next_stream = stream;
+					break;
+				}
+			}
+			if (next_stream == -1 && first_stream != -1) {
+				next_stream = first_stream;
+			}
+			if (next_stream != -1 && next_stream != inst->audio_stream_index) {
+				avbox_checkpoint_halt(&inst->stream_parser_checkpoint);
+				do {
+					avbox_queue_wake(inst->audio_packets_q);
+					avbox_queue_wake(inst->video_packets_q);
+				} while (!avbox_player_stream_checkpoint_wait(inst, 50L * 1000L));
+
+				while (!avbox_player_flush(inst)) {
+					usleep(50L * 1000L);
+				}
+
+				avbox_audiostream_pause(inst->audio_stream);
+				avbox_audiostream_setclock(inst->audio_stream, 0);
+				avbox_audiostream_resume(inst->audio_stream);
+
+				inst->audio_stream_index = next_stream;
+				inst->audio_time_set = 0;
+				avbox_player_restart_audio_dec(inst);
+				avbox_checkpoint_continue(&inst->stream_parser_checkpoint);
+			}
+
+			break;
+		}
 		case AVBOX_PLAYERCTL_BUFFER_UNDERRUN:
 		{
 #ifdef ENABLE_DVD
@@ -2772,15 +2915,25 @@ avbox_player_control(void * context, struct avbox_message * msg)
 			}
 			break;
 		}
-		case AVBOX_PLAYERCTL_AUDIO_STREAM_DRIED:
+		case AVBOX_PLAYERCTL_AUDIO_STREAM_UNDERRUN:
 		{
 			if (!inst->stream_exiting && inst->play_state == AVBOX_PLAYER_PLAYSTATE_PLAYING) {
-				DEBUG_PRINT(LOG_MODULE, "Audio stream dried!! Switching to video clock.");
-				avbox_stopwatch_reset(inst->video_time,
-					avbox_audiostream_gettime(inst->audio_stream));
-				inst->getmastertime = avbox_player_getsystemtime;
-				avbox_stopwatch_start(inst->video_time);
-				inst->audio_time_set = 0;
+				if (avbox_queue_count(inst->audio_packets_q) > 0 &&
+					avbox_audiostream_count(inst->audio_stream) > 0 &&
+					avbox_queue_count(inst->video_frames_q) == AVBOX_BUFFER_VIDEO) {
+
+					/* NOTE: I think this was only needed to workaround a bug
+					 * and may be safe to remove */
+					DEBUG_PRINT(LOG_MODULE, "Audio stream dried!! Switching to video clock.");
+					avbox_stopwatch_reset(inst->video_time,
+						avbox_audiostream_gettime(inst->audio_stream));
+					inst->getmastertime = avbox_player_getsystemtime;
+					avbox_stopwatch_start(inst->video_time);
+					inst->audio_time_set = 0;
+
+				} else {
+					/* TODO: Send AVBOX_PLAYERCTL_UNDERRUN? */
+				}
 			}
 			break;
 		}
@@ -2792,10 +2945,18 @@ avbox_player_control(void * context, struct avbox_message * msg)
 			break;
 		}
 #ifdef  ENABLE_DVD
+		case AVBOX_PLAYERCTL_RESTART_AUDIO_DEC:
+		{
+			struct avbox_syncarg * const arg = ctlmsg->data;
+			ASSERT(arg != NULL);
+			avbox_player_restart_audio_dec(inst);
+			avbox_syncarg_return(arg, NULL);
+			break;
+		}
 		case AVBOX_PLAYERCTL_DVD_HOP_CHANNEL:
 		case AVBOX_PLAYERCTL_DVD_WAIT:
 		{
-			struct avbox_player_waiter * const waiter = ctlmsg->data;
+			struct avbox_syncarg * const arg = ctlmsg->data;
 
 			if (!inst->flushing) {
 				DEBUG_PRINT(LOG_MODULE, "AVBOX_PLAYERCTL_DVD_WAIT");
@@ -2803,7 +2964,7 @@ avbox_player_control(void * context, struct avbox_message * msg)
 
 			ASSERT(inst != NULL);
 			ASSERT(inst->dvdio != NULL);
-			ASSERT(waiter != NULL);
+			ASSERT(arg != NULL);
 
 			/* if the player is ready flush it and tell
 			 * DVDNAV to continue */
@@ -2829,20 +2990,18 @@ avbox_player_control(void * context, struct avbox_message * msg)
 			}
 wait_end:
 			/* signal the DVDNAV state machine to continue */
-			pthread_mutex_lock(&waiter->mutex);
-			pthread_cond_signal(&waiter->cond);
-			pthread_mutex_unlock(&waiter->mutex);
+			avbox_syncarg_return(arg, NULL);
 			break;
 		}
 		case AVBOX_PLAYERCTL_DVD_STILL_FRAME:
 		{
-			struct avbox_player_waiter * const waiter = ctlmsg->data;
+			struct avbox_syncarg * const arg = ctlmsg->data;
 
 			ASSERT(inst != NULL);
 			ASSERT(inst->dvdio != NULL);
-			ASSERT(waiter != NULL);
+			ASSERT(arg != NULL);
 
-			dvdnav_still_event_t *ev = (dvdnav_still_event_t*) waiter->data;
+			dvdnav_still_event_t *ev = (dvdnav_still_event_t*) avbox_syncarg_data(arg);
 
 			if (ev->length != 0xFF) {
 				if (inst->play_state >= AVBOX_PLAYER_PLAYSTATE_PLAYING) {
@@ -2860,31 +3019,24 @@ wait_end:
 					usleep(50L * 1000L);
 				}
 				avbox_player_process_menus(inst);
+				usleep(50L * 1000L);
 			}
 
 			/* signal the DVDNAV state machine to continue */
-			pthread_mutex_lock(&waiter->mutex);
-			pthread_cond_signal(&waiter->cond);
-			pthread_mutex_unlock(&waiter->mutex);
+			avbox_syncarg_return(arg, NULL);
 			break;
 		}
 		case AVBOX_PLAYERCTL_DVD_AUDIO_STREAM_CHANGE:
 		{
-			struct avbox_player_waiter * const waiter = ctlmsg->data;
-			dvdnav_audio_stream_change_event_t * const e = waiter->data;
+			struct avbox_syncarg * const arg = ctlmsg->data;
+			dvdnav_audio_stream_change_event_t * const e = avbox_syncarg_data(arg);
 
-			DEBUG_VPRINT(LOG_MODULE, "AVBOX_PLAYERCTL_DVD_AUDIO_STREAM_CHANGE (phys=%i|log=%i)",
-				e->physical, e->logical);
+			DEBUG_VPRINT(LOG_MODULE, "AVBOX_PLAYERCTL_DVD_AUDIO_STREAM_CHANGE (phys=%i|log=%i|audio_stream_index=%i)",
+				e->physical, e->logical, inst->audio_stream_index);
 
 			ASSERT(inst != NULL);
 			ASSERT(inst->dvdio != NULL);
-			ASSERT(waiter != NULL);
-
-			const int8_t active_stream =
-				dvdnav_get_active_audio_stream(avbox_dvdio_dvdnav(inst->dvdio));
-
-			DEBUG_VPRINT(LOG_MODULE, "Active audio stream: %d",
-				active_stream);
+			ASSERT(arg != NULL);
 
 			if (inst->play_state == AVBOX_PLAYER_PLAYSTATE_PLAYING) {
 
@@ -2893,77 +3045,54 @@ wait_end:
 					usleep(50L * 1000L);
 				}
 
-				inst->logical_audio_stream = active_stream;
+				const int8_t active_stream =
+					dvdnav_get_active_audio_stream(avbox_dvdio_dvdnav(inst->dvdio));
 
-				if (inst->audio_stream_index != -1) {
+				if (active_stream != -1) {
+					/* drain the audio stream and reset it's clock */
+					avbox_audiostream_pause(inst->audio_stream);
+					avbox_audiostream_setclock(inst->audio_stream, 0);
+					avbox_audiostream_resume(inst->audio_stream);
+					inst->audio_time_set = 0;
 
-					if (active_stream != -1) {
-						/* drain the audio stream and reset it's clock */
-						avbox_audiostream_pause(inst->audio_stream);
-						avbox_audiostream_setclock(inst->audio_stream, 0);
-						avbox_audiostream_resume(inst->audio_stream);
-						inst->audio_time_set = 0;
-
-						/* audio is master so make video buffer unbound */
-						if (inst->video_stream_index != -1) {
-							avbox_queue_setsize(inst->video_frames_q, 0);
-						}
-					} else {
-						/* reset the video clock */
-						avbox_stopwatch_reset(inst->video_time, 0);
-						avbox_stopwatch_start(inst->video_time);
-						inst->getmastertime = avbox_player_getsystemtime;
-
-						/* set video buffer limits */
-						if (inst->video_stream_index != -1) {
-							avbox_queue_setsize(inst->video_frames_q, AVBOX_BUFFER_VIDEO);
-						}
+					/* audio is master so make video buffer unbound */
+					if (inst->video_stream_index != -1) {
+						avbox_queue_setsize(inst->video_frames_q, 0);
 					}
 
-					/* stop the audio decode thread */
-					avbox_queue_close(inst->audio_packets_q);
-					do {
-						avbox_queue_wake(inst->audio_packets_q);
-						usleep(50L * 1000L);
-					} while (!avbox_delegate_finished(inst->audio_decoder_worker));
-					avbox_delegate_wait(inst->audio_decoder_worker, NULL);
-					avbox_queue_destroy(inst->audio_packets_q);
-					if ((inst->audio_packets_q = avbox_queue_new(MB_AUDIO_BUFFER_PACKETS)) == NULL) {
-						avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
-					} else {
-						/* start the audio decoder thread and wait until it's ready to decode */
-						struct avbox_audio_decoder_args args;
-						if (pthread_mutex_init(&args.mutex, NULL) != 0 ||
-							pthread_cond_init(&args.cond, NULL) != 0) {
-							abort();
-						}
-						args.inst = inst;
-						pthread_mutex_lock(&args.mutex);
-						if ((inst->audio_decoder_worker = avbox_thread_delegate(
-							avbox_player_audio_decode, &args)) == NULL) {
-							abort();
-						}
-						pthread_cond_wait(&args.cond, &args.mutex);
-						pthread_mutex_unlock(&args.mutex);
+					/* we cannot change stream yet because we may not even
+					 * have received a frame for that stream yet, so we set
+					 * the audio stream to -2 to signal the input thread to
+					 * reset the audio decoder when the new stream is known */
+					inst->audio_stream_index = -2;
+
+				} else {
+					/* reset the video clock */
+					avbox_stopwatch_reset(inst->video_time, 0);
+					avbox_stopwatch_start(inst->video_time);
+					inst->getmastertime = avbox_player_getsystemtime;
+					inst->audio_stream_index = -1;
+
+					/* set video buffer limits */
+					if (inst->video_stream_index != -1) {
+						avbox_queue_setsize(inst->video_frames_q, AVBOX_BUFFER_VIDEO);
 					}
 				}
 			}
 
 			/* signal the DVDNAV state machine to continue */
-			pthread_mutex_lock(&waiter->mutex);
-			pthread_cond_signal(&waiter->cond);
-			pthread_mutex_unlock(&waiter->mutex);
+			avbox_syncarg_return(arg, NULL);
 			break;
 		}
 		case AVBOX_PLAYERCTL_DVD_VTS_CHANGE:
 		{
-			struct avbox_player_waiter * const waiter = ctlmsg->data;
+			struct avbox_syncarg * const arg = ctlmsg->data;
 			int32_t current_title, current_part;
 			uint32_t width, height;
 			uint64_t *part_times = NULL, duration = 0;
 			const char *title = NULL;
 			dvdnav_t *dvdnav;
-			dvdnav_vts_change_event_t * const e = waiter->data;
+			dvdnav_vts_change_event_t * const e = avbox_syncarg_data(arg);
 
 			DEBUG_VPRINT(LOG_MODULE, "AVBOX_PLAYERCTL_DVD_VTS_CHANGE (old=%i|new=%i)",
 				e->old_vtsN, e->new_vtsN);
@@ -2972,7 +3101,7 @@ wait_end:
 
 			ASSERT(inst != NULL);
 			ASSERT(inst->dvdio != NULL);
-			ASSERT(waiter != NULL);
+			ASSERT(arg != NULL);
 
 			dvdnav = avbox_dvdio_dvdnav(inst->dvdio);
 			ASSERT(dvdnav != NULL);
@@ -3010,16 +3139,14 @@ wait_end:
 
 vts_change_end:
 			/* signal the DVDNAV state machine to continue */
-			pthread_mutex_lock(&waiter->mutex);
-			pthread_cond_signal(&waiter->cond);
-			pthread_mutex_unlock(&waiter->mutex);
+			avbox_syncarg_return(arg, NULL);
 			break;
 		}
 		case AVBOX_PLAYERCTL_DVD_CELL_CHANGE:
 		{
 			int32_t tt, ptt;
 			uint32_t pos, len;
-			struct avbox_player_waiter * const waiter = ctlmsg->data;
+			struct avbox_syncarg * const arg = ctlmsg->data;
 			dvdnav_t *dvdnav = avbox_dvdio_dvdnav(inst->dvdio);
 
 			DEBUG_PRINT(LOG_MODULE, "DVDNAV_CELL_CHANGE");
@@ -3031,59 +3158,49 @@ vts_change_end:
 			DEBUG_VPRINT(LOG_MODULE, "At pos %d/%d", pos, len);
 
 			/* signal the DVDNAV state machine to continue */
-			pthread_mutex_lock(&waiter->mutex);
-			pthread_cond_signal(&waiter->cond);
-			pthread_mutex_unlock(&waiter->mutex);
+			avbox_syncarg_return(arg, NULL);
 			break;
 		}
 		case AVBOX_PLAYERCTL_DVD_SPU_CLUT_CHANGE:
 		{
-			struct avbox_player_waiter * const waiter = ctlmsg->data;
+			struct avbox_syncarg * const arg = ctlmsg->data;
 
 			DEBUG_PRINT(LOG_MODULE, "AVBOX_PLAYERCTL_DVD_SPU_CLUT_CHANGE");
 
 			/* signal the DVDNAV state machine to continue */
-			pthread_mutex_lock(&waiter->mutex);
-			pthread_cond_signal(&waiter->cond);
-			pthread_mutex_unlock(&waiter->mutex);
+			avbox_syncarg_return(arg, NULL);
 			break;
 		}
 		case AVBOX_PLAYERCTL_DVD_SPU_STREAM_CHANGE:
 		{
-			struct avbox_player_waiter * const waiter = ctlmsg->data;
+			struct avbox_syncarg * const arg = ctlmsg->data;
 
 			DEBUG_PRINT(LOG_MODULE, "AVBOX_PLAYERCTL_DVD_SPU_STREAM_CHANGE");
 
 			/* signal the DVDNAV state machine to continue */
-			pthread_mutex_lock(&waiter->mutex);
-			pthread_cond_signal(&waiter->cond);
-			pthread_mutex_unlock(&waiter->mutex);
+			avbox_syncarg_return(arg, NULL);
 			break;
 		}
 		case AVBOX_PLAYERCTL_DVD_HIGHLIGHT:
 		{
-			struct avbox_player_waiter * const waiter = ctlmsg->data;
-			dvdnav_highlight_event_t * const event = waiter->data;
+			struct avbox_syncarg * const arg = ctlmsg->data;
+			dvdnav_highlight_event_t * const event = avbox_syncarg_data(arg);
 			DEBUG_VPRINT(LOG_MODULE, "Hightlight button: %i",
 				event->buttonN);
 			/* signal the DVDNAV state machine to continue */
-			pthread_mutex_lock(&waiter->mutex);
-			pthread_cond_signal(&waiter->cond);
-			pthread_mutex_unlock(&waiter->mutex);
+			avbox_syncarg_return(arg, NULL);
 			break;
 		}
 		case AVBOX_PLAYERCTL_DVD_NAV_PACKET:
 		{
-			struct avbox_player_waiter * const waiter = ctlmsg->data;
+			struct avbox_syncarg * const arg = ctlmsg->data;
 
 			avbox_player_process_menus(inst);
 			inst->state_info.pos = (dvdnav_get_current_time(
 				avbox_dvdio_dvdnav(inst->dvdio)) / (90L * 1000L)) * 1000L * 1000L;
 
 			/* signal the DVDNAV state machine to continue */
-			pthread_mutex_lock(&waiter->mutex);
-			pthread_cond_signal(&waiter->cond);
-			pthread_mutex_unlock(&waiter->mutex);
+			avbox_syncarg_return(arg, NULL);
 			break;
 		}
 #endif
@@ -3099,8 +3216,6 @@ vts_change_end:
 	{
 		struct avbox_input_message *event =
 			avbox_message_payload(msg);
-
-		DEBUG_PRINT("shell", "Input event received");
 
 		switch (event->msg) {
 		case MBI_EVENT_CONTEXT:
@@ -3217,54 +3332,6 @@ vts_change_end:
 }
 
 
-/**
- * Run the player's control thread.
- */
-static void *
-avbox_player_run(void *arg)
-{
-	int quit = 0;
-	struct avbox_player * const inst = (struct avbox_player*) arg;
-	struct avbox_message * msg;
-
-	DEBUG_SET_THREAD_NAME("player");
-	DEBUG_PRINT("player", "Starting player control loop");
-
-	if (avbox_dispatch_init() == -1) {
-		LOG_VPRINT_ERROR("Could not initialize message dispatcher: %s",
-			strerror(errno));
-		return NULL;
-	}
-
-	inst->control_object = avbox_object_new(avbox_player_control, inst);
-	if (inst->control_object == NULL) {
-		LOG_VPRINT_ERROR("Could not create dispatch object: %s",
-			strerror(errno));
-		avbox_dispatch_shutdown();
-		return NULL;
-	}
-
-	while (!quit) {
-		if ((msg = avbox_dispatch_getmsg()) == NULL) {
-			switch (errno) {
-			case EAGAIN: continue;
-			case ESHUTDOWN:
-				quit = 1;
-				continue;
-			default:
-				DEBUG_VABORT("player", "getmsg() returned %i: %s",
-					errno, strerror(errno));
-			}
-		}
-		avbox_message_dispatch(msg);
-	}
-
-	avbox_dispatch_shutdown();
-
-	return NULL;
-}
-
-
 /****** BEGIN PUBLIC INTERFACE *******/
 
 
@@ -3292,6 +3359,18 @@ avbox_player_seek(struct avbox_player *inst, int flags, int64_t pos)
 	args->flags = flags;
 	args->pos = pos;
 	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_SEEK, args);
+}
+
+
+/**
+ * Tell the player to switch audio stream.
+ */
+void
+avbox_player_changeaudiotrack(struct avbox_player * const inst, int track_id)
+{
+	ASSERT(inst != NULL);
+	ASSERT(track_id == -1); /* for now */
+	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_CHANGE_AUDIO_TRACK, NULL);
 }
 
 
@@ -3506,11 +3585,13 @@ avbox_player_handler(void * const context, struct avbox_message * const msg)
 			free((void*) inst->media_file);
 		}
 
-		/* destroy the dispatch object and quit the
-		 * control thread */
-		avbox_object_destroy(inst->control_object);
-		pthread_join(inst->control_thread, NULL);
-
+		/* cleanup */
+		avbox_thread_destroy(inst->control_thread);
+		avbox_thread_destroy(inst->audio_decoder_thread);
+		avbox_thread_destroy(inst->video_decoder_thread);
+		avbox_thread_destroy(inst->video_output_thread);
+		avbox_thread_destroy(inst->stream_input_thread);
+		avbox_stopwatch_destroy(inst->video_time);
 		break;
 	}
 	case AVBOX_MESSAGETYPE_CLEANUP:
@@ -3574,8 +3655,22 @@ avbox_player_new(struct avbox_window *window)
 		}
 	}
 
+	/* initialize player threads */
+	if ((inst->audio_decoder_thread = avbox_thread_new(NULL, NULL)) == NULL ||
+		(inst->video_decoder_thread = avbox_thread_new(NULL, NULL)) == NULL ||
+		(inst->video_output_thread = avbox_thread_new(NULL, NULL)) == NULL ||
+		(inst->stream_input_thread = avbox_thread_new(NULL, NULL)) == NULL ||
+		(inst->control_thread = avbox_thread_new(avbox_player_control, inst)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create threads: %s",
+			strerror(errno));
+		free(inst);
+		abort();	/* until we cleanup */
+		return NULL;
+	}
+
 	if ((inst->video_time = avbox_stopwatch_new()) == NULL) {
 		LOG_PRINT_ERROR("Could not create stopwatch. Out of memory");
+		free(inst);
 		return NULL;
 	}
 
@@ -3619,13 +3714,6 @@ avbox_player_new(struct avbox_window *window)
 	avbox_checkpoint_init(&inst->video_decoder_checkpoint);
 	avbox_checkpoint_init(&inst->audio_decoder_checkpoint);
 	avbox_checkpoint_init(&inst->stream_parser_checkpoint);
-
-	/* fire control thread */
-	if (pthread_create(&inst->control_thread, NULL, avbox_player_run, inst) != 0) {
-		LOG_PRINT_ERROR("Could not create control thread");
-		free(inst);
-		return NULL;
-	}
 
 	return inst;
 }

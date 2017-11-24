@@ -417,7 +417,7 @@ mbox_downloads_populatelist(int id, void *data)
 	} else {
 		DEBUG_PRINT("downloads", "Populating list");
 		/* populate the list from a background thread */
-		if ((inst->worker = avbox_thread_delegate(
+		if ((inst->worker = avbox_workqueue_delegate(
 			mbox_downloads_populatelistasync, data)) == NULL) {
 			LOG_VPRINT_ERROR("Could not populate list: %s",
 				strerror(errno));

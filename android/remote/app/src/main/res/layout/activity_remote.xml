@@ -234,17 +234,17 @@
         android:onClick="onButtonPressed"/>
 
     <Button
-        android:text="SUBTITLES"
+        android:id="@+id/btnTrack"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:id="@+id/btnSubtitles"
-        android:background="@android:color/holo_blue_light"
-        android:textColor="@android:color/background_light"
         android:layout_alignBaseline="@+id/btnUp"
         android:layout_alignBottom="@+id/btnUp"
-        android:layout_alignParentRight="true"
         android:layout_alignParentEnd="true"
-        android:onClick="onButtonPressed"/>
+        android:layout_alignParentRight="true"
+        android:background="@android:color/holo_blue_light"
+        android:onClick="onButtonPressed"
+        android:text="TRACK"
+        android:textColor="@android:color/background_light" />
 
     <Button
         android:text="MUTE"

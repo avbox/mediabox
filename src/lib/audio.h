@@ -12,7 +12,7 @@ struct avbox_audiostream;
 /**
  * Stream dried callback.
  */
-typedef void (*avbox_audiostream_dried_callback)(
+typedef void (*avbox_audiostream_underrun_callback)(
 	struct avbox_audiostream * const inst, void * const context);
 
 
@@ -95,7 +95,9 @@ avbox_audiostream_drain(struct avbox_audiostream * const inst);
  * Create a new sound stream.
  */
 struct avbox_audiostream *
-avbox_audiostream_new(int max_frames, avbox_audiostream_dried_callback dried_callback, void * const callback_context);
+avbox_audiostream_new(int max_frames,
+	avbox_audiostream_underrun_callback underrun_callback,
+	void * const callback_context);
 
 
 /**

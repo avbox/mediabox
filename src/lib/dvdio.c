@@ -22,7 +22,7 @@
 struct avbox_dvdio
 {
 	char *path;
-	int quit;
+	int closed;
 	int blocking;
 	int playing;
 
@@ -54,7 +54,7 @@ avio_read_packet(void *opaque, uint8_t *buf, int bufsz)
 
 	while (1) {
 
-		if (inst->quit) {
+		if (inst->closed) {
 			inst->blocking = 0;
 			ret = 0;
 			goto end;
@@ -116,7 +116,7 @@ avio_read_packet(void *opaque, uint8_t *buf, int bufsz)
 		case DVDNAV_STOP:
 		{
 			inst->buf = NULL;
-			inst->quit = 1;
+			inst->closed = 1;
 			break;
 		}
 		default:
@@ -185,12 +185,69 @@ avbox_dvdio_dvdnav(struct avbox_dvdio * const inst)
 }
 
 
+/**
+ * Check is we're currently blocking the IO thread.
+ */
 int
 avbox_dvdio_isblocking(struct avbox_dvdio * const inst)
 {
 	return inst->blocking;
 }
 
+
+/**
+ * Get the dvdnav stream id that matches for
+ * a given AVStream id.
+ */
+int
+avbox_dvdio_dvdnavstream(int stream_id)
+{
+	/* find the stream id */
+	if ((stream_id & 0xf8) == 0x88) { /* dts */
+		stream_id &= 0x07;
+	} else if ((stream_id & 0xf0) == 0x80) { /* a52 */
+		stream_id &= 0xf;
+	} else if ((stream_id & 0xf0) == 0xa0) { /* lpcm */
+		stream_id &= 0x1f;
+	} else if ((stream_id & 0xe0) == 0xc0) { /* mpga */
+		stream_id &= 0x1f;
+	} else /*if ((i_id & 0x80) == 0x80)*/ {
+		/* i_id &= 0x07; */
+		LOG_VPRINT_ERROR("Could not map stream: %i!",
+			stream_id);
+		stream_id = -1;
+	}
+
+	return stream_id;
+}
+
+
+static int
+avbox_dvdio_initavio(struct avbox_dvdio * const inst)
+{
+	int ret = -1;
+	const size_t avio_ctx_bufsz = 8192;
+	/* initialize avio context */
+	if ((inst->avio_ctx_buffer = av_malloc(avio_ctx_bufsz)) == NULL) {
+		ASSERT(errno == ENOMEM);
+		goto end;
+	}
+	if ((inst->avio_ctx = avio_alloc_context(inst->avio_ctx_buffer,
+		avio_ctx_bufsz, 0, inst, avio_read_packet, NULL, NULL)) == NULL) {
+		goto end;
+	}
+	ret = 0;
+end:
+	if (ret == -1) {
+		if (inst->avio_ctx != NULL) {
+			av_free(inst->avio_ctx);
+		} else if (inst->avio_ctx_buffer != NULL) {
+			av_free(inst->avio_ctx);
+		}
+	}
+
+	return ret;
+}
 
 /**
  * Opens a DVD device for reading.
@@ -201,7 +258,6 @@ avbox_dvdio_open(const char * const path, avbox_dvdio_dvdnavcb callback, void *c
 	struct avbox_dvdio *inst;
 	struct avbox_dvdio *ret = NULL;
 	dvdnav_status_t status;
-	const size_t avio_ctx_bufsz = 512;
 
 	DEBUG_VPRINT(LOG_MODULE, "Opening device: %s", path);
 
@@ -224,12 +280,7 @@ avbox_dvdio_open(const char * const path, avbox_dvdio_dvdnavcb callback, void *c
 	}
 
 	/* initialize avio context */
-	if ((inst->avio_ctx_buffer = av_malloc(avio_ctx_bufsz)) == NULL) {
-		ASSERT(errno == ENOMEM);
-		goto end;
-	}
-	if ((inst->avio_ctx = avio_alloc_context(inst->avio_ctx_buffer,
-		avio_ctx_bufsz, 0, inst, avio_read_packet, NULL, NULL)) == NULL) {
+	if (avbox_dvdio_initavio(inst) == -1) {
 		goto end;
 	}
 
@@ -251,7 +302,7 @@ avbox_dvdio_open(const char * const path, avbox_dvdio_dvdnavcb callback, void *c
 		goto end;
 	}
 
-	inst->quit = 0;
+	inst->closed = 0;
 	inst->blen = 0;
 	inst->buf = NULL;
 	inst->blocking = 0;
@@ -264,11 +315,6 @@ end:
 	if (ret == NULL && inst != NULL) {
 		if (inst->dvdnav) {
 			dvdnav_close(inst->dvdnav);
-		}
-		if (inst->avio_ctx != NULL) {
-			av_free(inst->avio_ctx);
-		} else if (inst->avio_ctx_buffer != NULL) {
-			av_free(inst->avio_ctx);
 		}
 		if (inst->path != NULL) {
 			free(inst->path);
@@ -291,10 +337,23 @@ avbox_dvdio_close(struct avbox_dvdio * const inst)
 	ASSERT(inst != NULL);
 	ASSERT(inst->avio_ctx != NULL);
 	ASSERT(inst->dvdnav != NULL);
+	inst->closed = 1;
+}
 
-	/* send the stop command and wait for the
-	 * thread to exit */
-	inst->quit = 1;
+
+/**
+ * Reopen a closed dvdio stream.
+ */
+int
+avbox_dvdio_reopen(struct avbox_dvdio * const inst)
+{
+	DEBUG_PRINT(LOG_MODULE, "Re-opening DVDIO");
+
+	ASSERT(inst != NULL);
+	ASSERT(inst->avio_ctx != NULL);
+	ASSERT(inst->dvdnav != NULL);
+	inst->closed = 0;
+	return 0;
 }
 
 
@@ -306,6 +365,8 @@ avbox_dvdio_destroy(struct avbox_dvdio * const inst)
 {
 	DEBUG_PRINT(LOG_MODULE, "Destroying DVDIO");
 	dvdnav_close(inst->dvdnav);
-	av_free(inst->avio_ctx);
+	if (inst->avio_ctx) {
+		av_free(inst->avio_ctx);
+	}
 	free(inst);
 }

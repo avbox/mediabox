@@ -59,13 +59,15 @@ avbox_ffmpegutil_initvideofilters(
 
 int
 avbox_ffmpegutil_initaudiofilters(
-	AVFormatContext *fmt_ctx,
-	AVCodecContext *dec_ctx,
 	AVFilterContext **buffersink_ctx,
 	AVFilterContext **buffersrc_ctx,
 	AVFilterGraph **filter_graph,
 	const char *filters_descr,
-	int audio_stream_index, void *dvdnav);
+	int audio_stream_index,
+	int sample_rate,
+	AVRational time_base,
+	uint64_t channel_layout,
+	const char *sample_fmt_name);
 
 
 AVCodecContext *

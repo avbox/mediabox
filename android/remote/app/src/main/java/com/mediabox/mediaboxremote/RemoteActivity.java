@@ -240,7 +240,14 @@ public class RemoteActivity extends AppCompatActivity
         this.findViewById(R.id.btnMenu).setOnLongClickListener(new View.OnLongClickListener() {
             @Override
             public boolean onLongClick(View v) {
-                sendMessage("CONTEXT");
+                sendMessage("MENU_LONG");
+                return true;
+            }
+        });
+        this.findViewById(R.id.btnTrack).setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                sendMessage("TRACK_LONG");
                 return true;
             }
         });
@@ -441,9 +448,9 @@ public class RemoteActivity extends AppCompatActivity
         {
             sendMessage("VOLDOWN");
         }
-        else if (view == this.findViewById(R.id.btnSubtitles))
+        else if (view == this.findViewById(R.id.btnTrack))
         {
-            sendMessage("SUBS");
+            sendMessage("TRACK");
         }
         else if (view == this.findViewById(R.id.btnMute))
         {

@@ -70,7 +70,7 @@ struct avbox_audiostream
 	snd_pcm_uframes_t buffer_size;
 	unsigned int framerate;
 	struct avbox_queue *packets;
-	avbox_audiostream_dried_callback stream_dried_callback;
+	avbox_audiostream_underrun_callback underrun_callback;
 	void *callback_context;
 };
 
@@ -380,7 +380,7 @@ end:
 static void*
 avbox_audiostream_output(void *arg)
 {
-	int ret, dried = 1;
+	int ret, underrun = 1;
 	size_t n_frames;
 	struct avbox_audiostream * const inst = (struct avbox_audiostream * const) arg;
 	struct avbox_audio_packet * packet;
@@ -516,13 +516,17 @@ avbox_audiostream_output(void *arg)
 	/* start audio IO */
 	while (1) {
 		/* get the next packet */
-		if (!dried) {
+		if (!underrun) {
+			int64_t timeout;
+
 			/* calculate how long until the stream dries out
 			 * and wait up to that long for new packets */
 			if ((frames = snd_pcm_avail(inst->pcm_handle)) < 0) {
-				continue;
+				timeout = FRAMES2TIME(inst, inst->buffer_size);
+			} else {
+				timeout = FRAMES2TIME(inst, inst->buffer_size - frames);
 			}
-			const int64_t timeout = FRAMES2TIME(inst, inst->buffer_size - frames);
+
 			if ((packet = avbox_queue_timedpeek(inst->packets, timeout)) == NULL) {
 				if (errno == EAGAIN) {
 					snd_pcm_state_t state = snd_pcm_state(inst->pcm_handle);
@@ -530,14 +534,15 @@ avbox_audiostream_output(void *arg)
 					if (state == SND_PCM_STATE_RUNNING ||
 						state == SND_PCM_STATE_PAUSED ||
 						state == SND_PCM_STATE_SUSPENDED) {
-						DEBUG_VPRINT(LOG_MODULE, "PCM state after timedpeed: %s",
+						DEBUG_VPRINT(LOG_MODULE, "PCM state after timedpeek: %s. Still waiting",
 							avbox_pcm_state_getstring(state));
 						continue;
 					}
 
-					dried = 1;
-					if (inst->stream_dried_callback != NULL) {
-						inst->stream_dried_callback(inst, inst->callback_context);
+					underrun = 1;
+
+					if (inst->underrun_callback != NULL) {
+						inst->underrun_callback(inst, inst->callback_context);
 					}
 					continue;
 				} else if (errno == ESHUTDOWN) {
@@ -559,7 +564,7 @@ avbox_audiostream_output(void *arg)
 					goto end;
 				}
 			}
-			dried = 0;
+			underrun = 0;
 		}
 
 		/* wait for the pcm to be ready to receive a fragment */
@@ -611,7 +616,7 @@ avbox_audiostream_output(void *arg)
 					goto end;
 				}
 
-				assert(frames == 0);
+				ASSERT(frames == 0);
 				pthread_mutex_unlock(&inst->lock);
 				continue;
 
@@ -829,7 +834,9 @@ avbox_audiostream_drain(struct avbox_audiostream * const inst)
  * Create a new sound stream
  */
 struct avbox_audiostream *
-avbox_audiostream_new(int max_frames, avbox_audiostream_dried_callback dried_callback, void * const callback_context)
+avbox_audiostream_new(int max_frames,
+	avbox_audiostream_underrun_callback underrun_callback,
+	void * const callback_context)
 {
 	struct avbox_audiostream *stream;
 
@@ -860,7 +867,7 @@ avbox_audiostream_new(int max_frames, avbox_audiostream_dried_callback dried_cal
 
 	stream->max_frames = max_frames;
 	stream->queued_frames = 0;
-	stream->stream_dried_callback = dried_callback;
+	stream->underrun_callback = underrun_callback;
 	stream->callback_context = callback_context;
 
 	return stream;

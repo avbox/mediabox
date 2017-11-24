@@ -1434,7 +1434,7 @@ mbox_library_create_db_if_not_exist()
 		sqlite3_close(db);
 
 		/* scan the internal storage in background thread */
-		if ((del = avbox_thread_delegate(
+		if ((del = avbox_workqueue_delegate(
 			mbox_library_local_scan_library, NULL)) == NULL) {
 			LOG_VPRINT_ERROR("Could not start scan worker: %s",
 				strerror(errno));

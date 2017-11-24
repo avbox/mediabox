@@ -632,7 +632,7 @@ avbox_process_monitor_thread(void *arg)
 						proc->cbstate->result = 0;
 
 						if ((proc->cbstate->worker =
-							avbox_thread_delegate(avbox_process_callback_helper, proc)) == NULL) {
+							avbox_workqueue_delegate(avbox_process_callback_helper, proc)) == NULL) {
 							free(proc->cbstate);
 							proc->cbstate = NULL;
 							cbresult = 0;

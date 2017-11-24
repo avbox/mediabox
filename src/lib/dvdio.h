@@ -20,6 +20,13 @@ avbox_dvdio_open(const char * const path,
 
 
 /**
+ * Reopen a closed dvdio stream.
+ */
+int
+avbox_dvdio_reopen(struct avbox_dvdio * const inst);
+
+
+/**
  * Wake any threads waiting on IO
  */
 void
@@ -38,6 +45,14 @@ avbox_dvdio_play(struct avbox_dvdio * const inst);
  */
 int
 avbox_dvdio_isblocking(struct avbox_dvdio * const inst);
+
+
+/**
+ * Get the dvdnav stream id that matches for
+ * a given AVStream id.
+ */
+int
+avbox_dvdio_dvdnavstream(int stream_id);
 
 
 /**

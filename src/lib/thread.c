@@ -53,12 +53,15 @@ LISTABLE_STRUCT(avbox_thread,
 	struct timespec start_time;
 	struct timespec stop_time;
 	struct avbox_object *object;
+	avbox_message_handler handler;
+	void *context;
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
 );
 
 
-static LIST threads;
-static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+static LIST workqueue_threads;
+static pthread_mutex_t workqueue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 /**
@@ -86,14 +89,25 @@ avbox_thread_msghandler(void * const context, struct avbox_message *msg)
 	}
 	case AVBOX_MESSAGETYPE_DESTROY:
 	{
+		if (thread->handler != NULL) {
+			return thread->handler(thread->context, msg);
+		}
 		break;
 	}
 	case AVBOX_MESSAGETYPE_CLEANUP:
 	{
 		avbox_dispatch_close();
+		if (thread->handler != NULL) {
+			return thread->handler(thread->context, msg);
+		}
 		break;
 	}
 	default:
+		if (thread->handler != NULL) {
+			return thread->handler(thread->context, msg);
+		}
+		LOG_VPRINT_ERROR("Unhandled message: 0x%x",
+			avbox_message_id(msg));
 		abort();
 	}
 	return AVBOX_DISPATCH_OK;
@@ -109,9 +123,6 @@ avbox_thread_run(void *arg)
 	int quit = 0;
 	struct avbox_thread * const thread = (struct avbox_thread*) arg;
 	struct avbox_message * msg;
-
-	DEBUG_SET_THREAD_NAME("avbox-worker");
-	DEBUG_VPRINT("thread", "Thread #%i starting", thread->no);
 
 	/* initialize message dispatcher */
 	if (avbox_dispatch_init() == -1) {
@@ -134,10 +145,10 @@ avbox_thread_run(void *arg)
 	clock_gettime(CLOCK_MONOTONIC, &thread->stop_time);
 
 	/* signal that we're up and running */
-	pthread_mutex_lock(&lock);
+	pthread_mutex_lock(&thread->mutex);
 	thread->running = 1;
-	pthread_cond_signal(&cond);
-	pthread_mutex_unlock(&lock);
+	pthread_cond_signal(&thread->cond);
+	pthread_mutex_unlock(&thread->mutex);
 
 	/* run the message loop */
 	while (!quit) {
@@ -163,9 +174,9 @@ avbox_thread_run(void *arg)
 
 end:
 	/* signal that we've exited */
-	pthread_mutex_lock(&lock);
-	pthread_cond_signal(&cond);
-	pthread_mutex_unlock(&lock);
+	pthread_mutex_lock(&thread->mutex);
+	pthread_cond_signal(&thread->cond);
+	pthread_mutex_unlock(&thread->mutex);
 
 	return NULL;
 }
@@ -174,13 +185,10 @@ end:
 /**
  * Create a new thread.
  */
-static struct avbox_thread *
-avbox_thread_new(void)
+struct avbox_thread *
+avbox_thread_new(avbox_message_handler handler, void * const context)
 {
 	struct avbox_thread *thread;
-#ifndef NDEBUG
-	static int thread_no = 0;
-#endif
 
 	/* allocate memory */
 	if ((thread = malloc(sizeof(struct avbox_thread))) == NULL) {
@@ -188,26 +196,27 @@ avbox_thread_new(void)
 		return NULL;
 	}
 
-	/* start thread */
-	pthread_mutex_lock(&lock);
+	pthread_mutex_lock(&thread->mutex);
+
 #ifndef NDEBUG
-	thread->no = thread_no++;
+	thread->no = -1;
 	thread->jobs = 0;
 #endif
+	thread->handler = handler;
+	thread->context = context;
 	thread->running = 0;
 	if (pthread_create(&thread->thread, NULL, avbox_thread_run, thread) != 0) {
 		free(thread);
 		return NULL;
 	}
-	pthread_cond_wait(&cond, &lock);
-	pthread_mutex_unlock(&lock);
+	pthread_cond_wait(&thread->cond, &thread->mutex);
+	pthread_mutex_unlock(&thread->mutex);
 
 	/* check that the thread started successfully */
 	if (!thread->running) {
 		free(thread);
 		thread = NULL;
 	} else {
-		LIST_APPEND(&threads, thread);
 	}
 
 	DEBUG_VPRINT("thread", "Thread %p started", thread);
@@ -217,9 +226,46 @@ avbox_thread_new(void)
 
 
 /**
+ * Delegates a function call to a thread.
+ */
+struct avbox_delegate *
+avbox_thread_delegate(struct avbox_thread * const thread,
+	avbox_delegate_fn func, void * const arg)
+{
+	struct avbox_delegate *del = NULL;
+
+	if ((del = avbox_delegate_new(func, arg)) == NULL) {
+		assert(errno == ENOMEM);
+		goto end;
+	}
+
+	/* dispatch it to the chosen thread */
+	if (avbox_object_sendmsg(&thread->object,
+		AVBOX_MESSAGETYPE_DELEGATE, AVBOX_DISPATCH_UNICAST, del) == NULL) {
+		free(del);
+		del = NULL;
+		goto end;
+	}
+end:
+	return del;
+}
+
+
+/**
+ * Get the underlying object.
+ */
+struct avbox_object *
+avbox_thread_object(const struct avbox_thread * const thread)
+{
+	ASSERT(thread != NULL);
+	return thread->object;
+}
+
+
+/**
  * Destroy a thread.
  */
-static void
+void
 avbox_thread_destroy(struct avbox_thread * const thread)
 {
 	DEBUG_VPRINT("thread", "Shutting down thread #%i",
@@ -227,7 +273,6 @@ avbox_thread_destroy(struct avbox_thread * const thread)
 
 	assert(thread != NULL);
 
-	LIST_REMOVE(thread);
 
 	/* Destroy the thread object and wait for it
 	 * to exit */
@@ -249,7 +294,7 @@ avbox_thread_pick(void)
 
 	/* Pick the first free thread. If one cannot be found
 	 * pick the one with the shortest runtime */
-	LIST_FOREACH(struct avbox_thread*, thread, &threads) {
+	LIST_FOREACH(struct avbox_thread*, thread, &workqueue_threads) {
 		struct timespec now, runtime;
 		if (timegte(&thread->stop_time, &thread->start_time)) {
 			best_thread = thread;
@@ -270,15 +315,15 @@ avbox_thread_pick(void)
 
 
 /**
- * Delegate a function call to a thread.
+ * Delegate a function call to the work queue.
  */
 struct avbox_delegate *
-avbox_thread_delegate(avbox_delegate_fn func, void * arg)
+avbox_workqueue_delegate(avbox_delegate_fn func, void * arg)
 {
 	struct avbox_delegate *del;
 	struct avbox_thread *thread = NULL;
 
-	pthread_mutex_lock(&lock);
+	pthread_mutex_lock(&workqueue_mutex);
 
 	/* pick the best thread */
 	if ((thread = avbox_thread_pick()) == NULL) {
@@ -287,22 +332,29 @@ avbox_thread_delegate(avbox_delegate_fn func, void * arg)
 	}
 
 	/* create a new delegate */
-	if ((del = avbox_delegate_new(func, arg)) == NULL) {
-		assert(errno == ENOMEM);
+	if ((del = avbox_thread_delegate(thread, func, arg)) == NULL) {
 		goto end;
 	}
-
-	/* dispatch it to the chosen thread */
-	if (avbox_object_sendmsg(&thread->object,
-		AVBOX_MESSAGETYPE_DELEGATE, AVBOX_DISPATCH_UNICAST, del) == NULL) {
-		free(del);
-		del = NULL;
-		goto end;
-	}
-
 end:
-	pthread_mutex_unlock(&lock);
+	pthread_mutex_unlock(&workqueue_mutex);
 	return del;
+}
+
+
+/**
+ * Initialize a workqueue thread.
+ */
+static void *
+avbox_workqueue_thread_init(void *arg)
+{
+	struct avbox_thread * const thread = arg;
+#ifndef NDEBUG
+	DEBUG_SET_THREAD_NAME("avbox-worker");
+	DEBUG_VPRINT("thread", "Thread #%i started", thread->no);
+	static int thread_no = 0;
+	thread->no = thread_no++;
+#endif
+	return thread;
 }
 
 
@@ -310,20 +362,29 @@ end:
  * Initialize the thread pool.
  */
 int
-avbox_thread_init(void)
+avbox_workqueue_init(void)
 {
 	int i;
-	struct avbox_thread *thread;
-
-	LIST_INIT(&threads);
+	struct avbox_thread *thread, *thread_check;
+	struct avbox_delegate *initfunc;
+	LIST_INIT(&workqueue_threads);
 
 	for (i = 0; i < N_THREADS; i++) {
-		if ((thread = avbox_thread_new()) == NULL) {
-			LIST_FOREACH_SAFE(struct avbox_thread*, thread, &threads, {
+		if ((thread = avbox_thread_new(NULL, NULL)) == NULL ||
+			(initfunc = avbox_thread_delegate(thread, avbox_workqueue_thread_init, thread)) == NULL) {
+			if (thread != NULL) {
+				avbox_thread_destroy(thread);
+			}
+			LIST_FOREACH_SAFE(struct avbox_thread*, thread, &workqueue_threads, {
 				avbox_thread_destroy(thread);
 			});
 			return -1;
 		}
+		avbox_delegate_wait(initfunc, (void**) &thread_check);
+		if (thread_check != thread) {
+			abort();
+		}
+		LIST_APPEND(&workqueue_threads, thread);
 	}
 
 	return 0;
@@ -334,13 +395,14 @@ avbox_thread_init(void)
  * Shutdown the thread pool.
  */
 void
-avbox_thread_shutdown(void)
+avbox_workqueue_shutdown(void)
 {
 	struct avbox_thread *thread;
 
 	DEBUG_PRINT("thread", "Shutting down thread pool");
 
-	while ((thread = LIST_TAIL(struct avbox_thread*, &threads)) != NULL) {
+	while ((thread = LIST_TAIL(struct avbox_thread*, &workqueue_threads)) != NULL) {
 		avbox_thread_destroy(thread);
+		LIST_REMOVE(thread);
 	}
 }

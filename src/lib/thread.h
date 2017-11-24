@@ -21,27 +21,56 @@
 #ifndef __AVBOX_THREAD_H__
 #define __AVBOX_THREAD_H__
 #include "delegate.h"
+#include "dispatch.h"
 
 
 /**
- * Delegate a function call to a thread.
+ * Create a new thread.
+ */
+struct avbox_thread *
+avbox_thread_new(avbox_message_handler handler, void * const context);
+
+
+/**
+ * Delegates a function call to a thread.
+ */
+struct avbox_delegate *
+avbox_thread_delegate(struct avbox_thread * const thread,
+	avbox_delegate_fn func, void * const arg);
+
+/**
+ * Get the underlying object.
+ */
+struct avbox_object *
+avbox_thread_object(const struct avbox_thread * const thread);
+
+
+/**
+ * Destroy a thread.
+ */
+void
+avbox_thread_destroy(struct avbox_thread * const thread);
+
+
+/**
+ * Delegate a function call to the work queue.
  */
 struct avbox_delegate*
-avbox_thread_delegate(avbox_delegate_fn func, void * arg);
+avbox_workqueue_delegate(avbox_delegate_fn func, void * arg);
 
 
 /**
  * Initialize the thread pool.
  */
 int
-avbox_thread_init(void);
+avbox_workqueue_init(void);
 
 
 /**
  * Shutdown the thread pool.
  */
 void
-avbox_thread_shutdown(void);
+avbox_workqueue_shutdown(void);
 
 
 #endif

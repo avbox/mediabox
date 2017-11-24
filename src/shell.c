@@ -707,6 +707,16 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			}
 			break;
 		}
+		case MBI_EVENT_TRACK:
+		{
+			enum avbox_player_status status;
+			DEBUG_PRINT(LOG_MODULE, "Track button pressed");
+			status = avbox_player_getstatus(player);
+			if (status == MB_PLAYER_STATUS_PLAYING || status == MB_PLAYER_STATUS_PAUSED) {
+				avbox_player_changeaudiotrack(player, -1);
+			}
+			break;
+		}
 		case MBI_EVENT_BACK:
 		{
 			struct avbox_window * const overlay_window = mbox_overlay_window(overlay);
