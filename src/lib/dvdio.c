@@ -13,6 +13,7 @@
 #include "queue.h"
 #include "math_util.h"
 #include "time_util.h"
+#include "avbox.h"
 
 
 #define AVBOX_DVDIO_DEFLANG	"en"
@@ -25,6 +26,7 @@ struct avbox_dvdio
 	int closed;
 	int blocking;
 	int playing;
+	int waiting;
 
 	uint8_t *buf;
 	uint8_t mem[DVD_VIDEO_LB_LEN];
@@ -35,6 +37,7 @@ struct avbox_dvdio
 	void *callback_context;
 	avbox_dvdio_dvdnavcb callback;
 	uint8_t *avio_ctx_buffer;
+	struct avbox_player *player;
 	pthread_mutex_t lock;
 };
 
@@ -119,17 +122,51 @@ avio_read_packet(void *opaque, uint8_t *buf, int bufsz)
 			inst->closed = 1;
 			break;
 		}
+		case DVDNAV_HOP_CHANNEL:
+			DEBUG_PRINT(LOG_MODULE, "DVDNAV_HOP_CHANNEL");
+		case DVDNAV_WAIT:
+		{
+			if (!inst->playing) {
+				dvdnav_wait_skip(inst->dvdnav);
+			} else {
+				struct avbox_syncarg arg;
+
+				DEBUG_PRINT(LOG_MODULE, "DVDNAV_WAIT");
+
+				avbox_syncarg_init(&arg, NULL);
+				inst->waiting = 1;
+				avbox_player_sendctl(inst->player, AVBOX_PLAYERCTL_FLUSH, &arg);
+				avbox_syncarg_wait(&arg);
+				dvdnav_wait_skip(inst->dvdnav);
+				inst->waiting = 0;
+			}
+			break;
+		}
+		case DVDNAV_STILL_FRAME:
+		{
+			if (!inst->playing) {
+				dvdnav_still_skip(inst->dvdnav);
+			} else {
+				struct avbox_syncarg arg;
+				dvdnav_still_event_t * const e = (dvdnav_still_event_t*) inst->buf;
+
+				DEBUG_PRINT(LOG_MODULE, "DVDNAV_STILL_FRAME");
+
+				avbox_syncarg_init(&arg, (void*) ((intptr_t)e->length));
+				inst->waiting = 1;
+				avbox_player_sendctl(inst->player, AVBOX_PLAYERCTL_STILL_FRAME, &arg);
+				avbox_syncarg_wait(&arg);
+				dvdnav_still_skip(inst->dvdnav);
+				inst->waiting = 0;
+			}
+			break;
+		}
 		default:
 			if (!inst->playing) {
 				switch (event) {
 				case DVDNAV_STILL_FRAME:
 				{
 					dvdnav_still_skip(inst->dvdnav);
-					break;
-				}
-				case DVDNAV_WAIT:
-				{
-					dvdnav_wait_skip(inst->dvdnav);
 					break;
 				}
 				default:
@@ -196,6 +233,20 @@ avbox_dvdio_isblocking(struct avbox_dvdio * const inst)
 
 
 /**
+ * Returns 1 if the stream is expected to underrun (meaning
+ * that the player should not handle the underrun), 0
+ * otherwise.
+ */
+int
+avbox_dvdio_underrunok(const struct avbox_dvdio * const inst)
+{
+	return (!dvdnav_is_domain_vts(inst->dvdnav) &&
+		!dvdnav_is_domain_fp(inst->dvdnav)) ||
+		inst->waiting;
+}
+
+
+/**
  * Get the dvdnav stream id that matches for
  * a given AVStream id.
  */
@@ -253,7 +304,8 @@ end:
  * Opens a DVD device for reading.
  */
 struct avbox_dvdio *
-avbox_dvdio_open(const char * const path, avbox_dvdio_dvdnavcb callback, void *callback_context)
+avbox_dvdio_open(const char * const path, struct avbox_player * const player,
+	avbox_dvdio_dvdnavcb callback, void *callback_context)
 {
 	struct avbox_dvdio *inst;
 	struct avbox_dvdio *ret = NULL;
@@ -307,6 +359,8 @@ avbox_dvdio_open(const char * const path, avbox_dvdio_dvdnavcb callback, void *c
 	inst->buf = NULL;
 	inst->blocking = 0;
 	inst->playing = 0;
+	inst->waiting = 0;
+	inst->player = player;
 	inst->callback = callback;
 	inst->callback_context = callback_context;
 	ret = inst;

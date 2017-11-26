@@ -5,6 +5,8 @@
 #include <libavformat/avio.h>
 #include <dvdnav/dvdnav.h>
 
+#include "avbox.h"
+
 struct avbox_dvdio;
 
 
@@ -16,6 +18,7 @@ typedef void (*avbox_dvdio_dvdnavcb)(void *context, int event, void *data);
  */
 struct avbox_dvdio *
 avbox_dvdio_open(const char * const path,
+	struct avbox_player * const player,
 	avbox_dvdio_dvdnavcb callback, void * callback_context);
 
 
@@ -53,6 +56,15 @@ avbox_dvdio_isblocking(struct avbox_dvdio * const inst);
  */
 int
 avbox_dvdio_dvdnavstream(int stream_id);
+
+
+/**
+ * Returns 1 if the stream is expected to underrun (meaning
+ * that the player should not handle the underrun), 0
+ * otherwise.
+ */
+int
+avbox_dvdio_underrunok(const struct avbox_dvdio * const inst);
 
 
 /**

@@ -30,8 +30,56 @@
 #define AVBOX_PLAYER_SEEK_CHAPTER	(0x02)
 #define AVBOX_PLAYER_SEEK_RELATIVE	(0x04)
 
+#define AVBOX_PLAYERCTL_PLAY				(0x01)
+#define AVBOX_PLAYERCTL_PAUSE				(0x02)
+#define AVBOX_PLAYERCTL_STOP				(0x03)
+#define AVBOX_PLAYERCTL_SEEK				(0x04)
+#define AVBOX_PLAYERCTL_THREADEXIT			(0x05)
+#define AVBOX_PLAYERCTL_STREAM_READY			(0x06)
+#define AVBOX_PLAYERCTL_AUDIODEC_READY			(0x07)
+#define AVBOX_PLAYERCTL_VIDEODEC_READY			(0x08)
+#define AVBOX_PLAYERCTL_AUDIOOUT_READY			(0x09)
+#define AVBOX_PLAYERCTL_VIDEOOUT_READY 			(0x0A)
+#define AVBOX_PLAYERCTL_STREAM_EXIT			(0x0B)
+#define AVBOX_PLAYERCTL_BUFFER_UNDERRUN			(0x0C)
+#define AVBOX_PLAYERCTL_AUDIO_STREAM_UNDERRUN		(0x0D)
+#define AVBOX_PLAYERCTL_CHANGE_AUDIO_TRACK		(0x0F)
+#define AVBOX_PLAYERCTL_FLUSH				(0x10)
+#define AVBOX_PLAYERCTL_STILL_FRAME			(0x11)
+
+
+
+#ifdef ENABLE_DVD
+#define AVBOX_PLAYERCTL_DVD				(0x0700)
+#define AVBOX_PLAYERCTL_DVD_VTS_CHANGE			(AVBOX_PLAYERCTL_DVD | DVDNAV_VTS_CHANGE)
+#define AVBOX_PLAYERCTL_DVD_WAIT			(AVBOX_PLAYERCTL_DVD | DVDNAV_WAIT)
+#define AVBOX_PLAYERCTL_DVD_STILL_FRAME			(AVBOX_PLAYERCTL_DVD | DVDNAV_STILL_FRAME)
+#define AVBOX_PLAYERCTL_DVD_AUDIO_STREAM_CHANGE		(AVBOX_PLAYERCTL_DVD | DVDNAV_AUDIO_STREAM_CHANGE)
+#define AVBOX_PLAYERCTL_DVD_HOP_CHANNEL			(AVBOX_PLAYERCTL_DVD | DVDNAV_HOP_CHANNEL)
+#define AVBOX_PLAYERCTL_DVD_HIGHLIGHT			(AVBOX_PLAYERCTL_DVD | DVDNAV_HIGHLIGHT)
+#define AVBOX_PLAYERCTL_DVD_NAV_PACKET			(AVBOX_PLAYERCTL_DVD | DVDNAV_NAV_PACKET)
+#define AVBOX_PLAYERCTL_DVD_CELL_CHANGE			(AVBOX_PLAYERCTL_DVD | DVDNAV_CELL_CHANGE)
+#define AVBOX_PLAYERCTL_DVD_SPU_CLUT_CHANGE		(AVBOX_PLAYERCTL_DVD | DVDNAV_SPU_CLUT_CHANGE)
+#define AVBOX_PLAYERCTL_DVD_SPU_STREAM_CHANGE		(AVBOX_PLAYERCTL_DVD | DVDNAV_SPU_STREAM_CHANGE)
+#endif
+
+
 
 struct avbox_player;
+
+enum avbox_aspect_ratio
+{
+	AVBOX_ASPECT_16_9 = 0,
+	AVBOX_ASPECT_4_3 = 1
+};
+
+
+/* TODO: This belongs somewhere else */
+struct avbox_size
+{
+	int w;
+	int h;
+};
 
 
 LISTABLE_STRUCT(avbox_playlist_item,
@@ -59,6 +107,20 @@ struct avbox_player_status_data
 	struct avbox_player *sender;
 	enum avbox_player_status last_status;
 	enum avbox_player_status status;
+};
+
+
+/**
+ * Stores information about the current state of the
+ * player.
+ */
+struct avbox_player_state_info
+{
+	int64_t pos;
+	int64_t duration;
+	char *title;
+	struct avbox_size video_res;
+	struct avbox_size scaled_res;	/* this is the scaled video size */
 };
 
 
@@ -174,5 +236,14 @@ avbox_player_object(struct avbox_player * const inst);
  */
 struct avbox_player*
 avbox_player_new(struct avbox_window *window);
+
+
+/**
+ * Sends a control message to the player.
+ */
+int
+avbox_player_sendctl(struct avbox_player * const inst,
+	const int ctl, void * const data);
+
 
 #endif
