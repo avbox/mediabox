@@ -112,8 +112,8 @@ main (int argc, char **argv)
 	/* Change the working directory.
 	 * This is where profiling data will be stored */
 	if (chdir(WORKDIR) == -1) {
-		fprintf(stderr, "%s: Could not change working directory: %s\n",
-			argv[0], strerror(errno));
+		fprintf(stderr, "%s: Could not change working directory to %s: %s\n",
+			argv[0], WORKDIR, strerror(errno));
 	}
 
 	/* initialize application */

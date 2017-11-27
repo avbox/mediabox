@@ -43,26 +43,15 @@
 #define AVBOX_PLAYERCTL_STREAM_EXIT			(0x0B)
 #define AVBOX_PLAYERCTL_BUFFER_UNDERRUN			(0x0C)
 #define AVBOX_PLAYERCTL_AUDIO_STREAM_UNDERRUN		(0x0D)
+#define AVBOX_PLAYERCTL_ASPECT_RATIO_CHANGE		(0x0E)
 #define AVBOX_PLAYERCTL_CHANGE_AUDIO_TRACK		(0x0F)
 #define AVBOX_PLAYERCTL_FLUSH				(0x10)
 #define AVBOX_PLAYERCTL_STILL_FRAME			(0x11)
-
-
-
-#ifdef ENABLE_DVD
-#define AVBOX_PLAYERCTL_DVD				(0x0700)
-#define AVBOX_PLAYERCTL_DVD_VTS_CHANGE			(AVBOX_PLAYERCTL_DVD | DVDNAV_VTS_CHANGE)
-#define AVBOX_PLAYERCTL_DVD_WAIT			(AVBOX_PLAYERCTL_DVD | DVDNAV_WAIT)
-#define AVBOX_PLAYERCTL_DVD_STILL_FRAME			(AVBOX_PLAYERCTL_DVD | DVDNAV_STILL_FRAME)
-#define AVBOX_PLAYERCTL_DVD_AUDIO_STREAM_CHANGE		(AVBOX_PLAYERCTL_DVD | DVDNAV_AUDIO_STREAM_CHANGE)
-#define AVBOX_PLAYERCTL_DVD_HOP_CHANNEL			(AVBOX_PLAYERCTL_DVD | DVDNAV_HOP_CHANNEL)
-#define AVBOX_PLAYERCTL_DVD_HIGHLIGHT			(AVBOX_PLAYERCTL_DVD | DVDNAV_HIGHLIGHT)
-#define AVBOX_PLAYERCTL_DVD_NAV_PACKET			(AVBOX_PLAYERCTL_DVD | DVDNAV_NAV_PACKET)
-#define AVBOX_PLAYERCTL_DVD_CELL_CHANGE			(AVBOX_PLAYERCTL_DVD | DVDNAV_CELL_CHANGE)
-#define AVBOX_PLAYERCTL_DVD_SPU_CLUT_CHANGE		(AVBOX_PLAYERCTL_DVD | DVDNAV_SPU_CLUT_CHANGE)
-#define AVBOX_PLAYERCTL_DVD_SPU_STREAM_CHANGE		(AVBOX_PLAYERCTL_DVD | DVDNAV_SPU_STREAM_CHANGE)
-#endif
-
+#define AVBOX_PLAYERCTL_RESET_CLOCK			(0x12)
+#define AVBOX_PLAYERCTL_SET_TITLE			(0x13)
+#define AVBOX_PLAYERCTL_SET_DURATION			(0x14)
+#define AVBOX_PLAYERCTL_SET_POSITION			(0x15)
+#define AVBOX_PLAYERCTL_UPDATE				(0x16)
 
 
 struct avbox_player;
@@ -121,6 +110,7 @@ struct avbox_player_state_info
 	char *title;
 	struct avbox_size video_res;
 	struct avbox_size scaled_res;	/* this is the scaled video size */
+	enum avbox_aspect_ratio aspect_ratio;
 };
 
 
@@ -180,6 +170,12 @@ avbox_player_gettitle(struct avbox_player *inst);
 void
 avbox_player_getduration(struct avbox_player * const inst, int64_t *duration);
 
+
+/**
+ * Get the current player window.
+ */
+struct avbox_window *
+avbox_player_window(struct avbox_player * const inst);
 
 /**
  * Get the media position in microseconds.

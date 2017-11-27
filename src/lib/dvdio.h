@@ -10,16 +10,39 @@
 struct avbox_dvdio;
 
 
-typedef void (*avbox_dvdio_dvdnavcb)(void *context, int event, void *data);
-
-
 /**
  * Opens a DVD device for reading.
  */
 struct avbox_dvdio *
 avbox_dvdio_open(const char * const path,
-	struct avbox_player * const player,
-	avbox_dvdio_dvdnavcb callback, void * callback_context);
+	struct avbox_player * const player);
+
+/**
+ * Gets the coordinates of the highlighted item.
+ */
+struct avbox_rect*
+avbox_dvdio_highlight(struct avbox_dvdio * const inst);
+
+
+/**
+ * Gets the underlying object.
+ */
+struct avbox_object *
+avbox_dvdio_object(struct avbox_dvdio * const inst);
+
+
+/**
+ * Returns 1 if the stream can be paused.
+ */
+int
+avbox_dvdio_canpause(const struct avbox_dvdio * const inst);
+
+
+/**
+ * Seek the stream
+ */
+void
+avbox_dvdio_seek(struct avbox_dvdio * const inst, int flags, int64_t pos);
 
 
 /**
@@ -40,7 +63,7 @@ avbox_dvdio_wake(struct avbox_dvdio * const inst);
  * Start playing the DVD
  */
 void
-avbox_dvdio_play(struct avbox_dvdio * const inst);
+avbox_dvdio_play(struct avbox_dvdio * const inst, const int skip_to_menu);
 
 
 /**
@@ -55,7 +78,7 @@ avbox_dvdio_isblocking(struct avbox_dvdio * const inst);
  * a given AVStream id.
  */
 int
-avbox_dvdio_dvdnavstream(int stream_id);
+avbox_dvdio_dvdnavstream(struct avbox_dvdio * const inst, int stream_id);
 
 
 /**
@@ -93,12 +116,5 @@ avbox_dvdio_destroy(struct avbox_dvdio * const inst);
  */
 AVIOContext *
 avbox_dvdio_avio(struct avbox_dvdio * const inst);
-
-/**
- * Gets the dvdnav instance.
- */
-dvdnav_t *
-avbox_dvdio_dvdnav(struct avbox_dvdio * const inst);
-
 
 #endif

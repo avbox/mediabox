@@ -330,7 +330,7 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 				mbox_overlay_setstate(inst, MBOX_OVERLAY_STATE_READY);
 				mbox_overlay_show(inst, 15);
 			}
-			break;
+			/* fall through */
 		case MB_PLAYER_STATUS_PLAYING:
 		{
 			char *title;
