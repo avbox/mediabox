@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <dvdnav/dvdnav.h>
 
 #define LOG_MODULE "dvdio"
 
@@ -48,6 +49,10 @@ struct avbox_dvdio
 };
 
 
+/**
+ * Process menu input. This is temporary until we get
+ * subpicture support.
+ */
 static void
 avbox_dvdio_process_menus(struct avbox_dvdio * const inst)
 {
@@ -539,7 +544,7 @@ avbox_dvdio_control(void * context, struct avbox_message * msg)
 /**
  * Start playing the DVD
  */
-void
+static void
 avbox_dvdio_play(struct avbox_dvdio * const inst, const int skip_to_menu)
 {
 	pthread_mutex_lock(&inst->lock);
@@ -563,19 +568,9 @@ avbox_dvdio_play(struct avbox_dvdio * const inst, const int skip_to_menu)
 
 
 /**
- * Get an AVIOContext for this opened DVD.
- */
-AVIOContext *
-avbox_dvdio_avio(struct avbox_dvdio * const inst)
-{
-	return inst->avio_ctx;
-}
-
-
-/**
  * Gets the coordinates of the highlighted item.
  */
-struct avbox_rect*
+static struct avbox_rect*
 avbox_dvdio_highlight(struct avbox_dvdio * const inst)
 {
 	if (inst->highlight.x == 0 && inst->highlight.y == 0) {
@@ -588,8 +583,8 @@ avbox_dvdio_highlight(struct avbox_dvdio * const inst)
 /**
  * Check is we're currently blocking the IO thread.
  */
-int
-avbox_dvdio_isblocking(struct avbox_dvdio * const inst)
+static int
+avbox_dvdio_is_blocking(struct avbox_dvdio * const inst)
 {
 	return inst->blocking;
 }
@@ -600,8 +595,8 @@ avbox_dvdio_isblocking(struct avbox_dvdio * const inst)
  * that the player should not handle the underrun), 0
  * otherwise.
  */
-int
-avbox_dvdio_underrunok(const struct avbox_dvdio * const inst)
+static int
+avbox_dvdio_underrun_expected(const struct avbox_dvdio * const inst)
 {
 	return  1 || ((!dvdnav_is_domain_vts(inst->dvdnav) &&
 		!dvdnav_is_domain_fp(inst->dvdnav)) ||
@@ -612,8 +607,8 @@ avbox_dvdio_underrunok(const struct avbox_dvdio * const inst)
 /**
  * Returns 1 if the stream can be paused.
  */
-int
-avbox_dvdio_canpause(const struct avbox_dvdio * const inst)
+static int
+avbox_dvdio_can_pause(const struct avbox_dvdio * const inst)
 {
 	return (dvdnav_is_domain_fp(inst->dvdnav) ||
 		dvdnav_is_domain_vts(inst->dvdnav));
@@ -623,7 +618,7 @@ avbox_dvdio_canpause(const struct avbox_dvdio * const inst)
 /**
  * Seek the stream
  */
-void
+static void
 avbox_dvdio_seek(struct avbox_dvdio * const inst, int flags, int64_t pos)
 {
 	int32_t current_title, current_part, next_part, n_parts;
@@ -663,6 +658,7 @@ avbox_dvdio_seek(struct avbox_dvdio * const inst, int flags, int64_t pos)
 }
 
 
+#if 0
 /**
  * Get the dvdnav stream id that matches for
  * a given AVStream id.
@@ -687,59 +683,58 @@ avbox_dvdio_dvdnavstream(struct avbox_dvdio * const inst, int stream_id)
 	}
 	return stream_id;
 }
-
-
-static int
-avbox_dvdio_initavio(struct avbox_dvdio * const inst)
-{
-	int ret = -1;
-	const size_t avio_ctx_bufsz = 8192;
-	/* initialize avio context */
-	if ((inst->avio_ctx_buffer = av_malloc(avio_ctx_bufsz)) == NULL) {
-		ASSERT(errno == ENOMEM);
-		goto end;
-	}
-	if ((inst->avio_ctx = avio_alloc_context(inst->avio_ctx_buffer,
-		avio_ctx_bufsz, 0, inst, avio_read_packet, NULL, NULL)) == NULL) {
-		goto end;
-	}
-	ret = 0;
-end:
-	if (ret == -1) {
-		if (inst->avio_ctx != NULL) {
-			av_free(inst->avio_ctx);
-		} else if (inst->avio_ctx_buffer != NULL) {
-			av_free(inst->avio_ctx);
-		}
-	}
-
-	return ret;
-}
+#endif
 
 
 /**
- * Gets the underlying object.
+ * Close the DVDIO stream.
  */
-struct avbox_object *
-avbox_dvdio_object(struct avbox_dvdio * const inst)
+static void
+avbox_dvdio_close(struct avbox_dvdio * const inst)
 {
-	return inst->object;
+	DEBUG_PRINT(LOG_MODULE, "Closing DVDIO");
+
+	ASSERT(inst != NULL);
+	ASSERT(inst->avio_ctx != NULL);
+	ASSERT(inst->dvdnav != NULL);
+
+	if (!inst->closed) {
+		if (inst->have_input) {
+			avbox_input_release(inst->object);
+		}
+
+		inst->closed = 1;
+	} else {
+		DEBUG_PRINT(LOG_MODULE, "Closing closed stream!");
+	}
+}
+
+
+static void
+avbox_dvdio_destroy(struct avbox_dvdio * const inst)
+{
+	avbox_object_destroy(inst->object);
 }
 
 
 /**
  * Opens a DVD device for reading.
  */
-struct avbox_dvdio *
-avbox_dvdio_open(const char * const path, struct avbox_player * const player)
+struct avbox_player_stream *
+avbox_dvdio_open(const char * const path, struct avbox_player * const player,
+	struct avbox_player_stream * const stream)
 {
 	struct avbox_dvdio *inst;
-	struct avbox_dvdio *ret = NULL;
+	struct avbox_player_stream *ret = NULL;
+	const size_t avio_ctx_bufsz = 8192;
 	dvdnav_status_t status;
 
 	DEBUG_VPRINT(LOG_MODULE, "Opening device: %s", path);
 
 	ASSERT(path != NULL);
+
+	/* clear the function table */
+	memset(stream, 0, sizeof(struct avbox_player_stream));
 
 	if ((inst = malloc(sizeof(struct avbox_dvdio))) == NULL) {
 		return NULL;
@@ -758,7 +753,12 @@ avbox_dvdio_open(const char * const path, struct avbox_player * const player)
 	}
 
 	/* initialize avio context */
-	if (avbox_dvdio_initavio(inst) == -1) {
+	if ((inst->avio_ctx_buffer = av_malloc(avio_ctx_bufsz)) == NULL) {
+		ASSERT(errno == ENOMEM);
+		goto end;
+	}
+	if ((inst->avio_ctx = avio_alloc_context(inst->avio_ctx_buffer,
+		avio_ctx_bufsz, 0, inst, avio_read_packet, NULL, NULL)) == NULL) {
 		goto end;
 	}
 
@@ -798,10 +798,26 @@ avbox_dvdio_open(const char * const path, struct avbox_player * const player)
 		goto end;
 	}
 
-	ret = inst;
+	/* fill the funtion table */
+	stream->self = inst;
+	stream->avio = inst->avio_ctx;
+	stream->play = (void*) &avbox_dvdio_play;
+	stream->seek = (void*) &avbox_dvdio_seek;
+	stream->close = (void*) &avbox_dvdio_close;
+	stream->destroy = (void*) &avbox_dvdio_destroy;
+	stream->underrun_expected = (void*) &avbox_dvdio_underrun_expected;
+	stream->can_pause = (void*) &avbox_dvdio_can_pause;
+	stream->is_blocking = (void*) &avbox_dvdio_is_blocking;
+	stream->highlight = (void*) &avbox_dvdio_highlight;
+	ret = stream;
 
 end:
 	if (ret == NULL && inst != NULL) {
+		if (inst->avio_ctx != NULL) {
+			av_free(inst->avio_ctx);
+		} else if (inst->avio_ctx_buffer != NULL) {
+			av_free(inst->avio_ctx);
+		}
 		if (inst->dvdnav) {
 			dvdnav_close(inst->dvdnav);
 		}
@@ -812,40 +828,4 @@ end:
 	}
 
 	return ret;
-}
-
-
-/**
- * Close the DVD.
- */
-void
-avbox_dvdio_close(struct avbox_dvdio * const inst)
-{
-	DEBUG_PRINT(LOG_MODULE, "Closing DVDIO");
-
-	ASSERT(inst != NULL);
-	ASSERT(inst->avio_ctx != NULL);
-	ASSERT(inst->dvdnav != NULL);
-
-	if (inst->have_input) {
-		avbox_input_release(inst->object);
-	}
-
-	inst->closed = 1;
-}
-
-
-/**
- * Reopen a closed dvdio stream.
- */
-int
-avbox_dvdio_reopen(struct avbox_dvdio * const inst)
-{
-	DEBUG_PRINT(LOG_MODULE, "Re-opening DVDIO");
-
-	ASSERT(inst != NULL);
-	ASSERT(inst->avio_ctx != NULL);
-	ASSERT(inst->dvdnav != NULL);
-	inst->closed = 0;
-	return 0;
 }

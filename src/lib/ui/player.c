@@ -132,10 +132,7 @@ struct avbox_player
 	struct avbox_thread *control_thread;
 	struct avbox_rational aspect_ratio;
 	struct avbox_player_state_info state_info;
-
-#ifdef ENABLE_DVD
-	struct avbox_dvdio *dvdio;
-#endif
+	struct avbox_player_stream stream;
 
 	const char *media_file;
 	const char *next_file;
@@ -304,10 +301,9 @@ avbox_player_draw(struct avbox_window * const window, void * const context)
 	struct avbox_player * const inst = context;
 	avbox_window_blit(window, inst->video_window, MBV_BLITFLAGS_NONE, 0, 0);
 
-#if ENABLE_DVD
-	if (inst->dvdio != NULL) {
+	if (inst->stream.self != NULL) {
 		struct avbox_rect *highlight;
-		if ((highlight = avbox_dvdio_highlight(inst->dvdio)) != NULL) {
+		if ((highlight = inst->stream.highlight(inst->stream.self)) != NULL) {
 			int target_width, target_height;
 
 			avbox_window_getcanvassize(inst->window, &target_width, &target_height);
@@ -322,7 +318,7 @@ avbox_player_draw(struct avbox_window * const window, void * const context)
 				((highlight->w * wpc) / 100), ((highlight->h * hpc) / 100));
 		}
 	}
-#endif
+
 	return 0;
 }
 
@@ -837,8 +833,7 @@ avbox_player_audio_decode(void * arg)
 	/* initialize audio filter graph */
 	DEBUG_VPRINT("player", "Audio filters: %s", audio_filters);
 
-#ifdef ENABLE_DVD
-	if (inst->dvdio != NULL) {
+	if (inst->stream.self != NULL) {
 		int channels = inst->fmt_ctx->streams[inst->audio_stream_index]->codecpar->channels;
 		DEBUG_VPRINT(LOG_MODULE, "Audio channels: %i", channels);
 		if (channels == 6) {
@@ -858,9 +853,7 @@ avbox_player_audio_decode(void * arg)
 		}
 		time_base.num = 1;
 		time_base.den = 90000;
-	} else
-#endif
-	{
+	} else {
 		if (!dec_ctx->channel_layout) {
 			channel_layout = av_get_default_channel_layout(dec_ctx->channels);
 		} else {
@@ -1204,13 +1197,13 @@ avbox_player_stream_parse(void *arg)
 		goto decoder_exit;
 	}
 
-#ifdef ENABLE_DVD
-	if (inst->dvdio != NULL) {
-		inst->fmt_ctx->pb = avbox_dvdio_avio(inst->dvdio);
+	/* set the AVIO context */
+	if (inst->stream.self != NULL) {
+		ASSERT(inst->stream.avio != NULL);
+		inst->fmt_ctx->pb = inst->stream.avio;
 		file_to_open = inst->media_file + 4;
 		inst->fmt_ctx->ctx_flags |= AVFMTCTX_NOHEADER;
 	}
-#endif
 
 	/* open file */
 	av_dict_set(&stream_opts, "timeout", "30000000", 0);
@@ -1225,9 +1218,8 @@ avbox_player_stream_parse(void *arg)
 		goto decoder_exit;
 	}
 
-#ifdef ENABLE_DVD
-	if (inst->dvdio == NULL)
-#endif
+	/* if the stream doesn't set the title we need to */
+	if (inst->stream.self == NULL)
 	{
 		AVDictionaryEntry *title_entry;
 
@@ -1335,9 +1327,7 @@ avbox_player_stream_parse(void *arg)
 			}
 		}
 
-#ifdef ENABLE_DVD
-		if (inst->dvdio == NULL)
-#endif
+		if (inst->stream.self == NULL)
 		{
 			inst->state_info.pos = av_rescale_q(inst->packet.pts,
 				inst->fmt_ctx->streams[inst->packet.stream_index]->time_base,
@@ -1487,16 +1477,12 @@ decoder_exit:
 static inline int
 avbox_player_stream_checkpoint_wait(struct avbox_player * const inst, int64_t timeout)
 {
-#ifdef ENABLE_DVD
-	if (inst->dvdio == NULL) {
+	if (inst->stream.self == NULL) {
 		return avbox_checkpoint_wait(&inst->stream_parser_checkpoint, timeout);
 	} else {
-		return avbox_dvdio_isblocking(inst->dvdio) ||
+		return inst->stream.is_blocking(inst->stream.self) ||
 			avbox_checkpoint_wait(&inst->stream_parser_checkpoint, timeout);
 	}
-#else
-	return avbox_checkpoint_wait(&inst->stream_parser_checkpoint, timeout);
-#endif
 }
 
 
@@ -1765,12 +1751,11 @@ avbox_player_doresume(struct avbox_player * const inst)
 static void
 avbox_player_dostop(struct avbox_player * const inst)
 {
-#ifdef ENABLE_DVD
-	if (inst->dvdio != NULL) {
-		avbox_dvdio_close(inst->dvdio);
+	if (inst->stream.self != NULL) {
+		inst->stream.close(inst->stream.self);
 		return;
 	}
-#endif
+
 	/* tell the stream thread to quit */
 	inst->stream_quit = 1;
 
@@ -1828,11 +1813,12 @@ avbox_player_doplay(struct avbox_player * const inst,
 	avbox_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
 
 #ifdef ENABLE_DVD
+	/* if this is a DVD open it */
 	if (!strncmp("dvd:", path, 4)) {
-		ASSERT(inst->dvdio == NULL);
-		if ((inst->dvdio = avbox_dvdio_open(path + 4, inst)) == NULL) {
+		if (avbox_dvdio_open(path + 4, inst, &inst->stream) == NULL) {
 			LOG_VPRINT_ERROR("Could not open DVD: %s",
 				strerror(errno));
+			ASSERT(inst->stream.self == NULL);
 			avbox_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 			return;
 		}
@@ -1971,6 +1957,12 @@ avbox_player_doseek(struct avbox_player * const inst,
 
 	ASSERT(inst->fmt_ctx != NULL);
 	ASSERT(inst->getmastertime != NULL);
+
+	/* if the stream provider supports seeking use that */
+	if (inst->stream.self != NULL && inst->stream.seek != NULL) {
+		inst->stream.seek(inst->stream.self, flags, incr);
+		return;
+	}
 
 	pos = inst->getmastertime(inst);
 
@@ -2500,12 +2492,12 @@ avbox_player_control(void * context, struct avbox_message * msg)
 			ASSERT(inst->play_state == AVBOX_PLAYER_PLAYSTATE_VIDEOOUT);
 			DEBUG_PRINT(LOG_MODULE, "AVBOX_PLAYERCTL_VIDEOOUT_READY");
 			inst->play_state = AVBOX_PLAYER_PLAYSTATE_PLAYING;
-#ifdef ENABLE_DVD
-			if (inst->dvdio != NULL) {
+
+			if (inst->stream.self != NULL) {
 				avformat_flush(inst->fmt_ctx);
-				avbox_dvdio_play(inst->dvdio, 0);
+				inst->stream.play(inst->stream.self, 0);
 			}
-#endif
+
 			avbox_checkpoint_continue(&inst->stream_parser_checkpoint);
 			avbox_player_updatestatus(inst, MB_PLAYER_STATUS_PLAYING);
 			break;
@@ -2589,14 +2581,11 @@ avbox_player_control(void * context, struct avbox_message * msg)
 				inst->fmt_ctx = NULL;
 			}
 
-#ifdef ENABLE_DVD
 			/* cleanup dvdnav stuff */
-			if (inst->dvdio != NULL) {
-				avbox_object_destroy(
-					avbox_dvdio_object(inst->dvdio));
-				inst->dvdio = NULL;
+			if (inst->stream.self != NULL) {
+				inst->stream.destroy(inst->stream.self);
+				inst->stream.self = NULL;
 			}
-#endif
 
 			avbox_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 
@@ -2632,14 +2621,17 @@ avbox_player_control(void * context, struct avbox_message * msg)
 				avbox_player_throwexception(inst, "Cannot pause: Not playing!");
 				break;
 			}
-#ifdef ENABLE_DVD
-			if (inst->dvdio && !avbox_dvdio_canpause(inst->dvdio)) {
+
+			/* does the current stream allow pausing at this point? */
+			if (inst->stream.self != NULL &&
+				!inst->stream.can_pause(inst->stream.self)) {
+				DEBUG_PRINT(LOG_MODULE, "Stream cannot be paused at this point");
 				break;
 			}
-#endif
+
 			/* update status and pause */
-			avbox_player_updatestatus(inst, MB_PLAYER_STATUS_PAUSED);
 			avbox_player_dopause(inst);
+			avbox_player_updatestatus(inst, MB_PLAYER_STATUS_PAUSED);
 			break;
 		}
 		case AVBOX_PLAYERCTL_STOP:
@@ -2658,12 +2650,6 @@ avbox_player_control(void * context, struct avbox_message * msg)
 		{
 			struct avbox_player_seekargs * const args =
 				(struct avbox_player_seekargs*) ctlmsg->data;
-#ifdef ENABLE_DVD
-			if (inst->dvdio != NULL) {
-				avbox_dvdio_seek(inst->dvdio, args->flags, args->pos);
-				break;
-			}
-#endif
 			avbox_player_doseek(inst, args->flags, args->pos);
 			free(args);
 			break;
@@ -2682,14 +2668,6 @@ avbox_player_control(void * context, struct avbox_message * msg)
 					if (inst->fmt_ctx->streams[stream]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) {
 						continue;
 					}
-
-					#if 0
-					if (inst->dvdio != NULL &&
-						avbox_dvdio_dvdnavstream(inst->dvdio, inst->fmt_ctx->streams[stream]->id) == -1) {
-						/*debug*/
-					}
-					#endif
-
 					if (first_stream == -1) {
 						first_stream = stream;
 					}
@@ -2719,7 +2697,7 @@ avbox_player_control(void * context, struct avbox_message * msg)
 						}
 					}
 					if (!found_active) {
-						DEBUG_VPRINT(LOG_MODULE, "Stream id: %d not found. Delaying change",
+						DEBUG_VPRINT(LOG_MODULE, "Stream id: %d not found. It better come soon!",
 							next_stream);
 						inst->audio_stream_id = *stream_id;
 						inst->audio_stream_index = -2;
@@ -2789,15 +2767,13 @@ avbox_player_control(void * context, struct avbox_message * msg)
 		case AVBOX_PLAYERCTL_BUFFER_UNDERRUN:
 		{
 			DEBUG_PRINT(LOG_MODULE, "AVBOX_PLAYERCTL_BUFFER_UNDERRUN");
-#ifdef ENABLE_DVD
-			if (inst->dvdio != NULL && avbox_dvdio_underrunok(inst->dvdio)) {
-				break;
-			}
-#endif
+
 			/* underruns are expected while stopping or flushing
 			 * no need to react */
 			if (inst->flushing || inst->still_frame ||
-				inst->play_state == AVBOX_PLAYER_PLAYSTATE_STOPPING) {
+				inst->play_state == AVBOX_PLAYER_PLAYSTATE_STOPPING ||
+				(inst->stream.self != NULL &&
+					inst->stream.underrun_expected(inst->stream.self))) {
 				break;
 			}
 
@@ -3047,14 +3023,22 @@ avbox_player_seek(struct avbox_player *inst, int flags, int64_t pos)
 
 
 /**
- * Tell the player to switch audio stream.
+ * Tell the player to switch audio/subpicture tracks.
  */
 void
-avbox_player_changeaudiotrack(struct avbox_player * const inst, int track_id)
+avbox_player_changetrack(struct avbox_player * const inst,
+	const int track_id, const int track_type)
 {
 	ASSERT(inst != NULL);
 	ASSERT(track_id == -1); /* for now */
-	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_CHANGE_AUDIO_TRACK, NULL);
+	if (track_type == AVBOX_PLAYER_AUDIO_TRACK) {
+		avbox_player_sendctl(inst, AVBOX_PLAYERCTL_CHANGE_AUDIO_TRACK, NULL);
+	} else if (track_type == AVBOX_PLAYER_SUBPX_TRACK) {
+		/* not implemented */
+		abort();
+	} else {
+		abort();
+	}
 }
 
 

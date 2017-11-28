@@ -713,7 +713,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			DEBUG_PRINT(LOG_MODULE, "Track button pressed");
 			status = avbox_player_getstatus(player);
 			if (status == MB_PLAYER_STATUS_PLAYING || status == MB_PLAYER_STATUS_PAUSED) {
-				avbox_player_changeaudiotrack(player, -1);
+				avbox_player_changetrack(player, -1, AVBOX_PLAYER_AUDIO_TRACK);
 			}
 			break;
 		}

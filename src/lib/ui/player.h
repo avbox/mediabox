@@ -30,6 +30,11 @@
 #define AVBOX_PLAYER_SEEK_CHAPTER	(0x02)
 #define AVBOX_PLAYER_SEEK_RELATIVE	(0x04)
 
+#define AVBOX_PLAYER_AUDIO_TRACK 	(1)
+#define AVBOX_PLAYER_SUBPX_TRACK	(2)
+
+
+/* player control codes */
 #define AVBOX_PLAYERCTL_PLAY				(0x01)
 #define AVBOX_PLAYERCTL_PAUSE				(0x02)
 #define AVBOX_PLAYERCTL_STOP				(0x03)
@@ -55,6 +60,29 @@
 
 
 struct avbox_player;
+
+
+/**
+ * Interface to IO streams
+ */
+struct avbox_player_stream
+{
+	void *self;
+	void *avio;
+
+	void (*play)(void *self, const int skip_to_menu);
+	void (*seek)(void *self, int flags, int64_t pos);
+	void (*close)(void *self);
+	void (*destroy)(void *self);
+
+	int (*underrun_expected)(void *self);
+	int (*can_pause)(void *self);
+	int (*use_stream_pos)(void *self);
+	int (*is_blocking)(void *self);
+
+	struct avbox_rect* (*highlight)(void *self);
+};
+
 
 enum avbox_aspect_ratio
 {
@@ -202,7 +230,8 @@ avbox_player_seek(struct avbox_player *inst, int flags, int64_t pos);
  * Tell the player to switch audio stream.
  */
 void
-avbox_player_changeaudiotrack(struct avbox_player * const inst, int track_id);
+avbox_player_changetrack(struct avbox_player * const inst,
+	const int track_id, const int track_type);
 
 
 /**
