@@ -17,6 +17,14 @@ typedef void (*avbox_audiostream_underrun_callback)(
 
 
 /**
+ * Sends a clock packet to the audio stream.
+ */
+int
+avbox_audiostream_setclock(struct avbox_audiostream * const inst,
+	const int64_t time);
+
+
+/**
  * Flush an audio stream.
  */
 void
@@ -74,13 +82,6 @@ avbox_audiostream_count(struct avbox_audiostream * const stream);
  */
 int
 avbox_audiostream_start(struct avbox_audiostream * const stream);
-
-
-/**
- * Set the audio clock offset.
- */
-int
-avbox_audiostream_setclock(struct avbox_audiostream * const stream, const int64_t clock);
 
 
 /**

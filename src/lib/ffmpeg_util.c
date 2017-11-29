@@ -142,7 +142,6 @@ avbox_ffmpegutil_initaudiofilters(
 	AVFilterContext **buffersrc_ctx,
 	AVFilterGraph **filter_graph,
 	const char *filters_descr,
-	int audio_stream_index,
 	int sample_rate,
 	AVRational time_base,
 	uint64_t channel_layout,
