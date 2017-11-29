@@ -196,6 +196,11 @@ avbox_thread_new(avbox_message_handler handler, void * const context)
 		return NULL;
 	}
 
+	if (pthread_mutex_init(&thread->mutex, NULL) != 0 ||
+		pthread_cond_init(&thread->cond, NULL) != 0) {
+		abort();
+	}
+
 	pthread_mutex_lock(&thread->mutex);
 
 #ifndef NDEBUG
