@@ -147,7 +147,6 @@ struct avbox_player
 	int video_stream_index;
 	int play_state;
 	int stream_quit;
-	int gotpacket;
 	int stream_percent;
 	int stream_exiting;
 	int video_decoder_flushed;
@@ -155,7 +154,6 @@ struct avbox_player
 	int flushing;
 
 	avbox_player_time_fn getmastertime;
-	AVPacket packet;
 	AVFormatContext *fmt_ctx;
 	pthread_mutex_t state_lock;
 	LIST subscribers;
@@ -1126,13 +1124,13 @@ static void*
 avbox_player_stream_parse(void *arg)
 {
 	int res;
-	AVPacket *ppacket;
+	AVPacket packet, *ppacket;
 	AVDictionary *stream_opts = NULL;
 	struct avbox_player *inst = (struct avbox_player*) arg;
 	int prefered_video_stream = -1;
 	const char *file_to_open;
 
-	DEBUG_SET_THREAD_NAME("stream_parser");
+	DEBUG_SET_THREAD_NAME("stream_input");
 
 	ASSERT(inst != NULL);
 	ASSERT(inst->media_file != NULL);
@@ -1274,107 +1272,94 @@ avbox_player_stream_parse(void *arg)
 
 		avbox_checkpoint_here(&inst->stream_parser_checkpoint);
 
-		if (!inst->gotpacket) {
-			if (UNLIKELY((res = av_read_frame(inst->fmt_ctx, &inst->packet)) < 0)) {
-				if (res == AVERROR_EOF) {
-					goto decoder_exit;
-				} else {
-					char buf[256];
-					av_strerror(res, buf, sizeof(buf));
-					LOG_VPRINT_ERROR("Could not read frame: %s", buf);
-					goto decoder_exit;
-				}
+		/* read the next input packet */
+		if (UNLIKELY((res = av_read_frame(inst->fmt_ctx, &packet)) < 0)) {
+			if (res == AVERROR_EOF) {
+				goto decoder_exit;
 			} else {
-				inst->gotpacket = 1;
+				char buf[256];
+				av_strerror(res, buf, sizeof(buf));
+				LOG_VPRINT_ERROR("Could not read frame: %s", buf);
+				goto decoder_exit;
 			}
 		}
 
-		if (inst->stream.self == NULL)
-		{
-			inst->state_info.pos = av_rescale_q(inst->packet.pts,
-				inst->fmt_ctx->streams[inst->packet.stream_index]->time_base,
+		if (inst->stream.self == NULL) {
+			inst->state_info.pos = av_rescale_q(packet.pts,
+				inst->fmt_ctx->streams[packet.stream_index]->time_base,
 				AV_TIME_BASE_Q);
 		}
 
-		if (inst->packet.stream_index == inst->video_stream_index) {
+		if (packet.stream_index == inst->video_stream_index) {
 			if ((ppacket = malloc(sizeof(AVPacket))) == NULL) {
 				LOG_PRINT_ERROR("Could not allocate memory for packet!");
-				av_packet_unref(&inst->packet);
-				inst->gotpacket = 0;
+				av_packet_unref(&packet);
 				goto decoder_exit;
 			}
-			memcpy(ppacket, &inst->packet, sizeof(AVPacket));
-			if (avbox_queue_put(inst->video_packets_q, ppacket) == -1) {
+			memcpy(ppacket, &packet, sizeof(AVPacket));
+			while (avbox_queue_put(inst->video_packets_q, ppacket) == -1) {
 				if (errno == EAGAIN) {
-					free(ppacket);
 					continue;
 				} else if (errno == ESHUTDOWN) {
 					LOG_PRINT_ERROR("Video packets queue shutdown! Aborting parser!");
 					av_packet_unref(ppacket);
 					free(ppacket);
-					inst->gotpacket = 0;
 					goto decoder_exit;
 				}
 				LOG_VPRINT_ERROR("Could not add packet to queue: %s",
 					strerror(errno));
 				av_packet_unref(ppacket);
 				free(ppacket);
-				inst->gotpacket = 0;
 				goto decoder_exit;
 			}
 
-		} else if (inst->fmt_ctx->streams[inst->packet.stream_index]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+		} else if (inst->fmt_ctx->streams[packet.stream_index]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
 
 			/* if we're waiting for the audio stream... */
 			if (inst->audio_stream_index == -2) {
 				if (inst->audio_stream_id != -1) {
-					AVStream * const stream = inst->fmt_ctx->streams[inst->packet.stream_index];
+					AVStream * const stream = inst->fmt_ctx->streams[packet.stream_index];
 					DEBUG_VPRINT(LOG_MODULE, "Waiting for stream %i, checking: id=%x, index=%d",
-						inst->audio_stream_id, stream->id, inst->packet.stream_index);
+						inst->audio_stream_id, stream->id, packet.stream_index);
 					if (stream->id  == inst->audio_stream_id) {
 						DEBUG_VPRINT(LOG_MODULE, "Selecting stream: %i",
-							inst->packet.stream_index);
-						inst->audio_stream_index = inst->packet.stream_index;
+							packet.stream_index);
+						inst->audio_stream_index = packet.stream_index;
 					}
 				} else {
 					inst->audio_stream_index = -1;
 				}
 			}
 
-			if (inst->packet.stream_index == inst->audio_stream_index) {
+			if (packet.stream_index == inst->audio_stream_index) {
 
 				if ((ppacket = malloc(sizeof(AVPacket))) == NULL) {
 					LOG_PRINT_ERROR("Could not allocate memory for packet!");
-					av_packet_unref(&inst->packet);
-					inst->gotpacket = 0;
+					av_packet_unref(&packet);
 					goto decoder_exit;
 				}
-				memcpy(ppacket, &inst->packet, sizeof(AVPacket));
-				if (avbox_queue_put(inst->audio_packets_q, ppacket) == -1) {
+				memcpy(ppacket, &packet, sizeof(AVPacket));
+				while (avbox_queue_put(inst->audio_packets_q, ppacket) == -1) {
 					if (errno == EAGAIN) {
-						free(ppacket);
 						continue;
 					} else if (errno == ESHUTDOWN) {
 						LOG_PRINT_ERROR("Audio packets queue shutdown! Aborting parser!");
 						av_packet_unref(ppacket);
 						free(ppacket);
-						inst->gotpacket = 0;
 						goto decoder_exit;
 					}
 					LOG_VPRINT_ERROR("Could not enqueue packet: %s",
 						strerror(errno));
 					av_packet_unref(ppacket);
 					free(ppacket);
-					inst->gotpacket = 0;
 					goto decoder_exit;
 				}
 			} else {
-				av_packet_unref(&inst->packet);
+				av_packet_unref(&packet);
 			}
 		} else {
-			av_packet_unref(&inst->packet);
+			av_packet_unref(&packet);
 		}
-		inst->gotpacket = 0;
 	}
 
 decoder_exit:
@@ -1387,10 +1372,6 @@ decoder_exit:
 	pthread_mutex_lock(&inst->state_lock);
 	inst->stream_exiting  = 1;
 	pthread_mutex_unlock(&inst->state_lock);
-
-	if (inst->gotpacket) {
-		av_packet_unref(&inst->packet);
-	}
 
 	if (inst->video_stream_index != -1) {
 		ASSERT(inst->video_packets_q != NULL);
@@ -1834,13 +1815,6 @@ avbox_player_drop(struct avbox_player * const inst)
 	}
 
 	avbox_player_halt(inst);
-
-	/* if the stream parser already has a packet out
-	 * free it */
-	if (inst->gotpacket) {
-		av_packet_unref(&inst->packet);
-		inst->gotpacket = 0;
-	}
 
 	/* drop all decoded video frames */
 	if (inst->video_stream_index != -1) {
@@ -2322,11 +2296,6 @@ avbox_player_flush(struct avbox_player * const inst, const int flags)
 		}
 		
 		if (flags & AVBOX_PLAYER_FLUSH_ALL) {
-			if (inst->gotpacket) {
-				av_packet_unref(&inst->packet);
-				inst->gotpacket = 0;
-			}
-
 			/*avio_flush(inst->fmt_ctx->pb);*/
 			avformat_flush(inst->fmt_ctx);
 		}
