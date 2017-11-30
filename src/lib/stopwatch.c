@@ -9,6 +9,7 @@
 #include "log.h"
 #include "debug.h"
 #include "time_util.h"
+#include "stopwatch.h"
 
 #define CLOCK_ID	(CLOCK_MONOTONIC_COARSE)
 
@@ -20,9 +21,6 @@ struct avbox_stopwatch
 };
 
 
-const struct timespec zero = { .tv_sec = 0, .tv_nsec = 0 };
-
-
 /**
  * Sets the stopwatch and stops it.
  */
@@ -31,7 +29,7 @@ avbox_stopwatch_reset(struct avbox_stopwatch * const inst, int64_t value)
 {
 	struct timespec now;
 	clock_gettime(CLOCK_ID, &now);
-	inst->reset = utimediff(&now, &zero);
+	inst->reset = utimediff(&now, NULL);
 	inst->value = value;
 	inst->running = 0;
 }
@@ -46,7 +44,7 @@ avbox_stopwatch_time(const struct avbox_stopwatch * const inst)
 	if (inst->running) {
 		struct timespec now;
 		clock_gettime(CLOCK_ID, &now);
-		return (utimediff(&now, &zero) - inst->reset) + inst->value;
+		return (utimediff(&now, NULL) - inst->reset) + inst->value;
 	} else {
 		return inst->value;
 	}

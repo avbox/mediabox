@@ -291,7 +291,11 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 
 	DEBUG_PRINT("audio", "Pausing audio stream");
 	ASSERT(inst != NULL);
-	ASSERT(inst->framerate != 0);
+
+	if (!inst->pcm_handle) {
+		inst->paused = 1;
+		return 0;
+	}
 
 	snd_pcm_status_alloca(&status);
 

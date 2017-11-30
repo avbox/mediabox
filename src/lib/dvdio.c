@@ -45,6 +45,7 @@ struct avbox_dvdio
 	struct avbox_player *player;
 	struct avbox_rect highlight;
 	struct avbox_object *object;
+	pthread_cond_t waiter;
 	pthread_mutex_t lock;
 };
 
@@ -193,19 +194,12 @@ avio_read_packet(void *opaque, uint8_t *buf, int bufsz)
 
 				DEBUG_PRINT(LOG_MODULE, "DVDNAV_WAIT");
 
-				inst->waiting = 1;
-
 				/* flush */
+				inst->waiting = 1;
 				avbox_syncarg_init(&arg, NULL);
 				avbox_player_sendctl(inst->player, AVBOX_PLAYERCTL_FLUSH, &arg);
 				avbox_syncarg_wait(&arg);
 				dvdnav_wait_skip(inst->dvdnav);
-
-				/* reset clock */
-				avbox_syncarg_init(&arg, NULL);
-				avbox_player_sendctl(inst->player, AVBOX_PLAYERCTL_RESET_CLOCK, &arg);
-				avbox_syncarg_wait(&arg);
-
 				inst->waiting = 0;
 			}
 			break;
@@ -215,7 +209,11 @@ avio_read_packet(void *opaque, uint8_t *buf, int bufsz)
 			/* if we get this while on a still frame it means it was
 			 * an indefinite time still frame */
 			if (inst->still_frame) {
-				usleep(100L * 1000L);
+				struct timespec tv;
+				tv.tv_sec = 0;
+				tv.tv_nsec = 100L * 1000L * 1000L;
+				delay2abstime(&tv);
+				pthread_cond_timedwait(&inst->waiter, &inst->lock, &tv);
 				break;
 			}
 
@@ -260,11 +258,6 @@ avio_read_packet(void *opaque, uint8_t *buf, int bufsz)
 				/* flush player */
 				avbox_syncarg_init(&arg, NULL);
 				avbox_player_sendctl(inst->player, AVBOX_PLAYERCTL_FLUSH, &arg);
-				avbox_syncarg_wait(&arg);
-
-				/* reset clock */
-				avbox_syncarg_init(&arg, NULL);
-				avbox_player_sendctl(inst->player, AVBOX_PLAYERCTL_RESET_CLOCK, &arg);
 				avbox_syncarg_wait(&arg);
 
 				if (dvdnav_get_title_string(inst->dvdnav, &title) != DVDNAV_STATUS_OK) {
@@ -373,13 +366,6 @@ avio_read_packet(void *opaque, uint8_t *buf, int bufsz)
 				avbox_player_sendctl(inst->player, AVBOX_PLAYERCTL_FLUSH, &arg);
 				avbox_syncarg_wait(&arg);
 
-				#if 0
-				/* reset the clock */
-				avbox_syncarg_init(&arg, NULL);
-				avbox_player_sendctl(inst->player, AVBOX_PLAYERCTL_RESET_CLOCK, &arg);
-				avbox_syncarg_wait(&arg);
-				#endif
-
 				/* change the stream */
 				DEBUG_VPRINT(LOG_MODULE, "Switching to track id: %d", stream_id);
 				avbox_syncarg_init(&arg, &stream_id);
@@ -458,6 +444,8 @@ avbox_dvdio_control(void * context, struct avbox_message * msg)
 		struct avbox_input_message *event =
 			avbox_message_payload(msg);
 
+		pthread_mutex_lock(&inst->lock);
+
 		switch (event->msg) {
 		case MBI_EVENT_CONTEXT:
 		{
@@ -468,10 +456,12 @@ avbox_dvdio_control(void * context, struct avbox_message * msg)
 		}
 		case MBI_EVENT_ENTER:
 		{
-			DEBUG_PRINT(LOG_MODULE, "Enter pressed. Activating.");
-			dvdnav_button_activate(inst->dvdnav,
-				dvdnav_get_current_nav_pci(inst->dvdnav));
-			inst->still_frame = 0;
+			if (!dvdnav_is_domain_vts(inst->dvdnav) && !dvdnav_is_domain_fp(inst->dvdnav)) {
+				DEBUG_PRINT(LOG_MODULE, "Enter pressed. Activating.");
+				dvdnav_button_activate(inst->dvdnav,
+					dvdnav_get_current_nav_pci(inst->dvdnav));
+				inst->still_frame = 0;
+			}
 			break;
 		}
 		case MBI_EVENT_BACK:
@@ -484,38 +474,52 @@ avbox_dvdio_control(void * context, struct avbox_message * msg)
 			}
 
 			/* let the shell process the event */
+			pthread_cond_signal(&inst->waiter);
+			pthread_mutex_unlock(&inst->lock);
 			return AVBOX_DISPATCH_CONTINUE;
 		}
 		case MBI_EVENT_ARROW_UP:
 		{
-			dvdnav_upper_button_select(inst->dvdnav,
-				dvdnav_get_current_nav_pci(inst->dvdnav));
+			if (!dvdnav_is_domain_vts(inst->dvdnav) && !dvdnav_is_domain_fp(inst->dvdnav)) {
+				dvdnav_upper_button_select(inst->dvdnav,
+					dvdnav_get_current_nav_pci(inst->dvdnav));
+			}
 			break;
 		}
 		case MBI_EVENT_ARROW_DOWN:
 		{
-			dvdnav_lower_button_select(inst->dvdnav,
-				dvdnav_get_current_nav_pci(inst->dvdnav));
+			if (!dvdnav_is_domain_vts(inst->dvdnav) && !dvdnav_is_domain_fp(inst->dvdnav)) {
+				dvdnav_lower_button_select(inst->dvdnav,
+					dvdnav_get_current_nav_pci(inst->dvdnav));
+			}
 			break;
 		}
 		case MBI_EVENT_ARROW_LEFT:
 		{
-			dvdnav_left_button_select(inst->dvdnav,
-				dvdnav_get_current_nav_pci(inst->dvdnav));
+			if (!dvdnav_is_domain_vts(inst->dvdnav) && !dvdnav_is_domain_fp(inst->dvdnav)) {
+				dvdnav_left_button_select(inst->dvdnav,
+					dvdnav_get_current_nav_pci(inst->dvdnav));
+			}
 			break;
 		}
 		case MBI_EVENT_ARROW_RIGHT:
 		{
-			dvdnav_right_button_select(inst->dvdnav,
-				dvdnav_get_current_nav_pci(inst->dvdnav));
+			if (!dvdnav_is_domain_vts(inst->dvdnav) && !dvdnav_is_domain_fp(inst->dvdnav)) {
+				dvdnav_right_button_select(inst->dvdnav,
+					dvdnav_get_current_nav_pci(inst->dvdnav));
+			}
 			break;
 		}
 		default:
+			pthread_mutex_unlock(&inst->lock);
 			return AVBOX_DISPATCH_CONTINUE;
 		}
 
 		avbox_dvdio_process_menus(inst);
 		avbox_input_eventfree(event);
+		pthread_cond_signal(&inst->waiter);
+		pthread_mutex_unlock(&inst->lock);
+
 		return AVBOX_DISPATCH_OK;
 	}
 	case AVBOX_MESSAGETYPE_DESTROY:
@@ -742,7 +746,8 @@ avbox_dvdio_open(const char * const path, struct avbox_player * const player,
 		memset(inst, 0, sizeof(struct avbox_dvdio));
 	}
 
-	if (pthread_mutex_init(&inst->lock, NULL) != 0) {
+	if (pthread_mutex_init(&inst->lock, NULL) != 0 ||
+		pthread_cond_init(&inst->waiter, NULL) != 0) {
 		LOG_PRINT_ERROR("Could not initialize mutex!!!");
 		goto end;
 	}
