@@ -399,16 +399,13 @@ avbox_player_video(void *arg)
 
 	DEBUG_PRINT("player", "Video renderer ready");
 
-	int underrun = 1;
-
 	while (1) {
 
 		avbox_checkpoint_here(&inst->video_output_checkpoint);
 
-		if (!underrun && (frame = avbox_queue_timedpeek(inst->video_frames_q, 500L * 1000L)) == NULL) {
+		if ((frame = avbox_queue_timedpeek(inst->video_frames_q, 500L * 1000L)) == NULL) {
 			if (errno == EAGAIN) {
 				avbox_player_sendctl(inst, AVBOX_PLAYERCTL_BUFFER_UNDERRUN, NULL);
-				underrun = 1;
 				continue;
 			} else if (errno == ESHUTDOWN) {
 				break;
@@ -417,20 +414,6 @@ avbox_player_video(void *arg)
 					strerror(errno));
 				goto video_exit;
 			}
-		} else {
-			/* get the next decoded frame */
-			if ((frame = avbox_queue_peek(inst->video_frames_q, 1)) == NULL) {
-				if (errno == EAGAIN) {
-					continue;
-				} else if (errno == ESHUTDOWN) {
-					break;
-				} else {
-					LOG_VPRINT_ERROR("Error!: avbox_queue_get() failed: %s",
-						strerror(errno));
-					goto video_exit;
-				}
-			}
-			underrun = 0;
 		}
 
 		/* get the frame pts and wait */
@@ -2739,6 +2722,19 @@ avbox_player_control(void * context, struct avbox_message * msg)
 		case AVBOX_PLAYERCTL_BUFFER_UNDERRUN:
 		{
 			DEBUG_PRINT(LOG_MODULE, "AVBOX_PLAYERCTL_BUFFER_UNDERRUN");
+
+			/* if the video pipeline is empty flush the decoder */
+			if (inst->video_stream_index != -1) {
+				if (!inst->flushing && (avbox_queue_count(inst->video_frames_q) == 0 &&
+					avbox_queue_count(inst->video_packets_q) == 0)) {
+					inst->flushing = AVBOX_PLAYER_FLUSH_VIDEO;
+					while (!inst->video_decoder_flushed) {
+						avbox_queue_wake(inst->video_packets_q);
+						sched_yield();
+					}
+					inst->flushing = 0;
+				}
+			}
 
 			/* underruns are expected while stopping or flushing
 			 * no need to react */
