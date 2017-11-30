@@ -819,8 +819,7 @@ static void *
 avbox_player_audio_decode(void * arg)
 {
 	int ret, keep_going, just_flushed = 0, time_set = 0;
-	int sample_rate = -1, channels = -1, stream_index = -1;
-	uint64_t channel_layout = 0;
+	int stream_index = -1;
 	struct avbox_syncarg * const syncarg = arg;
 	struct avbox_player * const inst = avbox_syncarg_data(syncarg);
 	const char *audio_filters ="aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo";
@@ -831,7 +830,6 @@ avbox_player_audio_decode(void * arg)
 	AVFilterContext *audio_buffersink_ctx = NULL;
 	AVFilterContext *audio_buffersrc_ctx;
 	AVPacket *packet = NULL;
-	AVRational time_base = { .num = 0, .den = 0 };
 	const char *sample_fmt_name;
 
 	DEBUG_SET_THREAD_NAME("audio_decoder");
@@ -977,20 +975,6 @@ avbox_player_audio_decode(void * arg)
 							dec_ctx->channels);
 					}
 
-					/* if the stream has changed destroy the filtergraph */
-					if (filter_graph != NULL && (
-						sample_rate != dec_ctx->sample_rate ||
-						channels != dec_ctx->channels ||
-						channel_layout != dec_ctx->channel_layout ||
-						time_base.num != dec_ctx->time_base.num ||
-						time_base.den != dec_ctx->time_base.den)) {
-						avbox_player_destroy_filter_graph(filter_graph,
-							audio_buffersrc_ctx, audio_buffersink_ctx, audio_frame);
-						DEBUG_VPRINT(LOG_MODULE, "Switching to audio stream: %i",
-							inst->audio_stream_index);
-						filter_graph = NULL;
-					}
-
 					/* initialize the filtergraph is needed */
 					if (filter_graph == NULL) {
 						if ((sample_fmt_name = av_get_sample_fmt_name(dec_ctx->sample_fmt)) == NULL) {
@@ -1008,12 +992,6 @@ avbox_player_audio_decode(void * arg)
 							avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 							av_frame_unref(audio_frame_nat);
 							break;
-						} else {
-							/* remember the filtergraph arguments */
-							sample_rate = dec_ctx->sample_rate;
-							channels = dec_ctx->channels;
-							channel_layout = dec_ctx->channel_layout;
-							time_base = dec_ctx->time_base;
 						}
 					}
 
@@ -1094,7 +1072,10 @@ avbox_player_audio_decode(void * arg)
 		if (just_flushed) {
 			DEBUG_PRINT(LOG_MODULE, "Audio decoder flushed");
 			avcodec_flush_buffers(dec_ctx);
+			avbox_player_destroy_filter_graph(filter_graph,
+				audio_buffersrc_ctx, audio_buffersink_ctx, audio_frame);
 			inst->audio_decoder_flushed = 1;
+			filter_graph = NULL;
 			just_flushed = 0;
 			time_set = 0;
 		}
@@ -1104,8 +1085,10 @@ end:
 
 	avbox_checkpoint_disable(&inst->audio_decoder_checkpoint);
 
-	avbox_player_destroy_filter_graph(filter_graph,
-		audio_buffersrc_ctx, audio_buffersink_ctx, audio_frame);
+	if (filter_graph != NULL) {
+		avbox_player_destroy_filter_graph(filter_graph,
+			audio_buffersrc_ctx, audio_buffersink_ctx, audio_frame);
+	}
 
 	if (audio_frame_nat != NULL) {
 		av_free(audio_frame_nat);
