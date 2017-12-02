@@ -28,6 +28,8 @@
 #include <math.h>
 #include <pango/pangocairo.h>
 
+#include "../ffmpeg_util.h"
+
 #define LOG_MODULE "video"
 
 #include "video.h"
@@ -43,6 +45,9 @@
 
 #ifdef ENABLE_LIBDRM
 #include "video-drm.h"
+#endif
+#ifdef ENABLE_X11
+#include "video-x11.h"
 #endif
 
 #define ALIGNED(addr, bytes) \
@@ -77,6 +82,7 @@ struct avbox_window
 	struct avbox_rect rect;
 	int visible;
 	int flags;
+	int damaged;
 	int decor_dirty;
 	uint32_t foreground_color;
 	uint32_t background_color;
@@ -365,6 +371,19 @@ avbox_window_settitle(struct avbox_window *window, const char *title)
 
 
 /**
+ * Returns 1 if the window has been damaged and needs
+ * to be fully repaint. This is useful for the root window
+ * that may be damaged by other windows rendering to it during
+ * full screen updates.
+ */
+int
+avbox_window_damaged(struct avbox_window * const window)
+{
+	return window->damaged;
+}
+
+
+/**
  * Fills a rectangle inside a window.
  */
 void
@@ -469,6 +488,82 @@ avbox_window_blit(struct avbox_window * const dest,
 }
 
 
+int
+avbox_window_scaleblit(
+	struct avbox_window * const dst,
+	struct avbox_window * const src,
+	int flags, const int x, const int y, const int w, const int h)
+{
+	if (driver.surface_scaleblit == NULL) {
+		uint8_t *bufdst, *bufsrc;
+		int dstpitch, srcpitch;
+		struct SwsContext *swscale;
+
+		if ((swscale = sws_getContext(
+			src->content_window->rect.w,
+			src->content_window->rect.h,
+			MB_DECODER_PIX_FMT,
+			w,
+			h,
+			MB_DECODER_PIX_FMT,
+			SWS_FAST_BILINEAR,
+			NULL, NULL, NULL)) == NULL) {
+			LOG_PRINT_ERROR("Could not create swscale context!");
+			return -1;
+		}
+
+		if ((bufdst = avbox_window_lock(dst, MBV_LOCKFLAGS_WRITE, &dstpitch)) == NULL) {
+			sws_freeContext(swscale);
+			return -1;
+		}
+
+		if ((bufsrc = avbox_window_lock(src, MBV_LOCKFLAGS_READ, &srcpitch)) == NULL) {
+			avbox_window_unlock(dst);
+			sws_freeContext(swscale);
+			return -1;
+		}
+
+		bufdst += dstpitch * y;
+		bufdst += x * 4;
+		sws_scale(swscale, (uint8_t const * const *) &bufsrc,
+			&srcpitch, 0, src->content_window->rect.h, &bufdst, &dstpitch);
+		avbox_window_unlock(dst);
+		avbox_window_unlock(src);
+		sws_freeContext(swscale);
+		return 0;
+	} else {
+		return driver.surface_scaleblit(
+			dst->content_window->surface,
+			src->content_window->surface,
+			flags, x, y, w, h);
+	}
+}
+
+
+static int
+avbox_window_reallyvisible(struct avbox_window * const window)
+{
+	if (window->parent == &root_window) {
+		struct avbox_window_node *damaging_window =
+			LIST_NEXT(struct avbox_window_node*, &window->stack_node);
+
+		/* for now we return 0 only when one or more windows cover
+		 * the whole window. If the window is partially covered by several
+		 * windows so that the entire window is cover it will still be painted.
+		 * TODO: We need to do better */
+		while (!LIST_ISNULL(&window_stack, damaging_window)) {
+			if (avbox_rect_covers(&damaging_window->window->rect, &window->rect)) {
+				return 0;
+			}
+			damaging_window = LIST_NEXT(struct avbox_window_node*,
+				damaging_window);
+		}
+	}
+
+	return 1;
+}
+
+
 /**
  * This is the internal repaint handler
  */
@@ -482,7 +577,7 @@ avbox_window_paint(struct avbox_window * const window, int update)
 	/* DEBUG_VPRINT("video", "avbox_window_paint(\"%s\")",
 		window->identifier); */
 
-	if (!window->visible) {
+	if (!window->visible || !avbox_window_reallyvisible(window)) {
 		return 0;
 	}
 
@@ -506,14 +601,14 @@ avbox_window_paint(struct avbox_window * const window, int update)
 	/* blit window */
 	driver.surface_update(window->surface, blitflags, update);
 
+	/* if this is the root window we need to paint all
+	 * visible windows */
 	if (window->parent == &root_window) {
-		/* redraw all windows damaged by this window, that is
-		 * windows higher up on the stack that overlap */
 		damaged_window = LIST_NEXT(struct avbox_window_node*,
 			&window->stack_node);
 		while (!LIST_ISNULL(&window_stack, damaged_window)) {
 			if (avbox_rect_overlaps(&window->rect, &damaged_window->window->rect)) {
-				avbox_window_update(damaged_window->window);
+				avbox_window_paint(damaged_window->window, update);
 				if (avbox_rect_covers(&damaged_window->window->rect, &window->rect)) {
 					break;
 				}
@@ -784,6 +879,7 @@ avbox_window_subwindow(struct avbox_window * const window,
 	new_window->foreground_color = window->foreground_color;
 	new_window->background_color = window->background_color;
 	new_window->decor_dirty = 1;
+	new_window->damaged = 0;
 	new_window->stack_node.window = new_window;
 	LIST_INIT(&new_window->children);
 
@@ -889,6 +985,7 @@ avbox_window_new(
 	window->parent = &root_window;
 	window->visible = 0;
 	window->decor_dirty = 1;
+	window->damaged = 0;
 	window->stack_node.window = window;
 
 	LIST_INIT(&window->children);
@@ -1164,7 +1261,6 @@ avbox_window_show(struct avbox_window * const window)
 	LIST_APPEND(&window_stack, &window->stack_node);
 	window->visible = 1;
 	avbox_window_paint(window, 1);
-	driver.surface_update(window->surface, blitflags, 1);
 
 	/* if the window has input grab it */
 	if (window->flags & AVBOX_WNDFLAGS_INPUT) {
@@ -1208,7 +1304,9 @@ avbox_window_hide(struct avbox_window *window)
 		if (avbox_rect_overlaps(&window->rect, &damaged_window->window->rect)) {
 			/* DEBUG_VPRINT("video", "Repainting damaged window \"%s\"",
 				damaged_window->window->identifier); */
+			damaged_window->window->damaged = (damaged_window->window == &root_window);
 			avbox_window_update(damaged_window->window);
+			damaged_window->window->damaged = 0;
 			if (avbox_rect_covers(&damaged_window->window->rect, &window->rect)) {
 				break;
 			}
@@ -1284,6 +1382,15 @@ avbox_video_init(int argc, char **argv)
 	}
 #endif
 
+#if ENABLE_X11
+	if (!strcmp(driver_string, "x11")) {
+		avbox_video_x11_initft(&driver);
+		root_window.surface = driver.init(argc, argv, &w, &h);
+		if (root_window.surface == NULL) {
+			LOG_PRINT_ERROR("Could not initialize X11 driver!");
+		}
+	}
+#endif
 	if (!strcmp(driver_string, "directfb")) {
 		/* initialize directfb driver */
 		mbv_dfb_initft(&driver);

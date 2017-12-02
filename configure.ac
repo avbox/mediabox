@@ -91,6 +91,11 @@ if test x"$enable_libdrm" = xyes; then
 	AC_DEFINE([ENABLE_LIBDRM], 1, [Define to 1 to enable libdrm support])
 fi
 
+AC_ARG_ENABLE([x11], [Define to 1 to enable the X11 driver])
+AM_CONDITIONAL([ENABLE_X11], [test x$enable_x11 = xyes])
+if test x"$enable_x11" = xyes; then
+	AC_DEFINE([ENABLE_X11], 1, [Define to 1 to enable X11 support])
+fi
 
 AC_ARG_ENABLE([dvd], [DVD Disc support])
 AM_CONDITIONAL(ENABLE_DVD, test x"$enable_dvd" = xyes)
@@ -168,6 +173,23 @@ fi
 if test x"$enable_dvdcss" = xyes; then
 	PKG_CHECK_MODULES(LIBDVDCSS, [libdvdcss], ,
 		AC_MSG_ERROR('Unable to find libdvdcss. Please make sure library and header files are installed.'))
+fi
+
+
+if test x"$enable_x11" = xyes; then
+	AC_SEARCH_LIBS([XOpenDisplay], [X11], [], [
+		AC_MSG_ERROR([required library libX not found])
+	])
+	AC_SEARCH_LIBS([glEnable], [GL], [], [
+		AC_MSG_ERROR([required library libX not found])
+	])
+
+	AC_SEARCH_LIBS([gluLookAt], [GLU], [], [
+		AC_MSG_ERROR([required library libGLU not found])
+	])
+dnl	AC_CHECK_HEADER([GL/glext.h], [], [
+dnl		AC_MSG_ERROR([required header glext.h not found])
+dnl	])
 fi
 
 

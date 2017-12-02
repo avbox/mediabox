@@ -464,6 +464,7 @@ mbv_dfb_initft(struct mbv_drv_funcs * const funcs)
 	funcs->surface_unlock = &surface_unlock;
 	funcs->surface_blitbuf = &surface_blitbuf;
 	funcs->surface_blit = &surface_blit;
+	funcs->surface_scaleblit = NULL;
 	funcs->surface_update = &surface_update;
 	funcs->surface_destroy = &surface_destroy;
 	funcs->shutdown = &__shutdown;

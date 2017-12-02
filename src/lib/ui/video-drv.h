@@ -83,6 +83,13 @@ typedef int (*mbv_drv_surface_blit)(
 	struct mbv_surface * const src,
 	unsigned int flags, int x, int y);
 
+/**
+ * Scale and blit a surface unto another.
+ */
+typedef int (*mbv_drv_surface_scaleblit)(
+	struct mbv_surface * const dst,
+	struct mbv_surface * const src,
+	unsigned int flags, int x, int y, int w, int h);
 
 /**
  * Update a surface.
@@ -116,6 +123,7 @@ struct mbv_drv_funcs
 	mbv_drv_surface_unlock surface_unlock;
 	mbv_drv_surface_blitbuf surface_blitbuf;
 	mbv_drv_surface_blit surface_blit;
+	mbv_drv_surface_scaleblit surface_scaleblit;
 	mbv_drv_surface_update surface_update;
 	mbv_drv_surface_destroy surface_destroy;
 	mbv_drv_shutdown shutdown;

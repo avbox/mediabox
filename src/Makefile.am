@@ -105,6 +105,10 @@ if ENABLE_DVD
 mediabox_SOURCES += lib/dvdio.c
 endif
 
+if ENABLE_X11
+mediabox_SOURCES += lib/ui/video-x11.c
+endif
+
 systemddir = /usr/lib/systemd/system
 systemd_DATA = mediabox.service
 

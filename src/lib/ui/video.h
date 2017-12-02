@@ -146,6 +146,13 @@ avbox_window_blit(struct avbox_window * const dest,
 	struct avbox_window * const src, int flags, int x, int y);
 
 
+int
+avbox_window_scaleblit(
+	struct avbox_window * const dst,
+	struct avbox_window * const src,
+	int flags, const int x, const int y, const int w, const int h);
+
+
 /**
  * Gets the window's foreground color
  */
@@ -210,6 +217,16 @@ mbv_font_new(char *file, int height);
 
 void
 mbv_font_destroy(struct mbv_font *inst);
+
+
+/**
+ * Returns 1 if the window has been damaged and needs
+ * to be fully repaint. This is useful for the root window
+ * that may be damaged by other windows rendering to it during
+ * full screen updates.
+ */
+int
+avbox_window_damaged(struct avbox_window * const window);
 
 
 int
