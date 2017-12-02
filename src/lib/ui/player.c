@@ -631,7 +631,13 @@ avbox_player_video_decode(void *arg)
 					continue;
 				}
 
-				ret = avcodec_send_packet(dec_ctx, NULL);
+				/* send the flush packet to the video codec */
+				if ((ret = avcodec_send_packet(dec_ctx, NULL)) < 0) {
+					LOG_PRINT_ERROR("Error flushing video codec!!!");
+					avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
+					goto decoder_exit;
+				}
+
 				just_flushed = 1;
 				/* fall through */
 
@@ -670,8 +676,9 @@ avbox_player_video_decode(void *arg)
 					avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 					goto decoder_exit;
 				}
+			} else {
+				inst->video_decoder_flushed = 0;
 			}
-			inst->video_decoder_flushed = 0;
 		}
 
 		/* read decoded frames from codec */
@@ -681,12 +688,14 @@ avbox_player_video_decode(void *arg)
 			if (LIKELY((ret = avcodec_receive_frame(dec_ctx, video_frame_nat))) < 0) {
 				if (ret == AVERROR_EOF) {
 					/* send flush packet to filtergraph */
-					if (av_buffersrc_add_frame(video_buffersrc_ctx, NULL) < 0) {
-						LOG_PRINT_ERROR("Could not send flush packet to video buffersrc!");
-						avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
-						goto decoder_exit;
+					if (video_filter_graph != NULL) {
+						if (av_buffersrc_add_frame(video_buffersrc_ctx, NULL) < 0) {
+							LOG_PRINT_ERROR("Could not send flush packet to video buffersrc!");
+							avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
+							goto decoder_exit;
+						}
+						flush_graph = 1;
 					}
-					flush_graph = 1;
 
 				} else if (ret == AVERROR(EAGAIN)) {
 					/* if we're flushing keep trying until EOF */
@@ -856,8 +865,10 @@ avbox_player_video_decode(void *arg)
 		if (just_flushed) {
 			DEBUG_PRINT(LOG_MODULE, "Video decoder flushed");
 			avcodec_flush_buffers(dec_ctx);
-			avbox_player_destroy_filter_graph(video_filter_graph,
-				video_buffersrc_ctx, video_buffersink_ctx, video_frame_nat);
+			if (video_filter_graph != NULL) {
+				avbox_player_destroy_filter_graph(video_filter_graph,
+					video_buffersrc_ctx, video_buffersink_ctx, video_frame_nat);
+			}
 			video_filter_graph = NULL;
 			inst->video_decoder_flushed = 1;
 			just_flushed = 0;
@@ -1051,16 +1062,18 @@ avbox_player_audio_decode(void * arg)
 			/* get the next frame from the decoder */
 			if ((ret = avcodec_receive_frame(dec_ctx, audio_frame_nat)) != 0) {
 				if (ret == AVERROR_EOF) {
-					/* tell the filtergraph to flush */
-					if ((ret = av_buffersrc_add_frame(audio_buffersrc_ctx, NULL)) < 0) {
-						char err[256];
-						av_strerror(ret, err, sizeof(err));
-						LOG_VPRINT_ERROR("Error while feeding the audio filtergraph: %s (channels=%i|layout=0x%"PRIx64")",
-							err, audio_frame_nat->channels, audio_frame_nat->channel_layout);
-						avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
-						goto end;
+					if (filter_graph != NULL) {
+						/* tell the filtergraph to flush */
+						if ((ret = av_buffersrc_add_frame(audio_buffersrc_ctx, NULL)) < 0) {
+							char err[256];
+							av_strerror(ret, err, sizeof(err));
+							LOG_VPRINT_ERROR("Error while feeding the audio filtergraph: %s (channels=%i|layout=0x%"PRIx64")",
+								err, audio_frame_nat->channels, audio_frame_nat->channel_layout);
+							avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
+							goto end;
+						}
+						flush_graph = 1;
 					}
-					flush_graph = 1;
 					/* fall through */
 				}
 				else if (ret == AVERROR(EAGAIN)) {
