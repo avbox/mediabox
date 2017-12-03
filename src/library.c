@@ -116,6 +116,7 @@ static LIST mediatomb_instances;
 static int avmount_process_id = -1;
 static int local_inotify_fd = -1;
 static int local_inotify_quit = 0;
+static char *store;
 static pthread_t local_inotify_thread;
 static LIST local_inotify_watches;
 
@@ -2459,7 +2460,7 @@ remove_end:
 
 
 static int
-mbox_library_local_init(const char * const store)
+mbox_library_local_init()
 {
 	struct stat st;
 
@@ -2474,11 +2475,21 @@ mbox_library_local_init(const char * const store)
 				S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 		}
 
-		/* mount the store partition */
-		if (mount(store, MBOX_STORE_MOUNTPOINT, "ext4", 0, "") == -1) {
-			LOG_VPRINT_ERROR("Could not mount proc: %s",
-				strerror(errno));
-			return -1;
+		/* check that the video directory exists in the store
+		 * and create it if it doesn't */
+		if (stat(MBOX_STORE_VIDEO, &st) == -1) {
+			/* mount the store partition */
+			if (mount(store, MBOX_STORE_MOUNTPOINT, "ext4", 0, "") == -1) {
+				LOG_VPRINT_ERROR("Could not mount proc: %s",
+					strerror(errno));
+				return -1;
+			}
+		} else {
+			if (!S_ISDIR(st.st_mode)) {
+				LOG_VPRINT_ERROR("'%s' exists but it's not a directory!",
+					MBOX_STORE_VIDEO);
+				return -1;
+			}
 		}
 
 		/* check that the video directory exists in the store
@@ -2575,6 +2586,10 @@ mbox_library_local_shutdown(void)
 		close(local_inotify_fd);
 		local_inotify_fd = -1;
 	}
+
+	if (store != NULL) {
+		umount(store);
+	}
 }
 
 
@@ -2604,7 +2619,6 @@ mbox_library_init(void)
 	char exe_path_mem[255];
 	char *exe_path = exe_path_mem;
 	char *avmount_logfile = NULL;
-	char *store = NULL;
 	int config_setup = 0;
 	struct stat st;
 
@@ -2747,7 +2761,7 @@ mbox_library_init(void)
 	}
 
 	/* initialize local provider */
-	if (mbox_library_local_init(store) == -1) {
+	if (mbox_library_local_init() == -1) {
 		LOG_VPRINT_ERROR("Could not start local library provider: %s",
 			strerror(errno));
 		goto end;
@@ -2774,10 +2788,6 @@ mbox_library_init(void)
 
 	ret = 0;
 end:
-	if (store != NULL) {
-		free(store);
-	}
-
 	return ret;
 }
 
@@ -2798,6 +2808,10 @@ mbox_library_shutdown(void)
 	}
 
 	mbox_library_local_shutdown();
+
+	if (store != NULL) {
+		free(store);
+	}
 
 #if defined(ENABLE_DVD) || defined(ENABLE_USB)
 	ASSERT(udev != NULL);
