@@ -308,15 +308,27 @@ avbox_player_getsystemtime(struct avbox_player *inst)
 static int
 avbox_player_draw(struct avbox_window * const window, void * const context)
 {
+	int target_width, target_height;
 	struct avbox_player * const inst = context;
-	avbox_window_blit(window, inst->video_window, MBV_BLITFLAGS_NONE, 0, 0);
+
+	avbox_window_getcanvassize(inst->window, &target_width, &target_height);
+
+	const int x = (target_width - inst->state_info.scaled_res.w) / 2;
+	const int y = (target_height - inst->state_info.scaled_res.h) / 2;
+
+	/* if the window has been damaged we need to
+	 * paint the whole window */
+	if (avbox_window_damaged(window)) {
+		avbox_window_clear(window);
+	}
+
+	/* scale and show the frame */
+	avbox_window_scaleblit(window, inst->video_window, MBV_BLITFLAGS_NONE,
+		x, y, inst->state_info.scaled_res.w, inst->state_info.scaled_res.h);
 
 	if (inst->stream.self != NULL) {
 		struct avbox_rect *highlight;
 		if ((highlight = inst->stream.highlight(inst->stream.self)) != NULL) {
-			int target_width, target_height;
-
-			avbox_window_getcanvassize(inst->window, &target_width, &target_height);
 
 			const int wpc = (100 * inst->state_info.scaled_res.w) / inst->state_info.video_res.w;
 			const int hpc = (100 * inst->state_info.scaled_res.h) / inst->state_info.video_res.h;;
@@ -333,14 +345,70 @@ avbox_player_draw(struct avbox_window * const window, void * const context)
 }
 
 
+struct avbox_player_updateargs
+{
+	struct avbox_player *inst;
+	AVFrame *frame;
+};
+
+
 /**
  * Update the display from main thread.
  */
 static void *
 avbox_player_doupdate(void *arg)
 {
-	struct avbox_player * const inst = (struct avbox_player*) arg;
+	struct avbox_player_updateargs * const args = arg;
+	struct avbox_player * const inst = args->inst;
+	AVFrame * const frame = args->frame;
+
+	if (frame != NULL) {
+		/* upload the frame to the window surface */
+		avbox_window_blitbuf(inst->video_window,
+			frame->data[0],
+			frame->linesize[0],
+			inst->state_info.video_res.w,
+			inst->state_info.video_res.h,
+			0, 0);
+	}
+
 	avbox_window_update(inst->window);
+	return NULL;
+}
+
+
+static void *
+avbox_player_doclear(void *arg)
+{
+	struct avbox_player * const inst = arg;
+	avbox_window_clear(inst->window);
+	avbox_window_update(inst->window);
+	return NULL;
+}
+
+
+static void *
+avbox_player_createwindow(void *arg)
+{
+	int target_width, target_height;
+	struct avbox_player * const inst = arg;
+
+	/* get the size of the target window */
+	avbox_window_getcanvassize(inst->window, &target_width, &target_height);
+
+	/* create an offscreen window for rendering */
+	if ((inst->video_window = avbox_window_new(NULL, "video_surface", 0,
+		0, 0, inst->state_info.video_res.w, inst->state_info.video_res.h,
+		NULL, NULL, NULL)) == NULL) {
+		LOG_PRINT_ERROR("Could not create video window!");
+	}
+
+	/* clear the off-screen window and set a draw handler
+	 * for the target window */
+	avbox_window_setbgcolor(inst->video_window, AVBOX_COLOR(0x000000ff));
+	avbox_window_clear(inst->video_window);
+	avbox_window_setdrawfunc(inst->window, avbox_player_draw, inst);
+
 	return NULL;
 }
 
@@ -351,13 +419,12 @@ avbox_player_doupdate(void *arg)
 static void *
 avbox_player_video(void *arg)
 {
-	int pitch, linesize, height, target_width, target_height;
-	uint8_t *buf;
+	int target_width, target_height;
 	struct avbox_player *inst = (struct avbox_player*) arg;
 	struct avbox_player_packet *packet;
 	AVFrame *frame;
 	struct avbox_delegate *del;
-	struct SwsContext *swscale_ctx = NULL;
+	struct avbox_player_updateargs args;
 
 	DEBUG_SET_THREAD_NAME("video_playback");
 	DEBUG_PRINT("player", "Video renderer started");
@@ -365,44 +432,23 @@ avbox_player_video(void *arg)
 	ASSERT(inst != NULL);
 	ASSERT(inst->video_window == NULL);
 
-	linesize = av_image_get_linesize(MB_DECODER_PIX_FMT, inst->state_info.video_res.w, 0);
-	height = inst->state_info.video_res.h;
-
 	/* get the size of the target window */
 	avbox_window_getcanvassize(inst->window, &target_width, &target_height);
 
-	/* create an offscreen window for rendering */
-	if ((inst->video_window = avbox_window_new(NULL, "video_surface", 0,
-		0, 0, target_width, target_height,
-		NULL, NULL, NULL)) == NULL) {
-		LOG_PRINT_ERROR("Could not create video window!");
-		goto video_exit;
+	/* create target window from main thread */
+	if ((del = avbox_application_delegate(avbox_player_createwindow, inst)) == NULL) {
+		LOG_PRINT_ERROR("Could not create video window");
+		avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
+	} else {
+		avbox_delegate_wait(del, NULL);
+		if (inst->video_window == NULL) {
+			LOG_PRINT_ERROR("Video window not created");
+		}
 	}
-
-	/* clear the off-screen window and set a draw handler
-	 * for the target window */
-	avbox_window_setbgcolor(inst->video_window, AVBOX_COLOR(0x000000ff));
-	avbox_window_clear(inst->video_window);
-	avbox_window_setdrawfunc(inst->window, avbox_player_draw, inst);
 
 	/* calculate how to scale the video */
 	avbox_player_scale2display(inst,
 		target_width, target_height, &inst->state_info.scaled_res);
-
-	/* initialize the software scaler */
-	if ((swscale_ctx = sws_getContext(
-		inst->state_info.video_res.w,
-		inst->state_info.video_res.h,
-		MB_DECODER_PIX_FMT,
-		inst->state_info.scaled_res.w,
-		inst->state_info.scaled_res.h,
-		MB_DECODER_PIX_FMT,
-		SWS_PRINT_INFO | SWS_FAST_BILINEAR,
-		NULL, NULL, NULL)) == NULL) {
-		LOG_PRINT_ERROR("Could not create swscale context!");
-		avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
-		goto video_exit;
-	}
 
 	avbox_checkpoint_enable(&inst->video_output_checkpoint);
 
@@ -477,23 +523,11 @@ avbox_player_video(void *arg)
 			}
 		}
 
-		/* copy the frame to the video window. For now we
-		 * just scale here but in the future this should be done
-		 * by the video driver (possibly accelerated). */
-		if ((buf = avbox_window_lock(inst->video_window, MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
-			LOG_VPRINT_ERROR("Could not lock video window: %s", strerror(errno));
-		} else {
-			ASSERT(ALIGNED(*frame->data, 16));
-			ASSERT(ALIGNED(buf, 16));
-			buf += pitch * ((target_height - inst->state_info.scaled_res.h) / 2);
-			buf += (pitch / target_width) * ((target_width - inst->state_info.scaled_res.w) / 2);
-			sws_scale(swscale_ctx, (uint8_t const * const *) frame->data,
-				&linesize, 0, height, &buf, &pitch);
-			avbox_window_unlock(inst->video_window);
-		}
+		args.inst = inst;
+		args.frame = frame;
 
 		/* perform the actual update from the main thread */
-		if ((del = avbox_application_delegate(avbox_player_doupdate, inst)) == NULL) {
+		if ((del = avbox_application_delegate(avbox_player_doupdate, &args)) == NULL) {
 			LOG_PRINT_ERROR("Could not delegate update!");
 		} else {
 			avbox_delegate_wait(del, NULL);
@@ -515,10 +549,6 @@ video_exit:
 
 	avbox_checkpoint_disable(&inst->video_output_checkpoint);
 
-	if (swscale_ctx != NULL) {
-		sws_freeContext(swscale_ctx);
-	}
-
 	/* free any frames left in the queue */
 	while ((frame = avbox_queue_get(inst->video_frames_q)) != NULL) {
 		av_frame_unref(frame);
@@ -526,8 +556,7 @@ video_exit:
 	}
 
 	/* clear screen */
-	avbox_window_clear(inst->video_window);
-	if ((del = avbox_application_delegate(avbox_player_doupdate, inst)) == NULL) {
+	if ((del = avbox_application_delegate(avbox_player_doclear, inst)) == NULL) {
 		LOG_PRINT_ERROR("Could not delegate update!");
 	} else {
 		avbox_delegate_wait(del, NULL);
@@ -2978,7 +3007,10 @@ avbox_player_control(void * context, struct avbox_message * msg)
 		case AVBOX_PLAYERCTL_UPDATE:
 		{
 			struct avbox_delegate *del;
-			if ((del = avbox_application_delegate(avbox_player_doupdate, inst)) != NULL) {
+			struct avbox_player_updateargs args;
+			args.inst = inst;
+			args.frame = NULL;
+			if ((del = avbox_application_delegate(avbox_player_doupdate, &args)) != NULL) {
 				avbox_delegate_wait(del, NULL);
 			}
 			break;
