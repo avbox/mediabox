@@ -45,6 +45,13 @@
 #include "../linkedlist.h"
 #include "video-drv.h"
 
+#ifdef ENABLE_OPENGL
+#	include <EGL/egl.h>
+#	include <EGL/eglext.h>
+#	include <gbm.h>
+#	include "video-opengl.h"
+#endif
+
 
 struct mbv_drm_dev;
 
@@ -92,6 +99,15 @@ LISTABLE_STRUCT(mbv_drm_dev,
 
 LIST_DECLARE_STATIC(devices);
 static struct mbv_drm_dev *default_dev = NULL;
+
+#ifdef ENABLE_OPENGL
+static struct gbm_device *gbm_dev;
+static struct gbm_surface *gbm_surface;
+static EGLDisplay egl_display;
+static EGLContext egl_ctx;
+static uint32_t egl_framebuffer = 0;
+static int egl_enabled = 0;
+#endif
 
 
 static struct mbv_surface *
@@ -745,9 +761,43 @@ mbv_drm_prepare(int fd, int mode_index)
 	return 0;
 }
 
+#ifdef ENABLE_OPENGL
+static int
+create_egl_framebuffer(EGLDisplay egl_display,
+	EGLSurface egl_surface, struct gbm_surface *gbm_surface,
+	struct mbv_drm_dev * const dev, uint32_t * const fb)
+{
+	int ret;
+	struct gbm_bo *bo;
+
+	/* get the buffer object for the front buffer */
+	eglSwapBuffers(egl_display, egl_surface);
+	if ((bo = gbm_surface_lock_front_buffer(gbm_surface)) == NULL) {
+		LOG_PRINT_ERROR("Could not get the surface's buffer object");
+		return -1;
+	}
+
+	DEBUG_VPRINT(LOG_MODULE, "bo_handle=%d bo_stride=%d",
+		gbm_bo_get_handle(bo).u32, gbm_bo_get_stride(bo));
+
+	/* create a framebuffer for the buffer object */
+	if ((ret = drmModeAddFB(dev->fd, dev->root.w, dev->root.h, 24, 32,
+		gbm_bo_get_stride(bo), gbm_bo_get_handle(bo).u32, fb)) != 0) {
+		LOG_VPRINT_ERROR("Could not create GBM fb: %s",
+			strerror(ret));
+		gbm_surface_release_buffer(gbm_surface, bo);
+		return -1;
+	}
+
+	gbm_surface_release_buffer(gbm_surface, bo);
+	return 0;
+}
+#endif
+
 
 static struct mbv_surface *
-init(int argc, char **argv, int * const w, int * const h)
+init(struct mbv_drv_funcs * const driver,
+	int argc, char **argv, int * const w, int * const h)
 {
 	int i, ret, fd = -1;
 	int mode_index = 0;
@@ -798,6 +848,155 @@ init(int argc, char **argv, int * const w, int * const h)
 	*h = default_dev->root.h;
 	ret = 0;
 
+#ifdef ENABLE_OPENGL
+
+	/* if the no-accel argumant was provided skip
+	 * GL initialization */
+	for (i = 0; i < argc; i++) {
+		if (!strncmp(argv[i], "--no-accel", 10)) {
+			goto end;
+		}
+	}
+
+
+	const EGLint configAttribs[] = {
+		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+		EGL_BLUE_SIZE, 8,
+		EGL_GREEN_SIZE, 8,
+		EGL_RED_SIZE, 8,
+		EGL_ALPHA_SIZE, 8,
+		EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+		EGL_NONE
+	};
+	const EGLint surfaceAttribs[] = {
+		EGL_RENDER_BUFFER, EGL_SINGLE_BUFFER,
+		EGL_NONE
+	};
+
+	EGLint major, minor, n_configs, err;
+	EGLConfig cfg;
+	EGLSurface egl_surface;
+	void *gl_surface;
+
+	/* create a framebuffer bo */
+	gbm_dev = gbm_create_device(fd);
+	gbm_surface = gbm_surface_create(gbm_dev, default_dev->root.w, default_dev->root.h,
+		GBM_FORMAT_XRGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+	if (gbm_surface == NULL) {
+		LOG_PRINT_ERROR("Could not create GBM surface!");
+		goto end;
+	}
+
+	#if 1
+	PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = NULL;
+		get_platform_display = (void *) eglGetProcAddress("eglGetPlatformDisplayEXT");
+	assert(get_platform_display != NULL);
+
+
+	#define EGL_PLATFORM_GBM_KHR              0x31D7
+
+	if ((egl_display = get_platform_display(EGL_PLATFORM_GBM_KHR, (void*) gbm_dev, NULL)) == EGL_NO_DISPLAY) {
+		LOG_PRINT_ERROR("Could not create EGL display!");
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		goto end;
+	}
+	#else
+	/* get display */
+	if ((egl_display = eglGetDisplay((void*) gbm_dev)) == EGL_NO_DISPLAY) {
+		LOG_PRINT_ERROR("Could not create EGL display!");
+		goto end;
+	}
+	#endif
+
+	if (eglInitialize(egl_display, &major, &minor) == EGL_FALSE) {
+		LOG_PRINT_ERROR("Could not initialize EGL display!");
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		goto end;
+	}
+	if (eglChooseConfig(egl_display, configAttribs, &cfg, 1, &n_configs) == EGL_FALSE) {
+		LOG_PRINT_ERROR("Could not find EGL config!");
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		eglTerminate(egl_display);
+		goto end;
+	}
+	if (eglBindAPI(EGL_OPENGL_API) == EGL_FALSE) {
+		LOG_PRINT_ERROR("Could not bind OpenGL API!");
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		eglTerminate(egl_display);
+		goto end;
+	}
+	if ((egl_ctx = eglCreateContext(egl_display, cfg, EGL_NO_CONTEXT, NULL)) == EGL_NO_CONTEXT) {
+		LOG_PRINT_ERROR("Could not create egl context!");
+		if ((err = eglGetError()) != EGL_SUCCESS) {
+			LOG_VPRINT_ERROR("GL error: 0x%x", err);
+		}
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		eglTerminate(egl_display);
+		goto end;
+	}
+	if ((egl_surface = eglCreateWindowSurface(egl_display, cfg,
+		(EGLNativeWindowType) gbm_surface, surfaceAttribs)) == EGL_NO_SURFACE) {
+		LOG_PRINT_ERROR("Could not create window surface");
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		eglDestroyContext(egl_display, egl_ctx);
+		eglTerminate(egl_display);
+		goto end;
+	}
+	if (eglMakeCurrent(egl_display, egl_surface, egl_surface, egl_ctx) == EGL_FALSE) {
+		LOG_PRINT_ERROR("Could not make GL context current!");
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		eglDestroyContext(egl_display, egl_ctx);
+		eglTerminate(egl_display);
+		goto end;
+	}
+
+	/* create a DRM framebuffer from the bo */
+	if (create_egl_framebuffer(egl_display, egl_surface,
+		gbm_surface, default_dev, &egl_framebuffer) == -1) {
+		LOG_PRINT_ERROR("Could not make GL context current!");
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		eglDestroyContext(egl_display, egl_ctx);
+		eglTerminate(egl_display);
+		goto end;
+	}
+
+	/* an set it as the current framebuffer */
+	if (drmModeSetCrtc(default_dev->fd,
+		default_dev->crtc,
+		egl_framebuffer, 0, 0,
+		&default_dev->conn, 1,
+		&default_dev->mode)) {
+		LOG_PRINT_ERROR("Could not set EGL framebuffer");
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		eglDestroyContext(egl_display, egl_ctx);
+		eglTerminate(egl_display);
+		goto end;
+	}
+
+	/* now that we have everything setup we can attempt to
+	 * start the GL driver */
+	if ((gl_surface = avbox_video_glinit(driver, *w, *h)) != NULL) {
+		egl_enabled = 1;
+		return gl_surface;
+	} else {
+		LOG_PRINT_ERROR("Could not initialize GL driver! Using software driver.");
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		eglDestroyContext(egl_display, egl_ctx);
+		eglTerminate(egl_display);
+	}
+
+#endif
+
 end:
 	if (ret) {
 		errno = -ret;
@@ -822,6 +1021,16 @@ shutdown()
 {
 	struct mbv_drm_dev *iter;
 	struct drm_mode_destroy_dumb dreq;
+
+#ifdef ENABLE_OPENGL
+	if (egl_enabled) {
+		drmModeRmFB(default_dev->fd, egl_framebuffer);
+		gbm_surface_destroy(gbm_surface);
+		gbm_device_destroy(gbm_dev);
+		eglDestroyContext(egl_display, egl_ctx);
+		eglTerminate(egl_display);
+	}
+#endif
 
 	LIST_FOREACH_SAFE(struct mbv_drm_dev*, iter, &devices, {
 		/* remove from global list */

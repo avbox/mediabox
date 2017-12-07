@@ -1375,7 +1375,7 @@ avbox_video_init(int argc, char **argv)
 	if (!strcmp(driver_string, "libdrm")) {
 		/* attempt to initialize the libdrm driver */
 		mbv_drm_initft(&driver);
-		root_window.surface = driver.init(argc, argv, &w, &h);
+		root_window.surface = driver.init(&driver, argc, argv, &w, &h);
 		if (root_window.surface == NULL) {
 			LOG_PRINT_ERROR("Could not initialize libdrm driver!");
 		}
@@ -1385,7 +1385,7 @@ avbox_video_init(int argc, char **argv)
 #if ENABLE_X11
 	if (!strcmp(driver_string, "x11")) {
 		avbox_video_x11_initft(&driver);
-		root_window.surface = driver.init(argc, argv, &w, &h);
+		root_window.surface = driver.init(&driver, argc, argv, &w, &h);
 		if (root_window.surface == NULL) {
 			LOG_PRINT_ERROR("Could not initialize X11 driver!");
 		}
@@ -1394,7 +1394,7 @@ avbox_video_init(int argc, char **argv)
 	if (!strcmp(driver_string, "directfb")) {
 		/* initialize directfb driver */
 		mbv_dfb_initft(&driver);
-		root_window.surface = driver.init(argc, argv, &w, &h);
+		root_window.surface = driver.init(&driver, argc, argv, &w, &h);
 		if (root_window.surface == NULL) {
 			LOG_PRINT_ERROR("Could not initialize DirectFB driver. Exiting!");
 		}

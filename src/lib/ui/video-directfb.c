@@ -395,8 +395,10 @@ mode_callback(int width, int height, int bpp, void *arg)
  * Initialize video device.
  */
 static struct mbv_surface *
-init(int argc, char **argv, int * const w, int * const h)
+init(struct mbv_drv_funcs * const driver,
+	int argc, char **argv, int * const w, int * const h)
 {
+	(void) driver;
 	DFBCHECK(DirectFBInit(&argc, &argv));
 	DFBCHECK(DirectFBCreate(&dfb));
 	DFBCHECK(dfb->SetCooperativeLevel(dfb, DFSCL_NORMAL));

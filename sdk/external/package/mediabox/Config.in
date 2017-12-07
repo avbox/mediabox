@@ -1,5 +1,5 @@
 config BR2_PACKAGE_MEDIABOX
-	bool "mediabox"
+	bool "MediaBox"
 	depends on BR2_TOOLCHAIN_HAS_THREADS_NPTL
 	depends on BR2_TOOLCHAIN_GCC_AT_LEAST_4_5
 	depends on !BR2_TOOLCHAIN_USES_MUSL # sigval_t issue
@@ -12,31 +12,46 @@ config BR2_PACKAGE_MEDIABOX
 	select BR2_PACKAGE_AVMOUNT
 	select BR2_PACKAGE_DELUGE
 	help
-	  Set-top box system.
+	  A media player designed for set-top boxes.
 
 if BR2_PACKAGE_MEDIABOX
 
 config BR2_PACKAGE_MEDIABOX_DEBUG
-	bool "mediabox debug support"
+	bool "Build with debug information"
 	help
 	  Enables runtime checks and debug output to log
 	  file (or stderr).
 
 config BR2_PACKAGE_MEDIABOX_BLUETOOTH
-	bool "mediabox bluetooth support"
+	bool "Enable Bluetooth support"
 	select BR2_PACKAGE_BLUEALSA
 	depends on BR2_LINUX_KERNEL
 	help
 	  Enable Bluetooth support on MediaBox.
 
 config BR2_PACKAGE_MEDIABOX_LIBDRM
-	bool "mediabox libdrm driver"
+	bool "Enable the accelerated DRM driver (does not require an X server)"
 	select BR2_PACKAGE_LIBDRM
+	select BR2_PACKAGE_XORG7
+	select BR2_PACKAGE_XSERVER_XORG_SERVER
+	select BR2_PACKAGE_MESA3D
 	help
 	  Enable libdrm video driver.
+	  Note that this driver does NOT depend on an X server.
+	  The only reason that Xorg is selected is because I can't
+	  get mesa3d to build libGL without selecting it. Apparently
+	  a bug in buildroot.
+
+config BR2_PACKAGE_MEDIABOX_X11
+	bool "Enable the accelerated X11 driver"
+	select BR2_PACKAGE_XORG7
+	select BR2_PACKAGE_XSERVER_XORG_SERVER
+	select BR2_PACKAGE_MESA3D
+	help
+	  Enable the X11 video driver.
 
 config BR2_PACKAGE_MEDIABOX_DVD
-	bool "mediabox DVD support"
+	bool "Enable DVD playback support"
 	select BR2_PACKAGE_LIBDVDNAV
 	help
 	  Enable DVD playback

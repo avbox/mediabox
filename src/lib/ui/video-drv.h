@@ -26,6 +26,7 @@
  */
 struct mbv_surface;
 struct mbv_window;
+struct mbv_drv_funcs;
 
 #define MBV_BLITFLAGS_NONE		(0x0)
 #define MBV_BLITFLAGS_FRONT		(0x1)
@@ -42,6 +43,7 @@ struct mbv_window;
  * a pointer to the root surface.
  */
 typedef struct mbv_surface *(*mbv_drv_init)(
+	struct mbv_drv_funcs * const driver,
 	int argc, char **argv, int * const w, int * const h);
 
 /**

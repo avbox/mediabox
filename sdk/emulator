@@ -27,6 +27,7 @@ KVM=1
 EMU_VIDEO=std
 NCORES=2
 SDL=1
+ACCEL=0
 
 
 # switch to the script directory
@@ -53,6 +54,12 @@ do
 		--video=*)
 			VIDEO=${1#*=}
 		;;
+		--accel)
+			ACCEL=1
+		;;
+		--no-accel)
+			ACCEL=0
+		;;
 		--emu-video=*)
 			EMU_VIDEO=${1#*=}
 		;;
@@ -73,8 +80,9 @@ do
 			echo_e "  --cores=<no>\t\tNumber of cores for target system"
 			echo_e "  --video=<drv>\t\tThe mediabox video driver"
 			echo_e "  --emu-video=<drv>\tThe QEMU video driver to use"
-			echo_e "  --busybox-init\t\tBoot using BusyBox's init system"
+			echo_e "  --busybox-init\tBoot using BusyBox's init system"
 			echo_e "  --[no-]kvm\t\tEnable/disable kvm support"
+			echo_e "  --[no-]accel\t\tEnable/disable video acceleration"
 			echo_e "  --help\t\tShow this."
 			echo_e ""
 			exit 0
@@ -117,6 +125,10 @@ if [ ${BUSYBOX_INIT} -eq 0 ]; then
 	KARGS="${KARGS} mediabox.video:driver=${VIDEO}"
 	KARGS="${KARGS} mediabox.store=/dev/sdb"
 	KARGS="${KARGS} coredump_filter=255"
+fi
+
+if [ ${ACCEL} -eq 0 ]; then
+	KARGS="${KARGS} mediabox.no-accel"
 fi
 
 # start qemu

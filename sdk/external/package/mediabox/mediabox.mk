@@ -26,8 +26,17 @@ ifeq ($(BR2_PACKAGE_MEDIABOX_BLUETOOTH),y)
 MEDIABOX_CONF_OPTS += --enable-bluetooth
 endif
 
+# we need xorg here just so we can get a
+# libGL. Once we support OpenGL ES we won't
+# need this
 ifeq ($(BR2_PACKAGE_MEDIABOX_LIBDRM),y)
 MEDIABOX_CONF_OPTS += --enable-libdrm
+MEDIABOX_DEPENDENCIES += libdrm mesa3d xserver_xorg-server
+endif
+
+ifeq ($(BR2_PACKAGE_MEDIABOX_X11),y)
+MEDIABOX_CONF_OPTS += --enable-x11
+MEDIABOX_DEPENDENCIES += xserver_xorg-server mesa3d
 endif
 
 ifeq ($(BR2_PACKAGE_MEDIABOX_DVD),y)

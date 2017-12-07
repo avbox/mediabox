@@ -58,6 +58,9 @@ AC_HEADER_STDC
 AC_CHECK_HEADERS(unistd.h string.h pwd.h sys/stat.h sys/types.h execinfo.h)
 
 
+AM_CONDITIONAL(ENABLE_OPENGL, [test xyes = xno])
+
+
 AC_ARG_ENABLE([debug], [extra debugging code])
 AM_CONDITIONAL(ENABLE_DEBUG, test x"$enable_debug" = xyes)
 if test x"$enable_debug" = xyes; then
@@ -92,9 +95,11 @@ if test x"$enable_libdrm" = xyes; then
 fi
 
 AC_ARG_ENABLE([x11], [Define to 1 to enable the X11 driver])
-AM_CONDITIONAL([ENABLE_X11], [test x$enable_x11 = xyes])
+AM_CONDITIONAL([ENABLE_X11], [test x"$enable_x11" = xyes])
 if test x"$enable_x11" = xyes; then
 	AC_DEFINE([ENABLE_X11], 1, [Define to 1 to enable X11 support])
+	AC_DEFINE([ENABLE_OPENGL], 1, [Define to 1 to enable OpenGL support])
+	AM_CONDITIONAL(ENABLE_OPENGL, [test xyes = xyes])
 fi
 
 AC_ARG_ENABLE([dvd], [DVD Disc support])
@@ -114,6 +119,7 @@ if test x"$enable_dvdcss" = xyes; then
 		AC_MSG_ERROR([Cannot enable dvdcss without dvd!])
 	fi
 fi
+
 
 
 #AC_SUBST(DAEMON_ARGS)
@@ -180,25 +186,33 @@ if test x"$enable_x11" = xyes; then
 	AC_SEARCH_LIBS([XOpenDisplay], [X11], [], [
 		AC_MSG_ERROR([required library libX not found])
 	])
-	AC_SEARCH_LIBS([glEnable], [GL], [], [
-		AC_MSG_ERROR([required library libX not found])
+	AC_SEARCH_LIBS([glBegin], [GL], [], [
+		AC_MSG_ERROR([required library libGL not found])
 	])
-
-	AC_SEARCH_LIBS([gluLookAt], [GLU], [], [
-		AC_MSG_ERROR([required library libGLU not found])
-	])
-dnl	AC_CHECK_HEADER([GL/glext.h], [], [
-dnl		AC_MSG_ERROR([required header glext.h not found])
-dnl	])
 fi
-
 
 #
 # libdrm support
 #
 if test x"$enable_libdrm" = xyes; then
+	use_opengl=yes
+
 	PKG_CHECK_MODULES(LIBDRM, [libdrm], ,
 		AC_MSG_ERROR('Unable to find libdrm. Please make sure library and header files are installed.'))
+
+	AC_SEARCH_LIBS([glBegin], [GL], [], [use_opengl=no])
+
+	if test x"$use_opengl" = xyes; then
+		PKG_CHECK_MODULES(EGL, egl, , [use_opengl=no])
+		PKG_CHECK_MODULES(GBM, gbm, , [use_opengl=no])
+	fi
+
+	if test x"$use_opengl" = xyes; then
+		AC_DEFINE([ENABLE_OPENGL], 1, [Define to 1 to enable OpenGL support])
+		AM_CONDITIONAL(ENABLE_OPENGL, [test xyes = xyes])
+	else
+		AC_MSG_WARN('Unable to find GL dependencies. Disabling')
+	fi
 fi
 
 

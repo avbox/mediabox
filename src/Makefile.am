@@ -97,8 +97,8 @@ endif
 
 if ENABLE_LIBDRM
 mediabox_SOURCES += lib/ui/video-drm.c
-AM_CFLAGS += @LIBDRM_CFLAGS@
-AM_LDFLAGS += @LIBDRM_LIBS@
+AM_CFLAGS += @LIBDRM_CFLAGS@ @EGL_CFLAGS@ @GBM_CFLAGS@
+AM_LDFLAGS += @LIBDRM_LIBS@ @EGL_LIBS@ @GBM_LIBS@
 endif
 
 if ENABLE_DVD
@@ -107,6 +107,10 @@ endif
 
 if ENABLE_X11
 mediabox_SOURCES += lib/ui/video-x11.c
+endif
+
+if ENABLE_OPENGL
+mediabox_SOURCES += lib/ui/video-opengl.c
 endif
 
 systemddir = /usr/lib/systemd/system
