@@ -741,7 +741,7 @@ avbox_player_video_decode(void *arg)
 				if (video_frame_nat->pkt_dts == AV_NOPTS_VALUE) {
 					video_frame_nat->pts = 0;
 				} else {
-					/* video_frame_nat->pts = video_frame_nat->pkt_dts; */
+					video_frame_nat->pts = video_frame_nat->pkt_dts;
 				}
 
 				if (video_filter_graph == NULL) {
@@ -1338,9 +1338,11 @@ avbox_player_stream_parse(void *arg)
 
 	/* open file */
 	av_dict_set(&stream_opts, "timeout", "30000000", 0);
-	if (avformat_open_input(&inst->fmt_ctx, inst->media_file, NULL, &stream_opts) != 0) {
-		LOG_VPRINT_ERROR("Could not open stream '%s'",
-			inst->media_file);
+	if ((res = avformat_open_input(&inst->fmt_ctx, inst->media_file, NULL, &stream_opts)) != 0) {
+		char err[256];
+		av_strerror(res, err, sizeof(err));
+		LOG_VPRINT_ERROR("Could not open stream '%s': %s",
+			inst->media_file, err);
 		goto decoder_exit;
 	}
 
@@ -1873,6 +1875,32 @@ avbox_player_dostop(struct avbox_player * const inst)
 	}
 }
 
+struct avbox_player_openstream_args
+{
+	struct avbox_player * inst;
+	const char *path;
+};
+
+
+static void*
+avbox_player_openstream(void *arg)
+{
+	struct avbox_player_openstream_args * const osa = arg;
+
+#ifdef ENABLE_DVD
+	/* if this is a DVD open it */
+	if (!strncmp("dvd:", osa->path, 4)) {
+		if (avbox_dvdio_open(osa->path + 4, osa->inst, &osa->inst->stream) == NULL) {
+			LOG_VPRINT_ERROR("Could not open DVD: %s",
+				strerror(errno));
+			ASSERT(osa->inst->stream.self == NULL);
+			return (void*) -1;
+		}
+	}
+#endif
+
+	return (void*) 0;
+}
 
 /**
  * Start playing a stream.
@@ -1919,18 +1947,25 @@ avbox_player_doplay(struct avbox_player * const inst,
 	inst->play_state = AVBOX_PLAYER_PLAYSTATE_STREAM;
 	avbox_player_updatestatus(inst, MB_PLAYER_STATUS_BUFFERING);
 
-#ifdef ENABLE_DVD
-	/* if this is a DVD open it */
-	if (!strncmp("dvd:", path, 4)) {
-		if (avbox_dvdio_open(path + 4, inst, &inst->stream) == NULL) {
-			LOG_VPRINT_ERROR("Could not open DVD: %s",
-				strerror(errno));
-			ASSERT(inst->stream.self == NULL);
+	/* multicast and anycast messages are broken and are always
+	 * sent to the thread of the 1st recipient. So until this is
+	 * fixed we open the stream from the main thread so it can
+	 * request input */
+	struct avbox_player_openstream_args open_stream;
+	struct avbox_delegate *del;
+	open_stream.inst = inst;
+	open_stream.path = path;
+	if ((del = avbox_application_delegate(avbox_player_openstream, &open_stream)) == NULL) {
+		avbox_player_throwexception(inst, "Could not delegate streamopen");
+		return;
+	} else {
+		void *ret;
+		avbox_delegate_wait(del, &ret);
+		if (ret == (void*) -1) {
 			avbox_player_updatestatus(inst, MB_PLAYER_STATUS_READY);
 			return;
 		}
 	}
-#endif
 
 	/* initialize player object */
 	const char *old_media_file = inst->media_file;

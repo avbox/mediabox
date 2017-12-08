@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <string.h>
 #include <malloc.h>
+#include <pthread.h>
 
 #define GL_GLEXT_PROTOTYPES
 
@@ -42,6 +43,10 @@ struct mbv_surface
 /* GL driver */
 static GLuint root_framebuffer;
 static struct mbv_surface *root_surface;
+
+#ifndef NDEBUG
+static pthread_t gl_thread;
+#endif
 
 static struct mbv_surface *
 surface_new(struct mbv_surface *parent,
@@ -138,6 +143,7 @@ surface_lock(struct mbv_surface * const inst,
 	ASSERT(inst != NULL);
 	ASSERT(inst->lockflags == 0);
 	ASSERT(flags != 0);
+	ASSERT(pthread_self() == gl_thread);
 
 	if (flags & MBV_LOCKFLAGS_READ) {
 		GLuint err;
@@ -364,6 +370,11 @@ struct mbv_surface *
 avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int height)
 {
 	GLenum err;
+
+#ifndef NDEBUG
+	/* remember the main thread */
+	gl_thread = pthread_self();
+#endif
 
 	/* re-initialize the driver function table with GL
 	 * functions */

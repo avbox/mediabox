@@ -158,7 +158,7 @@ __window_cairobegin(struct avbox_window * const window)
 
 	assert(window != NULL);
 
-	if ((buf = driver.surface_lock(window->surface, MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
+	if ((buf = driver.surface_lock(window->surface, MBV_LOCKFLAGS_READ | MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
 		LOG_PRINT_ERROR("Could not lock surface!!!");
 		return NULL;
 	}
@@ -699,7 +699,8 @@ __avbox_window_destroy(struct avbox_window * const window)
 
 	/* if the window is visible hide it before
 	 * destroying it */
-	if (window->visible && window->parent == &root_window) {
+	if (window->visible && window->parent == &root_window &&
+		!(window->flags & AVBOX_WNDFLAGS_SUBWINDOW)) {
 		avbox_window_hide(window);
 	}
 

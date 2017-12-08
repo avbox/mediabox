@@ -47,6 +47,7 @@ print_usage(const char * const prog)
 	printf("\n");
 	printf("AVBox options:\n\n");
 	printf(" --video:driver=<drv>\tSet the video driver string\n");
+	printf(" --no-accel\t\tDisable video acceleration\n");
 	printf(" --dfb:XXX\t\tDirectFB options. See directfbrc(5)\n");
 	printf(" --logfile\t\tLog file\n");
 	printf(" --help\t\t\tShow this help\n");
@@ -100,6 +101,8 @@ main (int argc, char **argv)
 		} else if (!strcmp(argv[i], "--init")) {
 			/* pass through */
 		} else if (!strncmp(argv[i], "--store=", 8)) {
+			/* pass through */
+		} else if (!strcmp(argv[i], "--no-accel")) {
 			/* pass through */
 		} else {
 			fprintf(stderr, "%s: Invalid argument %s\n",
