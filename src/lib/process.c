@@ -441,6 +441,12 @@ avbox_process_autorestart(int id, void *data)
 }
 
 
+static
+void avbox_process_signal(int signum)
+{
+}
+
+
 /**
  * Runs on it's own thread and handles standard IO
  * to/from processes.
@@ -453,9 +459,16 @@ avbox_process_io_thread(void *arg)
 	char buf[1024];
 	struct avbox_process *proc;
 	struct timeval tv;
+	struct sigaction sa;
 
-	MB_DEBUG_SET_THREAD_NAME("proc-io");
+	DEBUG_SET_THREAD_NAME("proc-io");
 	DEBUG_PRINT("process", "Starting IO thread");
+
+	/* handle SIGUSR1... just used to interrupt read() calls */
+	sa.sa_handler = avbox_process_signal;
+	sa.sa_flags = 0;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGUSR1, &sa, NULL);
 
 	while (!quit || LIST_SIZE(&process_list) > 0) {
 

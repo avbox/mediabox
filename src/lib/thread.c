@@ -407,7 +407,7 @@ avbox_workqueue_shutdown(void)
 	DEBUG_PRINT("thread", "Shutting down thread pool");
 
 	while ((thread = LIST_TAIL(struct avbox_thread*, &workqueue_threads)) != NULL) {
-		avbox_thread_destroy(thread);
 		LIST_REMOVE(thread);
+		avbox_thread_destroy(thread);
 	}
 }

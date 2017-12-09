@@ -3364,6 +3364,11 @@ avbox_player_handler(void * const context, struct avbox_message * const msg)
 		 * (and the STOP handler) */
 		avbox_player_stop(inst);
 
+		if (inst->play_state != AVBOX_PLAYER_PLAYSTATE_READY) {
+			usleep(10L * 1000L);
+			return AVBOX_DISPATCH_CONTINUE;
+		}
+
 		avbox_player_freeplaylist(inst);
 
 		if (inst->media_file != NULL) {
