@@ -51,9 +51,10 @@
 #define MB_VIDEO_BUFFER_PACKETS (1)
 #define MB_AUDIO_BUFFER_PACKETS (1)
 
-#define AVBOX_BUFFER_MSECS	(300)
-#define AVBOX_BUFFER_VIDEO	(30 / (1000 / AVBOX_BUFFER_MSECS))
-#define AVBOX_BUFFER_AUDIO	(48000 / (1000 / AVBOX_BUFFER_MSECS))
+#define AVBOX_SKIP_FRAME_THRESHOLD	(10000)
+#define AVBOX_BUFFER_MSECS		(300)
+#define AVBOX_BUFFER_VIDEO		(30 / (1000 / AVBOX_BUFFER_MSECS))
+#define AVBOX_BUFFER_AUDIO		(48000 / (1000 / AVBOX_BUFFER_MSECS))
 
 #define ALIGNED(addr, bytes) \
     (((uintptr_t)(const void *)(addr)) % (bytes) == 0)
@@ -520,6 +521,11 @@ avbox_player_video(void *arg)
 					}
 					continue;
 				}
+			} else {
+				/* if we're running late skip this frame */
+				if ((current_time - frame_time) > AVBOX_SKIP_FRAME_THRESHOLD) {
+					goto next_frame;
+				}
 			}
 		}
 
@@ -533,6 +539,7 @@ avbox_player_video(void *arg)
 			avbox_delegate_wait(del, NULL);
 		}
 
+next_frame:
 		/* update buffer state and signal decoder */
 		if (avbox_queue_get(inst->video_frames_q) != packet) {
 			LOG_PRINT_ERROR("We peeked one frame but got another one!");

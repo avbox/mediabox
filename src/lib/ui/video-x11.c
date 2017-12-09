@@ -22,6 +22,19 @@ static Display *xdisplay;
 static Window xwindow;
 static Colormap xcolormap;
 static GLXContext xgl;
+static PFNGLXGETVIDEOSYNCSGIPROC glXGetVideoSyncSGI = NULL;
+static PFNGLXWAITVIDEOSYNCSGIPROC glXWaitVideoSyncSGI = NULL;
+
+
+static void
+wait_for_vsync(void)
+{
+	if (glXGetVideoSyncSGI != NULL) {
+		unsigned int count;
+		glXGetVideoSyncSGI(&count);
+		glXWaitVideoSyncSGI(2, (count + 1) % 2, &count);
+	}
+}
 
 
 /**
@@ -95,8 +108,20 @@ init(struct mbv_drv_funcs * const driver, int argc, char **argv, int * const w, 
 		glXMakeCurrent(xdisplay, xwindow, xgl);
 	}
 
+	glXGetVideoSyncSGI = (PFNGLXGETVIDEOSYNCSGIPROC)
+		glXGetProcAddress((const GLubyte*) "glXGetVideoSyncSGI");
+	glXWaitVideoSyncSGI = (PFNGLXWAITVIDEOSYNCSGIPROC)
+		glXGetProcAddress((const GLubyte*) "glXWaitVideoSyncSGI");
+	if (glXGetVideoSyncSGI == NULL || glXWaitVideoSyncSGI == NULL) {
+		LOG_PRINT_ERROR("Tear-free video will not be available :(");
+		glXGetVideoSyncSGI = NULL;
+		glXWaitVideoSyncSGI = NULL;
+	}
+
 	/* initialize the GL driver */
-	if ((surface = avbox_video_glinit(driver, gwa.width, gwa.height)) == NULL) {
+	if ((surface = avbox_video_glinit(
+		driver, gwa.width, gwa.height,
+		wait_for_vsync)) == NULL) {
 		LOG_PRINT_ERROR("GL setup failed");
 		XDestroyWindow(xdisplay, xwindow);
 		XFreeColormap(xdisplay, xcolormap);

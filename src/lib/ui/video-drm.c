@@ -795,6 +795,17 @@ create_egl_framebuffer(EGLDisplay egl_display,
 #endif
 
 
+static void
+wait_for_vsync(void)
+{
+	drmVBlank vb;
+	vb.request.type = DRM_VBLANK_RELATIVE;
+	vb.request.sequence = 1;
+	vb.request.signal = 0;
+	drmWaitVBlank(default_dev->fd, &vb);
+}
+
+
 static struct mbv_surface *
 init(struct mbv_drv_funcs * const driver,
 	int argc, char **argv, int * const w, int * const h)
@@ -984,7 +995,7 @@ init(struct mbv_drv_funcs * const driver,
 
 	/* now that we have everything setup we can attempt to
 	 * start the GL driver */
-	if ((gl_surface = avbox_video_glinit(driver, *w, *h)) != NULL) {
+	if ((gl_surface = avbox_video_glinit(driver, *w, *h, wait_for_vsync)) != NULL) {
 		egl_enabled = 1;
 		return gl_surface;
 	} else {

@@ -43,6 +43,7 @@ struct mbv_surface
 /* GL driver */
 static GLuint root_framebuffer;
 static struct mbv_surface *root_surface;
+static void (*wait_for_vsync)(void);
 
 #ifndef NDEBUG
 static pthread_t gl_thread;
@@ -315,6 +316,11 @@ surface_update(struct mbv_surface * const inst, int blitflags, int update)
 			glTexCoord2f(1.0, 1.0); glVertex2f(inst->x + inst->w, inst->y + inst->h);
 			glTexCoord2f(0.0, 1.0); glVertex2f(inst->x, inst->y + inst->h);
 		glEnd();
+
+		/* if this is a fullscreen repaint wait for vsync */
+		if (inst == root_surface) {
+			wait_for_vsync();
+		}
 	} else {
 		glBindFramebuffer(GL_FRAMEBUFFER, root_framebuffer);
 		glBindTexture(GL_TEXTURE_2D, inst->texture);
@@ -367,7 +373,8 @@ init_func_table(struct mbv_drv_funcs * const funcs)
  * Initialize the opengl driver
  */
 struct mbv_surface *
-avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int height)
+avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int height,
+	void (*wait_for_vsync_fn)(void))
 {
 	GLenum err;
 
@@ -379,6 +386,7 @@ avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int heig
 	/* re-initialize the driver function table with GL
 	 * functions */
 	init_func_table(funcs);
+	wait_for_vsync = wait_for_vsync_fn;
 
 	/* set the view port and clear screen and this is it.
 	 * for now on we use opengl */
