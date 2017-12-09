@@ -97,6 +97,14 @@ pixfmt_tostring(DFBSurfacePixelFormat fmt)
 #endif
 
 
+static int
+surface_doublebuffered(const struct mbv_surface * const surface)
+{
+	(void) surface;
+	return 0;
+}
+
+
 /**
  * Lock a surface and return a pointer for writing
  * to it. The pitch argument will indicate the pitch
@@ -468,6 +476,7 @@ mbv_dfb_initft(struct mbv_drv_funcs * const funcs)
 	funcs->surface_blit = &surface_blit;
 	funcs->surface_scaleblit = NULL;
 	funcs->surface_update = &surface_update;
+	funcs->surface_doublebuffered = &surface_doublebuffered;
 	funcs->surface_destroy = &surface_destroy;
 	funcs->shutdown = &__shutdown;
 }

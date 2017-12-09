@@ -49,6 +49,15 @@ static void (*wait_for_vsync)(void);
 static pthread_t gl_thread;
 #endif
 
+
+static int
+surface_doublebuffered(const struct mbv_surface * const surface)
+{
+	(void) surface;
+	return 0;
+}
+
+
 static struct mbv_surface *
 surface_new(struct mbv_surface *parent,
 	const int x, const int y, const int w, const int h)
@@ -365,6 +374,7 @@ init_func_table(struct mbv_drv_funcs * const funcs)
 	funcs->surface_blit = &surface_blit;
 	funcs->surface_scaleblit = &surface_scaleblit;
 	funcs->surface_update = &surface_update;
+	funcs->surface_doublebuffered = &surface_doublebuffered;
 	funcs->surface_destroy = &surface_destroy;
 }
 

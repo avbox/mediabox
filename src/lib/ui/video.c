@@ -203,12 +203,16 @@ __window_clear(struct avbox_window *window, const uint32_t color)
 {
 	int pitch;
 	uint8_t *buf;
+	unsigned int flags;
 
 	if (window->title != NULL) {
 		avbox_window_settitle(window, window->title);
 	}
 
-	if ((buf = avbox_window_lock(window, MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
+	flags = MBV_LOCKFLAGS_WRITE;
+
+clear:
+	if ((buf = avbox_window_lock(window, flags, &pitch)) == NULL) {
 		LOG_VPRINT_ERROR("Could not lock window: %s",
 			strerror(errno));
 	} else {
@@ -236,6 +240,14 @@ __window_clear(struct avbox_window *window, const uint32_t color)
 			}
 		}
 		avbox_window_unlock(window);
+	}
+
+	/* if the window surface is double buffered we need to clear
+	 * the front buffer as well */
+	if (!(flags & MBV_LOCKFLAGS_FRONT) &&
+		driver.surface_doublebuffered(window->content_window->surface)) {
+		flags |= MBV_LOCKFLAGS_FRONT;
+		goto clear;
 	}
 }
 

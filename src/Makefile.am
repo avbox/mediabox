@@ -69,6 +69,7 @@ mediabox_SOURCES = \
 	lib/stopwatch.c \
 	lib/ui/video.c \
 	lib/ui/video-directfb.c \
+	lib/ui/video-software.c \
 	lib/ui/listview.c \
 	lib/ui/textview.c \
 	lib/ui/progressview.c \

@@ -128,6 +128,7 @@ struct mbv_drv_funcs
 	mbv_drv_surface_scaleblit surface_scaleblit;
 	mbv_drv_surface_update surface_update;
 	mbv_drv_surface_destroy surface_destroy;
+	int (*surface_doublebuffered)(const struct mbv_surface * const);
 	mbv_drv_shutdown shutdown;
 };
 
