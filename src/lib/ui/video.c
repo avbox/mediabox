@@ -43,6 +43,9 @@
 #include "../delegate.h"
 
 
+#define ENABLE_DIRECTFB 1
+
+
 #ifdef ENABLE_LIBDRM
 #include "video-drm.h"
 #endif
@@ -1358,6 +1361,39 @@ avbox_window_destroy(struct avbox_window * const window)
 }
 
 
+#ifdef ENABLE_X11
+static void
+avbox_video_startx(void)
+{
+}
+
+
+static int
+avbox_video_can_startx()
+{
+	return 0;
+}
+#endif
+
+
+#ifdef ENABLE_LIBDRM
+static int
+avbox_video_drm_working()
+{
+	return 1;
+}
+#endif
+
+
+#ifdef ENABLE_DIRECTFB
+static int
+avbox_video_directfb_working()
+{
+	return 1;
+}
+#endif
+
+
 /**
  * Initialize the video subsystem.
  */
@@ -1365,8 +1401,9 @@ int
 avbox_video_init(int argc, char **argv)
 {
 	int w = 0, h = 0, i;
+	int startx = 0;
 	char font_desc_str[16];
-	char *driver_string = "directfb";
+	char *driver_string = NULL;
 
 	DEBUG_PRINT("video", "Initializing video subsystem");
 
@@ -1375,8 +1412,66 @@ avbox_video_init(int argc, char **argv)
 			char *arg = argv[i] + 8;
 			if (!strncmp(arg, "driver=", 7)) {
 				driver_string = arg + 7;
+			} else if (!strcmp("startx", arg)) {
+				startx = 1;
 			}
 		}
+	}
+
+	if (driver_string == NULL) {
+#ifdef ENABLE_LIBDRM
+#ifdef ENABLE_X11
+		if (getenv("DISPLAY") != NULL) {
+			driver_string = "x11";
+		} else if (startx && avbox_video_can_startx()) {
+			avbox_video_startx();
+			driver_string = "x11";
+		} else
+#endif
+		if (avbox_video_drm_working()) {
+			driver_string = "libdrm";
+		} else {
+#ifdef ENABLE_X11
+			if (avbox_video_can_startx()) {
+				avbox_video_startx();
+				driver_string = "x11";
+			} else
+#endif
+#ifdef ENABLE_DIRECTFB
+			if (avbox_video_directfb_working()) {
+				driver_string = "directfb";
+			} else
+#endif
+			if (1 /* no driver avail */) {
+				driver_string = "null";
+			}
+		}
+
+
+/*** We have X11 but no DRM ****/
+#elif defined(ENABLE_X11)
+		if (getenv("DISPLAY") != NULL) {
+			driver_string = "x11";
+		} else if (startx && avbox_player_can_startx()) {
+			avbox_video_startx();
+			driver_string = "x11";
+		} else
+#ifdef ENABLE_DIRECTFB
+		if (avbox_video_directfb_working()) {
+			driver_string = "directfb";
+		} else
+#endif
+		if (avbox_player_can_startx()) {
+			avbox_player_startx();
+			driver_string = "x11";
+		} else {
+			driver_string = "null";
+		}
+
+/*** We only have DirectFB ***/
+#else
+		driver_string = "directfb"
+#endif
 	}
 
 	DEBUG_VPRINT("video", "Using '%s' driver",
