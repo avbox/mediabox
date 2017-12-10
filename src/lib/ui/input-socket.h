@@ -25,13 +25,13 @@
 
 #include "../linkedlist.h"
 
-struct conn_state;
+struct socket_context;
 
 
-typedef void (*socket_closed_callback)(struct conn_state *state);
+typedef void (*socket_closed_callback)(struct socket_context *ctx);
 
 
-LISTABLE_STRUCT(conn_state,
+LISTABLE_STRUCT(socket_context,
 	int fd;
 	int quit;
 	pthread_t thread;
@@ -40,6 +40,6 @@ LISTABLE_STRUCT(conn_state,
 
 
 void *
-mbi_socket_connection(void *arg);
+avbox_input_socket_connect(void *arg);
 
 #endif

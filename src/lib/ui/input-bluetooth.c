@@ -55,47 +55,39 @@ static int sockfd = -1;
 static int newsockfd = -1;
 static int server_quit = 0;
 static pthread_t thread;
-
-
-LIST_DECLARE_STATIC(sockets);
+LIST sockets;
 
 
 static void
-mbi_bluetooth_socket_closed(struct conn_state *state)
+avbox_input_bluetooth_socket_closed(struct socket_context * const ctx)
 {
-	DEBUG_VPRINT("input-bluetooth", "Connection closed (fd=%i)", state->fd);
-	LIST_REMOVE(state);
-	free(state);
+	DEBUG_VPRINT("input-bluetooth", "Connection closed (fd=%i)", ctx->fd);
+	LIST_REMOVE(ctx);
+	free(ctx);
 }
 
 
 static void *
-mbi_bluetooth_server(void *arg)
+avbox_input_bluetooth_listener(void *arg)
 {
 	int channelno;
 	unsigned int clilen;
 	struct sockaddr_rc serv_addr, cli_addr;
 	struct timeval tv;
-	struct conn_state *state = NULL;
+	struct socket_context *ctx = NULL;
 	fd_set fds;
 	int n;
 	pthread_attr_t attr;
 
-	MB_DEBUG_SET_THREAD_NAME("input-bluetooth");
-	DEBUG_PRINT("input-bluetooth", "Bluetooth input server starting");
-
-	if (pthread_attr_init(&attr) != 0) {
-		LOG_PRINT_ERROR("Could not initialize pthread attributes");
-		return NULL;
-	}
-
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	DEBUG_SET_THREAD_NAME("input-bluetooth");
+	DEBUG_PRINT(LOG_MODULE, "Bluetooth input server starting");
 
 	while (!server_quit) {
 		channelno = 1;
 		sockfd = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
 		if (sockfd < 0) {
-			fprintf(stderr, "mbi_bluetooth: Could not open socket\n");
+			LOG_VPRINT_ERROR("Could not open socket: %s",
+				strerror(errno));
 			sleep(1);
 			continue;
 		}
@@ -106,8 +98,8 @@ rebind:
 		serv_addr.rc_bdaddr = *BDADDR_ANY;
 
 		if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-			fprintf(stderr, "mbi_bluetooth: Could not bind to socket (channel=%i)\n",
-				channelno);
+			LOG_VPRINT_ERROR("Could not bind() socket to channel %d: %s",
+				channelno, strerror(errno));
 			if (channelno < 30) {
 				channelno++;
 				goto rebind;
@@ -118,7 +110,8 @@ rebind:
 		}
 
 		if (listen(sockfd, 1) == -1) {
-			fprintf(stderr, "input-bluetooth: listen() failed\n");
+			LOG_VPRINT_ERROR("Could not listen() on socket: %s",
+				strerror(errno));
 			close(sockfd);
 			sleep(5);
 			continue;
@@ -136,8 +129,6 @@ rebind:
 			FD_ZERO(&fds);
 			FD_SET(sockfd, &fds);
 
-			/* fprintf(stderr, "input-bluetooth: Waiting for connection\n"); */
-
 			tv.tv_sec = 1;
 			tv.tv_usec = 0;
 			if ((n = select(sockfd + 1, &fds, NULL, NULL, &tv)) == 0) {
@@ -146,7 +137,8 @@ rebind:
 				if (errno == EINTR) {
 					continue;
 				}
-				fprintf(stderr, "input-bluetooth: select() returned %i\n", n);
+				LOG_VPRINT_ERROR("select() error: %s",
+					strerror(errno));
 				break;
 			}
 
@@ -155,15 +147,15 @@ rebind:
 			}
 
 			if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) <= 0) {
-				fprintf(stderr, "input-bluetooth: Could not accept socket. ret=%i\n",
-					newsockfd);
+				LOG_VPRINT_ERROR("Could no accept() socket (fd=%d): %s",
+					newsockfd, strerror(errno));
 				continue;
 			}
 
 			DEBUG_VPRINT("input-bluetooth", "Incoming connection accepted (fd=%i)", newsockfd);
 
-			if ((state = malloc(sizeof(struct conn_state))) == NULL) {
-				fprintf(stderr, "input-bluetooth: Could not allocate connection state: Out of memory\n");
+			if ((ctx = malloc(sizeof(struct socket_context))) == NULL) {
+				LOG_PRINT_ERROR("Could not allocate connection context");
 				close(newsockfd);
 				continue;
 			}
@@ -174,7 +166,7 @@ rebind:
 
 			LIST_ADD(&sockets, state);
 
-			if (pthread_create(&state->thread, &attr, &mbi_socket_connection, state) != 0) {
+			if (pthread_create(&state->thread, &attr, &mbi_socket_connection, ctx) != 0) {
 				LOG_PRINT_ERROR("Could not create bluetooth socket thread");
 				LIST_REMOVE(state);
 				close(newsockfd);
@@ -201,8 +193,8 @@ mbi_bluetooth_init(void)
 	DEBUG_PRINT("input-bluetooth", "Initializing bluetooth input server");
 	LIST_INIT(&sockets);
 
-	if (pthread_create(&thread, NULL, mbi_bluetooth_server, NULL) != 0) {
-		fprintf(stderr, "input-bluetooth: Could not create bluetooth server thread\n");
+	if (pthread_create(&thread, NULL, avbox_input_bluetooth_listener, NULL) != 0) {
+		LOG_PRINT_ERROR("Could not create bluetooth listener thread");
 		return -1;
 	}
 	return 0;
@@ -212,13 +204,13 @@ mbi_bluetooth_init(void)
 void
 mbi_bluetooth_destroy(void)
 {
-	struct conn_state *socket;
+	struct socket_context *socket;
 
 	DEBUG_PRINT("input-bluetooth", "Exiting (give me 2 secs)");
 
 	/* Close all connections */
 	DEBUG_PRINT("input-bluetooth", "Closing all open sockets");
-	LIST_FOREACH(struct conn_state*, socket, &sockets) {
+	LIST_FOREACH(struct socket_context*, socket, &sockets) {
 		socket->quit = 1;
 		/* pthread_join(socket->thread, NULL); */
 	}

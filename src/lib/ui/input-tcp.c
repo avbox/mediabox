@@ -33,6 +33,7 @@
 #include <netinet/in.h>
 #include <fcntl.h>
 
+#define LOG_MODULE "input-tcp"
 
 #include "input.h"
 #include "input-socket.h"
@@ -50,33 +51,34 @@ LIST_DECLARE_STATIC(sockets);
 
 
 static void
-mbi_tcp_socket_closed(struct conn_state *state)
+avbox_tcp_socket_closed(struct socket_context *ctx)
 {
-	DEBUG_VPRINT("input-tcp", "Connection closed (fd=%i)", state->fd);
-	LIST_REMOVE(state);
-	free(state);
+	DEBUG_VPRINT(LOG_MODULE, "Connection closed (fd=%i)", ctx->fd);
+	LIST_REMOVE(ctx);
+	free(ctx);
 }
 
 
 static void *
-mbi_tcp_server(void *arg)
+avbox_tcp_listener(void *arg)
 {
 	int portno;
 	unsigned int clilen;
 	struct sockaddr_in serv_addr, cli_addr;
 	struct timeval tv;
-	struct conn_state *state = NULL;
+	struct socket_context *ctx = NULL;
 	fd_set fds;
 	int n;
 
-	MB_DEBUG_SET_THREAD_NAME("input-tcp");
+	DEBUG_SET_THREAD_NAME("input-tcp");
 	DEBUG_PRINT("input-tcp", "TCP input server starting");
 
 	while (!server_quit) {
 
 		sockfd = socket(AF_INET, SOCK_STREAM, 0);
 		if (sockfd < 0) {
-			fprintf(stderr, "mbi_tcp: Could not open socket\n");
+			LOG_VPRINT_ERROR("Could not open socket: %s. Will keep trying.",
+				strerror(errno));
 			sleep(1);
 			continue;
 		}
@@ -87,7 +89,8 @@ mbi_tcp_server(void *arg)
 		serv_addr.sin_addr.s_addr = INADDR_ANY;
 		serv_addr.sin_port = htons(portno);
 		if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-			fprintf(stderr, "mbi_tcp: Could not bind to socket\n");
+			LOG_VPRINT_ERROR("Could not bind socket: %s",
+				strerror(errno));
 			close(sockfd);
 			sockfd = -1;
 			sleep(5);
@@ -97,14 +100,13 @@ mbi_tcp_server(void *arg)
 		listen(sockfd, 1);
 		clilen = sizeof(cli_addr);
 
-		DEBUG_VPRINT("input-tcp", "Listening for connections on port %i", portno);
+		DEBUG_VPRINT(LOG_MODULE, "Listening for connections on port %i",
+			portno);
 
 		while(!server_quit) {
 
 			FD_ZERO(&fds);
 			FD_SET(sockfd, &fds);
-
-			/* fprintf(stderr, "input-tcp: Waiting for connection\n"); */
 
 			tv.tv_sec = 1;
 			tv.tv_usec = 0;
@@ -114,7 +116,8 @@ mbi_tcp_server(void *arg)
 				if (errno == EINTR) {
 					continue;
 				}
-				fprintf(stderr, "input-tcp: select() returned %i\n", n);
+				LOG_VPRINT_ERROR(LOG_MODULE, "select() error: %s",
+					strerror(errno));
 				break;
 			}
 			
@@ -123,29 +126,29 @@ mbi_tcp_server(void *arg)
 			}
 
 			if ((newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen)) <= 0) {
-				fprintf(stderr, "input-tcp: Could not accept socket. ret=%i\n",
-					newsockfd);
+				LOG_VPRINT_ERROR("accept() error: %s",
+					strerror(errno));
 				continue;
 			}
 
-			DEBUG_VPRINT("input-tcp", "Incoming connection accepted (fd=%i)", newsockfd);
+			DEBUG_VPRINT(LOG_MODULE, "Incoming connection accepted (fd=%i)", newsockfd);
 
-			if ((state = malloc(sizeof(struct conn_state))) == NULL) {
-				fprintf(stderr, "input-tcp: Could not allocate connection state: Out of memory\n");
+			if ((ctx = malloc(sizeof(struct socket_context))) == NULL) {
+				LOG_PRINT_ERROR("Could not accept connection. Out of memory");
 				close(newsockfd);
 				continue;
 			}
 
-			state->fd = newsockfd;
-			state->quit = 0;
-			state->closed_callback = mbi_tcp_socket_closed;
+			ctx->fd = newsockfd;
+			ctx->quit = 0;
+			ctx->closed_callback = avbox_tcp_socket_closed;
 
-			LIST_ADD(&sockets, state);
+			LIST_ADD(&sockets, ctx);
 
-			if (pthread_create(&state->thread, NULL, &mbi_socket_connection, state) != 0) {
-				fprintf(stderr, "input-tcp: Could not launch connection thread\n");
+			if (pthread_create(&ctx->thread, NULL, &avbox_input_socket_connect, ctx) != 0) {
+				LOG_PRINT_ERROR("Could not accept connection. Thread creation failed");
 				close(newsockfd);
-				free(state);
+				free(ctx);
 				continue;
 			}
 		}
@@ -153,7 +156,7 @@ mbi_tcp_server(void *arg)
 		sockfd = -1;
 	}
 
-	DEBUG_PRINT("input-tcp", "TCP input server exiting");
+	DEBUG_PRINT(LOG_MODULE, "TCP input server exiting");
 
 	return NULL;
 }
@@ -167,8 +170,8 @@ mbi_tcp_init(void)
 {
 	LIST_INIT(&sockets);
 
-	if (pthread_create(&thread, NULL, mbi_tcp_server, NULL) != 0) {
-		fprintf(stderr, "Could not create TCP server thread\n");
+	if (pthread_create(&thread, NULL, avbox_tcp_listener, NULL) != 0) {
+		LOG_PRINT_ERROR("Could not start TCP listener");
 		return -1;
 	}
 	return 0;
@@ -178,15 +181,15 @@ mbi_tcp_init(void)
 void
 mbi_tcp_destroy(void)
 {
-	struct conn_state *socket;
+	struct socket_context *ctx;
 
 	DEBUG_PRINT("input-tcp", "Exiting (give me 2 secs)");
 
 	/* Close all connections */
 	DEBUG_PRINT("input-tcp", "Closing all open sockets");
-	LIST_FOREACH(struct conn_state*, socket, &sockets) {
-		socket->quit = 1;
-		pthread_join(socket->thread, NULL);
+	LIST_FOREACH(struct socket_context*, ctx, &sockets) {
+		ctx->quit = 1;
+		pthread_join(ctx->thread, NULL);
 	}
 
 	server_quit = 1;
@@ -196,4 +199,3 @@ mbi_tcp_destroy(void)
 	close(sockfd);
 	pthread_join(thread, NULL);
 }
-

@@ -44,10 +44,10 @@
 
 
 void *
-mbi_socket_connection(void *arg)
+avbox_input_socket_connect(void *arg)
 {
-	struct conn_state *state = (struct conn_state*) arg;
-	int fd = state->fd;
+	struct socket_context *ctx = (struct socket_context*) arg;
+	int fd = ctx->fd;
 	int n;
 	ssize_t ret;
 	struct timeval tv;
@@ -55,7 +55,7 @@ mbi_socket_connection(void *arg)
 	fd_set fds;
 
 	ASSERT(arg != NULL);
-	ASSERT(((struct conn_state*) arg)->fd > 0);
+	ASSERT(((struct socket_context*) arg)->fd > 0);
 
 	DEBUG_SET_THREAD_NAME("input-socket");
 	DEBUG_PRINT("input-socket", "Connection handler running");
@@ -65,7 +65,7 @@ mbi_socket_connection(void *arg)
 	/* clear the buffer */
 	bzero(buffer, sizeof(buffer));
 
-	while (!state->quit) {
+	while (!ctx->quit) {
 
 		FD_ZERO(&fds);
 		FD_SET(fd, &fds);
@@ -97,7 +97,7 @@ mbi_socket_connection(void *arg)
 		n = 0;
 		pbuf = buffer;
 		while (n < sizeof(buffer) - 1) {
-			if (state->quit) {
+			if (ctx->quit) {
 				goto end;
 			}
 			if ((ret = read(fd, pbuf, 1)) == -1) {
@@ -208,10 +208,9 @@ end:
 
 	close(fd);
 
-	if (state->closed_callback != NULL) {
-		state->closed_callback(state);
+	if (ctx->closed_callback != NULL) {
+		ctx->closed_callback(ctx);
 	}
 
 	return NULL;
 }
-
