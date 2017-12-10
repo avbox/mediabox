@@ -118,6 +118,9 @@ init(struct mbv_drv_funcs * const driver, int argc, char **argv, int * const w, 
 		glXWaitVideoSyncSGI = NULL;
 	}
 
+	DEBUG_VPRINT(LOG_MODULE, "X11 window created (w=%d,h=%d)",
+		gwa.width, gwa.height);
+
 	/* initialize the GL driver */
 	if ((surface = avbox_video_glinit(
 		driver, gwa.width, gwa.height,

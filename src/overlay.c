@@ -188,6 +188,8 @@ mbox_overlay_draw(struct avbox_window *window, void * const ctx)
 				g_object_unref(msg);
 			}
 		}
+
+		/* draw the duration */
 		if ((msg = pango_cairo_create_layout(context)) != NULL) {
 			if ((font_desc = pango_font_description_from_string("Sans Bold 18px")) != NULL) {
 				char duration[20];

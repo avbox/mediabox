@@ -1543,11 +1543,14 @@ avbox_video_init(int argc, char **argv)
 
 	/* calculate default font height based on screen size */
 	default_font_height = 16;
-	switch (w) {
-	case 640:  default_font_height = 16; break;
-	case 1024: default_font_height = 20; break;
-	case 1280: default_font_height = 32; break;
-	case 1920: default_font_height = 32; break;
+	if (w >= 1920) {
+		default_font_height = 32;
+	} else if (w >= 1280) {
+		default_font_height = 28;
+	} else if (w >= 1024) {
+		default_font_height = 20;
+	} else {
+		default_font_height = 16;
 	}
 
 	/* initialize default font description */

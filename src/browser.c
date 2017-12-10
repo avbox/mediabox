@@ -624,13 +624,16 @@ mbox_browser_new(struct avbox_object *parent)
 	avbox_window_getcanvassize(avbox_video_getrootwindow(0), &resx, &resy);
 
 	/* set width according to screen size */
-	switch (resx) {
-	case 800:  width =  700; break;
-	case 1024: width =  800; break;
-	case 1280: width = 1000; break;
-	case 1920: width = 1280; break;
-	case 640:
-	default:   width = 300; break;
+	if (resx >= 1920) {
+		width = 1280;
+	} else if (resx >= 1280) {
+		width = 1000;
+	} else if (resx >= 1024) {
+		width = 800;
+	} else if (resx >= 800) {
+		width = 700;
+	} else {
+		width = 300;
 	}
 
 	/* create a new window for the library dialog */

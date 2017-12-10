@@ -310,12 +310,14 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	DEBUG_VPRINT("mainmenu", "Default font size: %i", font_height);
 
 	/* set width according to screen size */
-	switch (xres) {
-	case 1024: window_width =  400; break;
-	case 1280: window_width =  800; break;
-	case 1920: window_width = 1024; break;
-	case 640:
-	default:   window_width = 300; break;
+	if (xres >= 1920) {
+		window_width = 800;
+	} else if (xres >= 1280) {
+		window_width = 500;
+	} else if (xres >= 1024) {
+		window_width = 400;
+	} else {
+		window_width = 300;
 	}
 
 	/* create a new window for the menu dialog */

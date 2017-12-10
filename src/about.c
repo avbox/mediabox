@@ -162,12 +162,14 @@ mbox_about_new(struct avbox_object * const parent)
 	inst->dirty = 0;
 
 	/* set width according to screen size */
-	switch (xres) {
-	case 1024: inst->w = 500; break;
-	case 1280: inst->w = 900; break;
-	case 1920: inst->w = 700; break;
-	case 640:
-	default:   inst->w = 400; break;
+	if (xres >= 1920) {
+		inst->w = 900;
+	} else if (xres >= 1280) {
+		inst->w = 800;
+	} else if (xres >= 1024) {
+		inst->w = 700;
+	} else {
+		inst->w = 600;
 	}
 
 	/* create a new window for the menu dialog */
