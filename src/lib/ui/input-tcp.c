@@ -83,6 +83,9 @@ avbox_tcp_listener(void *arg)
 			continue;
 		}
 
+		const int reuse_addr = 1;
+		setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void*) &reuse_addr,
+			sizeof(reuse_addr));
 		bzero((char *) &serv_addr, sizeof(serv_addr));
 		portno = 2048;
 		serv_addr.sin_family = AF_INET;
