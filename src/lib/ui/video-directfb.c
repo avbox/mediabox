@@ -156,7 +156,8 @@ surface_unlock(struct mbv_surface * const inst)
 static int
 surface_blitbuf(
 	struct mbv_surface * const inst,
-	void *buf, int pitch, unsigned int flags, int width, int height, const int x, const int y)
+	unsigned int pix_fmt, void **buf, int *pitch, unsigned int flags,
+	int width, int height, const int x, const int y)
 {
 	DFBSurfaceDescription dsc;
 	static IDirectFBSurface *surface = NULL;
@@ -172,11 +173,26 @@ surface_blitbuf(
 	dsc.height = height;
 	dsc.flags = DSDESC_HEIGHT | DSDESC_WIDTH | DSDESC_PREALLOCATED | DSDESC_PIXELFORMAT;
 	dsc.caps = DSCAPS_NONE;
-	dsc.pixelformat = DSPF_RGB32;
-	dsc.preallocated[0].data = buf;
-	dsc.preallocated[0].pitch = pitch;
-	dsc.preallocated[1].data = NULL;
-	dsc.preallocated[1].pitch = 0;
+
+	switch (pix_fmt) {
+	case AVBOX_PIXFMT_BGRA:
+		dsc.pixelformat = DSPF_RGB32;
+		dsc.preallocated[0].data = buf[0];
+		dsc.preallocated[0].pitch = pitch[0];
+		dsc.preallocated[1].data = NULL;
+		dsc.preallocated[1].pitch = 0;
+		break;
+	case AVBOX_PIXFMT_YUV420P:
+		dsc.pixelformat = DSPF_YV12;
+		dsc.preallocated[0].data = buf[0];
+		dsc.preallocated[1].data = buf[1];
+		dsc.preallocated[2].data = buf[2];
+		dsc.preallocated[0].pitch = pitch[0];
+		dsc.preallocated[1].pitch = pitch[1];
+		dsc.preallocated[2].pitch = pitch[2];
+		break;
+	default: abort();
+	}
 
 	DFBCHECK(dfb->CreateSurface(dfb, &dsc, &surface));
 	DFBCHECK(surface->SetBlittingFlags(surface, DSBLIT_NOFX));
@@ -210,7 +226,7 @@ surface_blit(
 	}
 
 	/* blit the buffer */
-	ret = surface_blitbuf(dst, buf, pitch, flags,
+	ret = surface_blitbuf(dst, AVBOX_PIXFMT_BGRA, &buf, &pitch, flags,
 		src->rect.w, src->rect.h, x, y);
 	surface_unlock(src);
 	return ret;

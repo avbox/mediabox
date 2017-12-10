@@ -312,6 +312,11 @@ avbox_player_draw(struct avbox_window * const window, void * const context)
 	int target_width, target_height;
 	struct avbox_player * const inst = context;
 
+	if (inst->video_window == NULL) {
+		avbox_window_clear(window);
+		return 0;
+	}
+
 	avbox_window_getcanvassize(inst->window, &target_width, &target_height);
 
 	const int x = (target_width - inst->state_info.scaled_res.w) / 2;
@@ -363,26 +368,16 @@ avbox_player_doupdate(void *arg)
 	struct avbox_player * const inst = args->inst;
 	AVFrame * const frame = args->frame;
 
-	if (frame != NULL) {
+	if (inst->video_window != NULL && frame != NULL) {
 		/* upload the frame to the window surface */
 		avbox_window_blitbuf(inst->video_window,
-			frame->data[0],
-			frame->linesize[0],
+			inst->state_info.pix_fmt,
+			(void**) frame->data,
+			frame->linesize,
 			inst->state_info.video_res.w,
 			inst->state_info.video_res.h,
 			0, 0);
 	}
-
-	avbox_window_update(inst->window);
-	return NULL;
-}
-
-
-static void *
-avbox_player_doclear(void *arg)
-{
-	struct avbox_player * const inst = arg;
-	avbox_window_clear(inst->window);
 	avbox_window_update(inst->window);
 	return NULL;
 }
@@ -408,9 +403,20 @@ avbox_player_createwindow(void *arg)
 	 * for the target window */
 	avbox_window_setbgcolor(inst->video_window, AVBOX_COLOR(0x000000ff));
 	avbox_window_clear(inst->video_window);
-	avbox_window_setdrawfunc(inst->window, avbox_player_draw, inst);
-
 	return NULL;
+}
+
+
+static void *
+avbox_player_destroywindow(void *arg)
+{
+	struct avbox_player * const inst = arg;
+	struct avbox_player_updateargs args;
+	avbox_window_destroy(inst->video_window);
+	inst->video_window = NULL;
+	args.inst = inst;
+	args.frame = NULL;
+	return avbox_player_doupdate(&args);
 }
 
 
@@ -562,14 +568,14 @@ video_exit:
 		av_free(frame);
 	}
 
-	/* clear screen */
-	if ((del = avbox_application_delegate(avbox_player_doclear, inst)) == NULL) {
-		LOG_PRINT_ERROR("Could not delegate update!");
+	/* destroy the video window */
+	if ((del = avbox_application_delegate(avbox_player_destroywindow, inst)) == NULL) {
+		LOG_PRINT_ERROR("Could not create video window");
+		avbox_player_sendctl(inst, AVBOX_PLAYERCTL_THREADEXIT, NULL);
 	} else {
 		avbox_delegate_wait(del, NULL);
+		ASSERT(inst->video_window == NULL);
 	}
-
-	avbox_window_setdrawfunc(inst->window, NULL, NULL);
 
 	return NULL;
 }
@@ -636,6 +642,20 @@ avbox_player_video_decode(void *arg)
 		LOG_PRINT_ERROR("Could not open video codec context");
 		goto decoder_exit;
 	}
+
+#ifndef NDEBUG
+	char pix_fmt_string[256];
+	av_get_pix_fmt_string(pix_fmt_string, sizeof(pix_fmt_string),
+		dec_ctx->pix_fmt);
+	DEBUG_VPRINT(LOG_MODULE, "Video codec: %s (%s)",
+		dec_ctx->codec_descriptor->long_name, dec_ctx->codec_descriptor->name);
+	DEBUG_VPRINT(LOG_MODULE, "Pixel format: %s (%s)",
+		pix_fmt_string, av_get_pix_fmt_name(dec_ctx->pix_fmt));
+	DEBUG_VPRINT(LOG_MODULE, "Resolution: %ix%x",
+		dec_ctx->width, dec_ctx->height);
+	DEBUG_VPRINT(LOG_MODULE, "Framerate: %d/%d", dec_ctx->framerate,
+		dec_ctx->framerate.num, dec_ctx->framerate.den);
+#endif
 
 	inst->state_info.video_res.w = dec_ctx->width;
 	inst->state_info.video_res.h = dec_ctx->height;
@@ -752,6 +772,20 @@ avbox_player_video_decode(void *arg)
 				}
 
 				if (video_filter_graph == NULL) {
+					enum AVPixelFormat pix_fmt;
+
+					/* if we support the pixel format of the decoder then
+					 * don't convert it. Otherwise convert to BGRA */
+					if ((inst->state_info.pix_fmt =
+						avbox_pixfmt_from_libav(dec_ctx->pix_fmt)) == AVBOX_PIXFMT_UNKNOWN) {
+						LOG_VPRINT_WARN("Pixel format not supported. Converting %s to BGRA!!",
+							av_get_pix_fmt_name(dec_ctx->pix_fmt));
+						inst->state_info.pix_fmt = AVBOX_PIXFMT_BGRA;
+						pix_fmt = AV_PIX_FMT_BGRA;
+					} else {
+						pix_fmt = dec_ctx->pix_fmt;
+					}
+
 					/* initialize video filter graph */
 					strcpy(video_filters, "null");
 					DEBUG_VPRINT("player", "Video width: %i height: %i",
@@ -759,7 +793,7 @@ avbox_player_video_decode(void *arg)
 					DEBUG_VPRINT("player", "Video filters: %s", video_filters);
 					if (avbox_ffmpegutil_initvideofilters(inst->fmt_ctx, dec_ctx,
 						&video_buffersink_ctx, &video_buffersrc_ctx, &video_filter_graph,
-						video_filters, inst->video_stream_index) < 0) {
+						pix_fmt, video_filters, inst->video_stream_index) < 0) {
 						LOG_PRINT_ERROR("Could not initialize filtergraph!");
 						goto decoder_exit;
 					}
@@ -2694,11 +2728,6 @@ avbox_player_control(void * context, struct avbox_message * msg)
 					inst->video_decoder_worker = NULL;
 				}
 
-				if (inst->video_window != NULL) {
-					avbox_window_destroy(inst->video_window);
-					inst->video_window = NULL;
-				}
-
 				avbox_queue_destroy(inst->video_frames_q);
 				avbox_queue_destroy(inst->video_packets_q);
 				inst->video_frames_q = NULL;
@@ -3369,6 +3398,7 @@ avbox_player_handler(void * const context, struct avbox_message * const msg)
 			return AVBOX_DISPATCH_CONTINUE;
 		}
 
+		avbox_window_setdrawfunc(inst->window, NULL, NULL);
 		avbox_player_freeplaylist(inst);
 
 		if (inst->media_file != NULL) {
@@ -3512,6 +3542,8 @@ avbox_player_new(struct avbox_window *window)
 	avbox_checkpoint_init(&inst->video_decoder_checkpoint);
 	avbox_checkpoint_init(&inst->audio_decoder_checkpoint);
 	avbox_checkpoint_init(&inst->stream_parser_checkpoint);
+
+	avbox_window_setdrawfunc(inst->window, avbox_player_draw, inst);
 
 	return inst;
 }

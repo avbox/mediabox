@@ -123,7 +123,10 @@ struct mbv_drv_funcs
 	mbv_drv_surface_new surface_new;
 	mbv_drv_surface_lock surface_lock;
 	mbv_drv_surface_unlock surface_unlock;
-	mbv_drv_surface_blitbuf surface_blitbuf;
+	int (*surface_blitbuf)(
+		struct mbv_surface * const surface,
+		unsigned int pix_fmt, void **buf, int *pitch, unsigned int flags,
+		int x, int y, int w, int h);
 	mbv_drv_surface_blit surface_blit;
 	mbv_drv_surface_scaleblit surface_scaleblit;
 	mbv_drv_surface_update surface_update;

@@ -480,13 +480,14 @@ mbv_getdefaultfontheight(void)
  */
 int
 avbox_window_blitbuf(
-	struct avbox_window *window, void *buf, int pitch, int width, int height,
+	struct avbox_window *window,
+	unsigned int pix_fmt, void **buf, int *pitch, int width, int height,
 	int x, int y)
 {
 	int ret;
 	ret = driver.surface_blitbuf(
 		window->content_window->surface,
-		buf, pitch, MBV_BLITFLAGS_NONE, width, height, x, y);
+		pix_fmt, buf, pitch, MBV_BLITFLAGS_NONE, width, height, x, y);
 	return ret;
 }
 

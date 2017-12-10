@@ -138,6 +138,7 @@ struct avbox_player_state_info
 	struct avbox_size video_res;
 	struct avbox_size scaled_res;	/* this is the scaled video size */
 	enum avbox_aspect_ratio aspect_ratio;
+	enum avbox_pixel_format pix_fmt;
 };
 
 

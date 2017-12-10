@@ -31,6 +31,7 @@
 //#define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_RGB565)
 //#define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_RGB32)
 #define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_BGRA)
+//#define MB_DECODER_PIX_FMT 		(AV_PIX_FMT_YUV420)
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -40,7 +41,30 @@
 #include <libavfilter/buffersrc.h>
 #include <libavutil/opt.h>
 #include <libavutil/imgutils.h>
+#include "ui/video.h"
 
+
+static inline enum avbox_pixel_format
+avbox_pixfmt_from_libav(enum AVPixelFormat pix_fmt)
+{
+	switch (pix_fmt) {
+	case AV_PIX_FMT_YUV420P: return AVBOX_PIXFMT_YUV420P;
+	case AV_PIX_FMT_BGRA: return AVBOX_PIXFMT_BGRA;
+	default: return AVBOX_PIXFMT_UNKNOWN;
+	}
+}
+
+
+static inline enum AVPixelFormat
+avbox_pixfmt_to_libav(enum avbox_pixel_format pix_fmt)
+{
+	switch (pix_fmt) {
+	case AVBOX_PIXFMT_UNKNOWN: return 0;
+	case AVBOX_PIXFMT_BGRA: return AV_PIX_FMT_BGRA;
+	case AVBOX_PIXFMT_YUV420P: return AV_PIX_FMT_YUV420P;
+	}
+	return 0;
+}
 
 
 /**
@@ -53,6 +77,7 @@ avbox_ffmpegutil_initvideofilters(
 	AVFilterContext **buffersink_ctx,
 	AVFilterContext **buffersrc_ctx,
 	AVFilterGraph **filter_graph,
+	enum AVPixelFormat pix_fmt,
 	const char *filters_descr,
 	int stream_index);
 

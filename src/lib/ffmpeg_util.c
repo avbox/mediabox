@@ -42,6 +42,7 @@ avbox_ffmpegutil_initvideofilters(
 	AVFilterContext **buffersink_ctx,
 	AVFilterContext **buffersrc_ctx,
 	AVFilterGraph **filter_graph,
+	enum AVPixelFormat pix_fmt,
 	const char *filters_descr,
 	int stream_index)
 {
@@ -53,7 +54,7 @@ avbox_ffmpegutil_initvideofilters(
 	AVFilterInOut *outputs = avfilter_inout_alloc();
 	AVFilterInOut *inputs  = avfilter_inout_alloc();
 	AVRational time_base = fmt_ctx->streams[stream_index]->time_base;
-	enum AVPixelFormat pix_fmts[] = { MB_DECODER_PIX_FMT, AV_PIX_FMT_NONE };
+	enum AVPixelFormat pix_fmts[] = { pix_fmt, AV_PIX_FMT_NONE };
 
 	snprintf(args, sizeof(args),
 		"video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",

@@ -67,6 +67,14 @@ struct avbox_window;
 struct mbv_font;
 
 
+enum avbox_pixel_format
+{
+	AVBOX_PIXFMT_UNKNOWN = 0,
+	AVBOX_PIXFMT_BGRA = 1,
+	AVBOX_PIXFMT_YUV420P = 2
+};
+
+
 /**
  * Function that handles window painting.
  */
@@ -231,7 +239,8 @@ avbox_window_damaged(struct avbox_window * const window);
 
 int
 avbox_window_blitbuf(
-	struct avbox_window *window, void *buf, int pitch, int width, int height,
+	struct avbox_window *window,
+	unsigned int pix_fmt, void **buf, int *pitch, int width, int height,
 	int x, int y);
 
 

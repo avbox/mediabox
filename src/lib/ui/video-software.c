@@ -35,12 +35,14 @@
 #include <time.h>
 #include <unistd.h>
 
-#define LOG_MODULE "video-drm"
+#define LOG_MODULE "video-software"
 
 #include "../log.h"
 #include "../debug.h"
 #include "../linkedlist.h"
+#include "../ffmpeg_util.h"
 #include "video-drv.h"
+#include "video.h"
 
 
 /* define to 1 if swap_buffers will never
@@ -147,39 +149,75 @@ surface_unlock(struct mbv_surface * const inst)
 
 static int
 surface_blitbuf(struct mbv_surface * const surface,
-	void *buf, int pitch, unsigned int flags, int w, int h, int x, int y)
+	unsigned int pix_fmt, void **buf, int *pitch, unsigned int flags, int w, int h, int x, int y)
 {
-	int dst_pitch;
-	uint8_t *dst;
-	unsigned int lockflags = MBV_LOCKFLAGS_WRITE;
+	switch (pix_fmt) {
+	case AVBOX_PIXFMT_YUV420P:
+	{
+		int dstpitch;
+		uint8_t *surface_buf;
+		struct SwsContext *swscale;
 
-	if (flags & MBV_BLITFLAGS_FRONT) {
-		lockflags |= MBV_LOCKFLAGS_FRONT;
-	}
-
-	dst = surface_lock(surface, lockflags, &dst_pitch);
-	if (dst == NULL) {
-		LOG_PRINT_ERROR("Could not lock surface");
-		surface_unlock(surface);
-		return -1;
-	}
-
-	dst += y * dst_pitch;
-
-	if (x == 0 && pitch == dst_pitch) {
-		/* both surfaces are in contiguos memory so we
-		 * can just memcpy() the whole thing */
-		memcpy(dst, buf, pitch * h);
-	} else {
-		const uint8_t *src = buf;
-		const uint8_t * const end = src + (pitch * h);
-		const int stride_sz = w * 4;
-		for (dst += x * 4; src < end; dst += dst_pitch, src += pitch) {
-			memcpy(dst, src, stride_sz);
+		if ((swscale = sws_getContext(
+			w, h, avbox_pixfmt_to_libav(pix_fmt),
+			w, h, AV_PIX_FMT_BGRA,
+			SWS_FAST_BILINEAR,
+			NULL, NULL, NULL)) == NULL) {
+			LOG_PRINT_ERROR("Could not create swscale context!");
+			return -1;
 		}
-	}
 
-	surface_unlock(surface);
+		if ((surface_buf = surface_lock(surface, MBV_LOCKFLAGS_WRITE, &dstpitch)) == NULL) {
+			sws_freeContext(swscale);
+			return -1;
+		}
+
+		surface_buf += dstpitch * y;
+		surface_buf += x * 4;
+		sws_scale(swscale, (const uint8_t**) buf,
+			pitch, 0, h, &surface_buf, &dstpitch);
+		surface_unlock(surface);
+		sws_freeContext(swscale);
+		break;
+	}
+	case AVBOX_PIXFMT_BGRA:
+	{
+		int dst_pitch;
+		uint8_t *dst;
+		unsigned int lockflags = MBV_LOCKFLAGS_WRITE;
+
+		if (flags & MBV_BLITFLAGS_FRONT) {
+			lockflags |= MBV_LOCKFLAGS_FRONT;
+		}
+
+		dst = surface_lock(surface, lockflags, &dst_pitch);
+		if (dst == NULL) {
+			LOG_PRINT_ERROR("Could not lock surface");
+			surface_unlock(surface);
+			return -1;
+		}
+
+		dst += y * dst_pitch;
+
+		if (0 && x == 0 && *pitch == dst_pitch && pitch[0] == (w * 4)) {
+			/* both surfaces are in contiguos memory so we
+			 * can just memcpy() the whole thing */
+			memcpy(dst, buf, *pitch * h);
+		} else {
+			const uint8_t *src = *buf;
+			const uint8_t * const end = src + (pitch[0] * h);
+			const int stride_sz = w * 4;
+			for (dst += x * 4; src < end; dst += dst_pitch, src += pitch[0]) {
+				memcpy(dst, src, stride_sz);
+			}
+		}
+
+		surface_unlock(surface);
+		break;
+	}
+	default:
+		abort();
+	}
 
 	return 0;
 }
@@ -201,7 +239,7 @@ surface_blit(struct mbv_surface * const dst,
 	}
 
 	/* blit the buffer */
-	ret = surface_blitbuf(dst, buf, pitch, flags,
+	ret = surface_blitbuf(dst, AVBOX_PIXFMT_BGRA, &buf, &pitch, flags,
 		src->w, src->h, x, y);
 	surface_unlock(src);
 	return ret;
