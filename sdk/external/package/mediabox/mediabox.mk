@@ -14,7 +14,7 @@ MEDIABOX_LICENSE = OTHER
 MEDIABOX_LICENSE_FILES = COPYING
 MEDIABOX_INSTALL_STAGING = NO
 MEDIABOX_AUTORECONF = YES
-MEDIABOX_DEPENDENCIES = libcurl libupnp directfb openssl mediatomb avmount bluealsa
+MEDIABOX_DEPENDENCIES = libcurl libupnp directfb openssl mediatomb avmount
 
 MEDIABOX_CONF_OPTS = --without-systemd
 
@@ -23,6 +23,7 @@ MEDIABOX_CONF_OPTS += --enable-debug
 endif
 
 ifeq ($(BR2_PACKAGE_MEDIABOX_BLUETOOTH),y)
+MEDIABOX_DEPENDENCIES += bluealsa
 MEDIABOX_CONF_OPTS += --enable-bluetooth
 endif
 
