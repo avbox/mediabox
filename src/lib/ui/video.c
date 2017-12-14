@@ -44,6 +44,7 @@
 
 
 #define ENABLE_DIRECTFB 1
+#define FORCE_FULL_SCREEN_REPAINTS 1
 
 
 #ifdef ENABLE_LIBDRM
@@ -1119,7 +1120,15 @@ avbox_window_update(struct avbox_window *window)
 		return;
 	}
 
+#ifdef FORCE_FULL_SCREEN_REPAINTS
+	if (update) {
+		avbox_window_paint(&root_window, 0);
+	} else {
+		avbox_window_paint(window, 0);
+	}
+#else
 	avbox_window_paint(window, update);
+#endif
 }
 
 
@@ -1277,7 +1286,11 @@ avbox_window_show(struct avbox_window * const window)
 	/* add to the visible windows stack */
 	LIST_APPEND(&window_stack, &window->stack_node);
 	window->visible = 1;
+#ifdef FORCE_FULL_SCREEN_REPAINTS
+	avbox_window_paint(&root_window, 0);
+#else
 	avbox_window_paint(window, 1);
+#endif
 
 	/* if the window has input grab it */
 	if (window->flags & AVBOX_WNDFLAGS_INPUT) {

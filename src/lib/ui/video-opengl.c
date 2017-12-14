@@ -48,11 +48,11 @@ static GLuint bgra_program = 0, yuv420p_program = 0;
 static GLint bgra_texcoords, bgra_pos, bgra_texture;
 static GLint yuv420p_y, yuv420p_u, yuv420p_v, yuv420p_pos, yuv420p_texcoords;
 static struct mbv_surface *root_surface;
-static void (*wait_for_vsync)(void);
 static const GLfloat surface_texcoords[] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f };
 static const GLfloat display_texcoords[] = { 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f };
 static const GLfloat vertices[] = { -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f };
 static const GLenum draw_buffers[] = { GL_COLOR_ATTACHMENT0, GL_NONE };
+static void (*swap_buffers)(void);
 
 
 #ifndef NDEBUG
@@ -328,7 +328,7 @@ surface_unlock(struct mbv_surface * const inst)
 
 static inline
 void
-surface_render(struct mbv_surface * const inst, unsigned int flags)
+surface_render(struct mbv_surface * const inst, unsigned int flags, GLenum buffer)
 {
 	if (flags & MBV_BLITFLAGS_ALPHABLEND) {
 		glEnable(GL_BLEND);
@@ -342,6 +342,7 @@ surface_render(struct mbv_surface * const inst, unsigned int flags)
 	glEnableVertexAttribArray(bgra_pos);
 	glEnableVertexAttribArray(bgra_texcoords);
 	glViewport(inst->x, root_surface->h - (inst->y + inst->h), inst->w, inst->h);
+	glDrawBuffer(buffer);
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	glFlush();
 	if (flags & MBV_BLITFLAGS_ALPHABLEND) {
@@ -361,13 +362,11 @@ surface_update(struct mbv_surface * const inst, int blitflags, int update)
 	}
 
 	if (inst == root_surface) {
-		if (inst == root_surface) {
-			wait_for_vsync();
-		}
-		surface_render(inst, 0);
+		surface_render(inst, 0, GL_BACK);
+		swap_buffers();
 	} else {
 		if (update) {
-			surface_render(inst, blitflags);
+			surface_render(inst, blitflags, GL_FRONT);
 		} else {
 			surface_blit(root_surface, inst, blitflags, inst->x, inst->y);
 		}
@@ -562,7 +561,7 @@ avbox_video_opengl_prepare_shaders(void)
  */
 struct mbv_surface *
 avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int height,
-	void (*wait_for_vsync_fn)(void))
+	void (*swap_buffers_fn)(void))
 {
 #ifndef NDEBUG
 	/* remember the main thread */
@@ -572,7 +571,7 @@ avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int heig
 	/* re-initialize the driver function table with GL
 	 * functions */
 	init_func_table(funcs);
-	wait_for_vsync = wait_for_vsync_fn;
+	swap_buffers = swap_buffers_fn;
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
