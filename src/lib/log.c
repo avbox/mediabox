@@ -81,7 +81,7 @@ log_backtrace(void)
 	}
 
 	for (size_t i = 0; i < sz; i++) {
-		log_printf("%s", strings[i]);
+		log_printf("%s\n", strings[i]);
 	}
 	free(strings);
 #endif

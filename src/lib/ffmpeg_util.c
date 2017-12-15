@@ -35,7 +35,7 @@
 /**
  * Initialize ffmpeg's filter graph
  */
-int
+INTERNAL int
 avbox_ffmpegutil_initvideofilters(
 	AVFormatContext *fmt_ctx,
 	AVCodecContext *dec_ctx,
@@ -137,7 +137,7 @@ end:
 }
 
 
-int
+INTERNAL int
 avbox_ffmpegutil_initaudiofilters(
 	AVFilterContext **buffersink_ctx,
 	AVFilterContext **buffersrc_ctx,
@@ -261,7 +261,7 @@ end:
 }
 
 
-AVCodecContext *
+INTERNAL AVCodecContext *
 avbox_ffmpegutil_opencodeccontext(int *stream_idx,
 	AVFormatContext *fmt_ctx, enum AVMediaType type)
 {
@@ -282,12 +282,25 @@ avbox_ffmpegutil_opencodeccontext(int *stream_idx,
 
 	st = fmt_ctx->streams[*stream_idx];
 
+#if 0 && defined(ENABLE_VC4)
+	/* try to use the hardware decoder on the raspberry pi */
+	if (st->codecpar->codec_id == AV_CODEC_ID_H264) {
+		if ((dec = avcodec_find_decoder_by_name("h264_mmal")) == NULL) {
+			LOG_PRINT_ERROR("Could not find decoder: h264_mmal");
+		} else {
+			DEBUG_PRINT(LOG_MODULE, "Hardware decoding with mmal!");
+		}
+	}
+#endif
+
 	/* find decoder for the stream */
-	dec = avcodec_find_decoder(st->codecpar->codec_id);
-	if (!dec) {
-		LOG_VPRINT_ERROR("Failed to find '%s' codec!",
-			av_get_media_type_string(type));
-		return NULL;
+	if (dec == NULL) {
+		dec = avcodec_find_decoder(st->codecpar->codec_id);
+		if (!dec) {
+			LOG_VPRINT_ERROR("Failed to find '%s' codec!",
+				av_get_media_type_string(type));
+			return NULL;
+		}
 	}
 
 	/* allocate decoder context */
@@ -311,6 +324,3 @@ avbox_ffmpegutil_opencodeccontext(int *stream_idx,
 
 	return dec_ctx;
 }
-
-
-

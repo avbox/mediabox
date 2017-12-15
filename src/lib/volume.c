@@ -38,66 +38,33 @@
 
 static struct avbox_object *msgobj;
 static const char *card = "default";
-static const char *selem_name = "Master";
+static const char *selem_name = "PCM";
+static const int selem_index = 0;
+static snd_mixer_t *handle;
+static snd_mixer_elem_t* elem;
+static long min, max, volume;
 
 
 int
 avbox_volume_get(void)
 {
-	int err, ret = -1;
-	long min, max, volume;
-	snd_mixer_t *handle;
-	snd_mixer_selem_id_t *sid;
-	snd_mixer_elem_t* elem;
+	int err;
 
 	DEBUG_PRINT("volume", "avbox_volume_get()");
 
-	if ((err = snd_mixer_open(&handle, 0)) < 0) {
-		LOG_VPRINT_ERROR("snd_mixer_open() failed: %s", snd_strerror(err));
+	if (elem == NULL) {
+		errno = ENOTSUP;
 		return -1;
 	}
-	if ((err = snd_mixer_attach(handle, card)) < 0) {
-		LOG_VPRINT_ERROR("snd_mixer_attach() failed: %s", snd_strerror(err));
-		goto end;
-	}
-	if ((err = snd_mixer_selem_register(handle, NULL, NULL)) < 0) {
-		LOG_VPRINT_ERROR("snd_mixer_selem_register() failed %s", snd_strerror(err));
-		goto end;
-	}
-	if ((err = snd_mixer_load(handle)) < 0) {
-		LOG_VPRINT_ERROR("snd_mixer_load() failed: %s", snd_strerror(err));
-		goto end;
-	}
 
-	snd_mixer_selem_id_alloca(&sid);
-	snd_mixer_selem_id_set_index(sid, 0);
-	snd_mixer_selem_id_set_name(sid, selem_name);
-
-	if ((elem = snd_mixer_find_selem(handle, sid)) == NULL) {
-		LOG_PRINT_ERROR("snd_mixer_find_selem() returned NULL");
-		goto end;
-	}
-	if ((err = snd_mixer_selem_get_playback_volume_range(elem, &min, &max)) < 0) {
-		LOG_VPRINT_ERROR("snd_mixer_selem_get_playback_volume_range() failed: %s",
-			snd_strerror(err));
-		goto end;
-	}
 	if ((err = snd_mixer_selem_get_playback_volume(elem,
 		SND_MIXER_SCHN_FRONT_LEFT, &volume)) < 0) {
 		LOG_VPRINT_ERROR("snd_mixer_selem_get_playback_volume() failed: %s",
-			snd_strerror(ret));
-		goto end;
+			snd_strerror(err));
+		return -1;
 	}
 
-	DEBUG_VPRINT("volume", "min=%d max=%d vol=%d, percent=%d",
-		min, max, volume, (volume * 100) / max);
-
-	ret = (int) ((volume * 100) / max);
-
-end:
-	snd_mixer_close(handle);
-
-	return ret;
+	return (int) ((volume * 100) / max);
 }
 
 
@@ -105,47 +72,19 @@ int
 avbox_volume_set(int volume)
 {
 	int err, ret = -1;
-	long min, max;
-	snd_mixer_t *handle;
-	snd_mixer_selem_id_t *sid;
-	snd_mixer_elem_t* elem;
 	static int vol;
 
 	DEBUG_VPRINT("volume", "Setting volume to %d",
 		volume);
 
-	if ((err = snd_mixer_open(&handle, 0)) < 0) {
-		LOG_VPRINT_ERROR("Could not open mixer: %s", snd_strerror(err));
+	if (elem == NULL) {
+		errno = ENOTSUP;
 		return -1;
 	}
-	if ((err = snd_mixer_attach(handle, card)) < 0) {
-		LOG_VPRINT_ERROR("Could not attach mixer: %s", snd_strerror(err));
-		goto end;
-	}
-	if ((err = snd_mixer_selem_register(handle, NULL, NULL)) < 0) {
-		LOG_VPRINT_ERROR("Could not register: %s", snd_strerror(err));
-		goto end;
-	}
-	if ((err = snd_mixer_load(handle)) < 0) {
-		LOG_VPRINT_ERROR("Could not load mixer: %s", snd_strerror(err));
-		goto end;
-	}
 
-	snd_mixer_selem_id_alloca(&sid);
-	snd_mixer_selem_id_set_index(sid, 0);
-	snd_mixer_selem_id_set_name(sid, selem_name);
-
-	if ((elem = snd_mixer_find_selem(handle, sid)) == NULL) {
-		LOG_PRINT_ERROR("snd_mixer_find_selem() returned NULL");
-		goto end;
-	}
-	if ((err = snd_mixer_selem_get_playback_volume_range(elem, &min, &max)) < 0) {
-		LOG_VPRINT_ERROR("Could not get volume range: %s", snd_strerror(err));
-		goto end;
-	}
 	if ((err = snd_mixer_selem_set_playback_volume_all(elem, volume * max / 100)) < 0) {
 		LOG_VPRINT_ERROR("Could not set volume: %s", snd_strerror(err));
-		goto end;
+		return -1;
 	}
 
 	/* if the device has a playback switch try to enable it */
@@ -169,10 +108,6 @@ avbox_volume_set(int volume)
 
 	/* save the volume */
 	avbox_settings_setint("volume", volume);
-	ret = 0;
-
-end:
-	snd_mixer_close(handle);
 
 	return ret;
 }
@@ -181,7 +116,57 @@ end:
 int
 avbox_volume_init(struct avbox_object *obj)
 {
-	assert(msgobj == NULL);
+	int err;
+	snd_mixer_selem_id_t *sid;
+
+	ASSERT(msgobj == NULL);
+
+	if ((err = snd_mixer_open(&handle, 0)) < 0) {
+		LOG_VPRINT_ERROR("Could not open mixer: %s", snd_strerror(err));
+		handle = NULL;
+		elem = NULL;
+		return -1;
+	}
+	if ((err = snd_mixer_attach(handle, card)) < 0) {
+		LOG_VPRINT_ERROR("Could not attach mixer: %s", snd_strerror(err));
+		snd_mixer_close(handle);
+		handle = NULL;
+		elem = NULL;
+		return -1;
+	}
+	if ((err = snd_mixer_selem_register(handle, NULL, NULL)) < 0) {
+		LOG_VPRINT_ERROR("Could not register: %s", snd_strerror(err));
+		snd_mixer_close(handle);
+		handle = NULL;
+		elem = NULL;
+		return -1;
+	}
+	if ((err = snd_mixer_load(handle)) < 0) {
+		LOG_VPRINT_ERROR("Could not load mixer: %s", snd_strerror(err));
+		snd_mixer_close(handle);
+		handle = NULL;
+		elem = NULL;
+		return -1;
+	}
+
+	snd_mixer_selem_id_alloca(&sid);
+	snd_mixer_selem_id_set_index(sid, selem_index);
+	snd_mixer_selem_id_set_name(sid, selem_name);
+
+	if ((elem = snd_mixer_find_selem(handle, sid)) == NULL) {
+		LOG_PRINT_ERROR("snd_mixer_find_selem() returned NULL");
+		snd_mixer_close(handle);
+		handle = NULL;
+		elem = NULL;
+		return -1;
+	}
+	if ((err = snd_mixer_selem_get_playback_volume_range(elem, &min, &max)) < 0) {
+		LOG_VPRINT_ERROR("Could not get volume range: %s", snd_strerror(err));
+		snd_mixer_close(handle);
+		handle = NULL;
+		elem = NULL;
+		return -1;
+	}
 
 	/* set the volume to either the last known
 	 * volume or a default value of 60 */
@@ -196,5 +181,8 @@ avbox_volume_init(struct avbox_object *obj)
 void
 avbox_volume_shutdown(void)
 {
+	if (handle != NULL) {
+		snd_mixer_close(handle);
+	}
 	msgobj = NULL;
 }

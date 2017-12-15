@@ -305,7 +305,7 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	/* set height according to font size */
 	avbox_window_getcanvassize(avbox_video_getrootwindow(0), &xres, &yres);
 	font_height = mbv_getdefaultfontheight();
-	window_height = 3 + font_height + ((font_height + 3) * n_entries);
+	window_height = 5 + 3 + font_height + ((font_height + 3) * n_entries);
 
 	DEBUG_VPRINT("mainmenu", "Default font size: %i", font_height);
 
@@ -322,7 +322,7 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 
 	/* create a new window for the menu dialog */
 	inst->window = avbox_window_new(NULL, "mainmenu",
-		AVBOX_WNDFLAGS_DECORATED,
+		AVBOX_WNDFLAGS_DECORATED | AVBOX_WNDFLAGS_ALPHABLEND,
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
 		window_width, window_height, mbox_mainmenu_messagehandler, NULL, inst);

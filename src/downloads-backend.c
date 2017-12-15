@@ -101,7 +101,7 @@ mb_downloadmanager_init(void)
 		"-p",
 		"58846",
 		"-c",
-		"/tmp/mediabox/deluge/",
+		STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/",
 		NULL
 	};
 
@@ -110,19 +110,20 @@ mb_downloadmanager_init(void)
 	/* create all config files for deluged */
 	umask(000);
 
-	mkdir_p("/tmp/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	cp(STRINGIZE(DATADIR) "/mediabox/deluge/core.conf", "/tmp/mediabox/deluge/core.conf");
-	cp(STRINGIZE(DATADIR) "/mediabox/deluge/auth", "/tmp/mediabox/deluge/auth");
-	unlink("/tmp/mediabox/deluge/deluged.pid");
+	mkdir_p(STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	cp(STRINGIZE(DATADIR) "/mediabox/deluge/core.conf", STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/core.conf");
+	cp(STRINGIZE(DATADIR) "/mediabox/deluge/auth", STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/auth");
+	unlink(STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/deluged.pid");
 
 	/* launch the deluged process */
 	if ((daemon_id = avbox_process_start(DELUGED_BIN, (const char **) args,
-		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE | AVBOX_PROCESS_SUPERUSER,
+		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
+		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_STDERR_LOG | AVBOX_PROCESS_STDOUT_LOG,
 		"Deluge Daemon", NULL, NULL)) == -1) {
 		fprintf(stderr, "download-backend: Could not start deluge daemon\n");
 		return -1;
 	}
-return 0;
+	return 0;
 }
 
 

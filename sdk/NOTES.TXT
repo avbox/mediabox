@@ -10,3 +10,10 @@ gdb stops on SIGPIPE:
 
 gdb> handle SIGPIPE nostop noprint pass
 gdb> c
+
+
+Adding new board configs
+========================
+1. Copy an existing configuration to the config/<arch>/<board> directory.
+2. Run builroot --arch=<arch> --board=<board> --menuconfig
+2. Update BR2_....

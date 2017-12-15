@@ -192,9 +192,7 @@ end:
 void
 avbox_queue_wait(struct avbox_queue * const inst)
 {
-	pthread_mutex_lock(&inst->lock);
 	pthread_cond_wait(&inst->cond, &inst->lock);
-	pthread_mutex_unlock(&inst->lock);
 }
 
 

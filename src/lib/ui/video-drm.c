@@ -859,7 +859,11 @@ shutdown()
 			       &iter->saved_crtc->mode);
 		drmModeFreeCrtc(iter->saved_crtc);
 
-		if (iter == default_dev && !egl_enabled) {
+		if (iter == default_dev
+#ifdef ENABLE_OPENGL
+		&& !egl_enabled
+#endif
+		) {
 			avbox_drm_free_framebuffer(iter);
 		}
 
@@ -869,7 +873,7 @@ shutdown()
 }
 
 
-void
+INTERNAL void
 mbv_drm_initft(struct mbv_drv_funcs * const funcs)
 {
 	funcs->init = &init;

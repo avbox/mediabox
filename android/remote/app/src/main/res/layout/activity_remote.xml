@@ -9,263 +9,199 @@
     android:paddingRight="@dimen/activity_horizontal_margin"
     android:paddingTop="@dimen/activity_vertical_margin"
     tools:context="com.mediabox.mediaboxremote.RemoteActivity">
-
-    <Button
-        style="?android:attr/buttonStyleSmall"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="MENU"
-        android:id="@+id/btnMenu"
-        android:layout_marginTop="61dp"
-        android:onClick="onButtonPressed"
-        android:background="@android:color/holo_red_dark"
-        android:textColor="#ffffff"
-        android:width="80dp"
-        android:layout_alignParentTop="true"
-        android:layout_centerHorizontal="true"
-        />
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="  UP  "
-        android:id="@+id/btnUp"
-        android:layout_alignBottom="@+id/btnMenu"
-        android:layout_centerHorizontal="true"
-        android:layout_marginBottom="54dp"
-        android:onClick="onButtonPressed"
-        android:background="@color/colorPrimaryDark"
-        android:textColor="#ffffff"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="DOWN"
-        android:id="@+id/btnDown"
-        android:onClick="onButtonPressed"
-        android:background="@color/colorPrimaryDark"
-        android:textColor="#ffffff"
-        android:layout_below="@+id/btnMenu"
-        android:layout_toLeftOf="@+id/btnRight"
-        android:layout_toStartOf="@+id/btnRight"
-        android:layout_marginTop="5dp"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="LEFT"
-        android:id="@+id/btnLeft"
-        android:layout_alignTop="@+id/btnMenu"
-        android:layout_toLeftOf="@+id/btnDown"
-        android:layout_toStartOf="@+id/btnDown"
-        android:onClick="onButtonPressed"
-        android:background="@color/colorPrimaryDark"
-        android:textColor="#ffffff"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="RIGHT"
-        android:id="@+id/btnRight"
-        android:layout_alignTop="@+id/btnMenu"
-        android:layout_toRightOf="@+id/btnUp"
-        android:layout_toEndOf="@+id/btnUp"
-        android:onClick="onButtonPressed"
-        android:background="@color/colorPrimaryDark"
-        android:textColor="#ffffff"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="PLAY"
-        android:id="@+id/btnPlay"
-        android:layout_marginBottom="33dp"
-        android:layout_alignParentBottom="true"
-        android:layout_toLeftOf="@+id/btnInfo"
-        android:layout_toStartOf="@+id/btnInfo"
-        android:onClick="onButtonPressed"
-        android:background="@android:color/holo_green_light"
-        android:textColor="#ffffff"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="INFO"
-        android:id="@+id/btnInfo"
-        android:layout_alignTop="@+id/btnPlay"
-        android:layout_alignRight="@+id/btnRight"
-        android:layout_alignEnd="@+id/btnRight"
-        android:onClick="onButtonPressed"
-        android:background="@android:color/holo_red_dark"
-        android:textColor="#ffffff"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="STOP"
-        android:id="@+id/btnStop"
-        android:layout_alignTop="@+id/btnPlay"
-        android:layout_toLeftOf="@+id/btnPlay"
-        android:layout_toStartOf="@+id/btnPlay"
-        android:onClick="onButtonPressed"
-        android:background="@android:color/holo_red_dark"
-        android:textColor="#ffffff"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="BACK"
-        android:id="@+id/btnBack"
-        android:layout_below="@+id/btnDown"
-        android:layout_alignParentLeft="true"
-        android:layout_alignParentStart="true"
-        android:onClick="onButtonPressed"
-        android:background="@android:color/holo_red_dark"
-        android:textColor="#ffffff"
-        android:layout_marginTop="5dp"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="ENTER"
-        android:id="@+id/btnEnter"
-        android:layout_below="@+id/btnDown"
-        android:layout_alignParentRight="true"
-        android:layout_alignParentEnd="true"
-        android:onClick="onButtonPressed"
-        android:background="@android:color/holo_green_light"
-        android:textColor="#ffffff"
-        android:layout_marginTop="5dp"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="KEYBOARD"
-        android:id="@+id/btnKeyboard"
-        android:onClick="onKeyboard"
-        android:focusable="true"
-        android:focusableInTouchMode="true"
-        android:layout_below="@+id/btnDown"
-        android:layout_centerHorizontal="true"
-        android:background="@android:color/holo_blue_dark"
-        android:layout_marginTop="5dp"
-        android:textColor="#ffffff"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="|&lt;"
-        android:id="@+id/btnPrev"
-        android:background="@android:color/holo_red_dark"
-        android:textColor="#ffffff"
-        android:minWidth="50dp"
-        android:layout_alignTop="@+id/btnRew"
-        android:layout_alignParentEnd="false"
-        android:layout_alignParentRight="false"
-        android:layout_alignParentStart="true"
-        android:layout_alignParentLeft="true"
-        android:onClick="onButtonPressed"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="&lt;&lt;"
-        android:id="@+id/btnRew"
-        android:layout_above="@+id/btnPlay"
-        android:layout_toEndOf="@+id/btnPrev"
-        android:background="@android:color/holo_red_light"
-        android:layout_marginBottom="5dp"
-        android:textColor="#ffffff"
-        android:layout_marginRight="5dp"
-        android:layout_marginTop="5dp"
-        android:layout_toRightOf="@+id/btnPrev"
-        android:minWidth="50dp"
-        android:onClick="onButtonPressed"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text=">>"
-        android:id="@+id/btnFF"
-        android:background="@android:color/holo_red_light"
-        android:textColor="#ffffff"
-        android:width="5dp"
-        android:minWidth="50dp"
-        android:layout_alignTop="@+id/btnRew"
-        android:layout_toRightOf="@+id/btnRew"
-        android:layout_toEndOf="@+id/btnRew"
-        android:onClick="onButtonPressed"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="@string/next"
-        android:id="@+id/btnNext"
-        android:background="@android:color/holo_red_dark"
-        android:textColor="#ffffff"
-        android:minWidth="50dp"
-        android:layout_alignTop="@+id/btnFF"
-        android:layout_toRightOf="@+id/btnFF"
-        android:layout_toEndOf="@+id/btnFF"
-        android:onClick="onButtonPressed"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Vol Up"
-        android:id="@+id/btnVolUp"
-        android:layout_alignTop="@+id/btnUp"
-        android:layout_alignParentLeft="true"
-        android:layout_alignParentStart="true"
-        android:background="@android:color/holo_purple"
-        android:textColor="#ffffff"
-        android:onClick="onButtonPressed"/>
-
-    <Button
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Vol Down"
-        android:id="@+id/btnVolDown"
-        android:layout_alignTop="@+id/btnDown"
-        android:layout_alignParentLeft="true"
-        android:layout_alignParentStart="true"
-        android:background="@android:color/holo_purple"
-        android:textColor="#ffffff"
-        android:onClick="onButtonPressed"/>
-
-    <Button
-        android:id="@+id/btnTrack"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_alignBaseline="@+id/btnUp"
-        android:layout_alignBottom="@+id/btnUp"
-        android:layout_alignParentEnd="true"
-        android:layout_alignParentRight="true"
-        android:background="@android:color/holo_blue_light"
-        android:onClick="onButtonPressed"
-        android:text="TRACK"
-        android:textColor="@android:color/background_light" />
-
-    <Button
-        android:text="MUTE"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_alignTop="@+id/btnDown"
-        android:layout_alignParentRight="true"
-        android:layout_alignParentEnd="true"
-        android:id="@+id/btnMute"
-        android:background="@android:color/holo_red_dark"
-        android:textColor="@android:color/background_light"
-        android:onClick="onButtonPressed"/>
-
-    <SeekBar
-        android:id="@+id/seekBar"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="35dp"
-        android:layout_below="@+id/btnBack"
-        android:layout_alignParentLeft="true"
-        android:layout_alignParentStart="true"
-        android:layout_alignParentRight="true"
-        android:layout_alignParentEnd="true" />
+    <TableLayout xmlns:android="http://schemas.android.com/apk/res/android"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:stretchColumns="1">
+        <TableRow>
+            <Button
+                android:id="@+id/btnVolUp"
+                android:layout_gravity="start"
+                android:layout_margin="3dp"
+                android:layout_weight=".30"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text="Vol Up"
+                android:textColor="#ffffff" />
+            <Button
+                android:id="@+id/btnUp"
+                android:text="  UP  "
+                android:layout_margin="3dp"
+                android:layout_weight=".30"
+                android:layout_gravity="center"
+                android:onClick="onButtonPressed"
+                android:background="@color/colorPrimaryDark"
+                android:textColor="#ffffff"/>
+            <Button
+                android:id="@+id/btnTrack"
+                android:layout_gravity="end"
+                android:layout_margin="3dp"
+                android:layout_weight=".30"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text="TRACK"
+                android:textColor="@android:color/background_light" />
+        </TableRow>
+        <TableRow>
+            <Button
+                android:id="@+id/btnLeft"
+                android:layout_weight=".30"
+                android:layout_gravity="start"
+                android:layout_margin="3dp"
+                android:text="LEFT"
+                android:onClick="onButtonPressed"
+                android:background="@color/colorPrimaryDark"
+                android:textColor="#ffffff"/>
+            <Button
+                android:id="@+id/btnMenu"
+                android:layout_gravity="center"
+                android:layout_margin="3dp"
+                android:layout_weight=".30"
+                android:background="@color/colorAccent"
+                android:onClick="onButtonPressed"
+                android:text="MENU"
+                android:textColor="#ffffff" />
+            <Button
+                android:layout_weight=".30"
+                android:layout_gravity="end"
+                android:layout_margin="3dp"
+                android:text="RIGHT"
+                android:id="@+id/btnRight"
+                android:onClick="onButtonPressed"
+                android:background="@color/colorPrimaryDark"
+                android:textColor="#ffffff"/>
+        </TableRow>
+        <TableRow>
+            <Button
+                android:id="@+id/btnVolDown"
+                android:layout_gravity="left"
+                android:layout_margin="3dp"
+                android:layout_weight=".30"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text="Vol Down"
+                android:textColor="#ffffff" />
+            <Button
+                android:layout_weight=".30"
+                android:layout_gravity="center"
+                android:layout_margin="3dp"
+                android:text="DOWN"
+                android:id="@+id/btnDown"
+                android:onClick="onButtonPressed"
+                android:background="@color/colorPrimaryDark"
+                android:textColor="#ffffff"  />
+            <Button
+                android:id="@+id/btnMute"
+                android:layout_gravity="right"
+                android:layout_margin="3dp"
+                android:layout_weight=".30"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text="MUTE"
+                android:textColor="@android:color/background_light" />
+        </TableRow>
+        <TableRow>
+            <Button
+                android:id="@+id/btnBack"
+                android:layout_gravity="start"
+                android:layout_margin="3dp"
+                android:layout_weight=".30"
+                android:background="@color/colorPrimaryDark"
+                android:onClick="onButtonPressed"
+                android:text="BACK"
+                android:textColor="#ffffff" />
+            <Button
+                android:id="@+id/btnKeyboard"
+                android:layout_gravity="center"
+                android:layout_margin="3dp"
+                android:layout_weight=".30"
+                android:background="@color/colorPrimary"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:onClick="onKeyboard"
+                android:text="KEYBOARD"
+                android:textColor="#ffffff" />
+            <Button
+                android:id="@+id/btnEnter"
+                android:layout_gravity="end"
+                android:layout_margin="3dp"
+                android:layout_marginTop="5dp"
+                android:layout_weight=".30"
+                android:background="@color/colorPrimaryDark"
+                android:onClick="onButtonPressed"
+                android:text="ENTER"
+                android:textColor="#ffffff" />
+        </TableRow>
+        <TableRow android:layout_height="fill_parent">
+            <SeekBar
+                android:id="@+id/seekBar"
+                android:layout_weight="1"
+                android:layout_gravity="center" />
+        </TableRow>
+        <TableRow>
+            <Button
+                android:id="@+id/btnPrev"
+                android:layout_marginBottom="3dp"
+                android:layout_marginRight="4dp"
+                android:layout_weight=".25"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text="|&lt;"
+                android:textColor="#ffffff" />
+            <Button
+                android:id="@+id/btnRew"
+                android:layout_marginBottom="3dp"
+                android:layout_marginRight="2dp"
+                android:layout_weight=".25"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text="&lt;&lt;"
+                android:textColor="#ffffff" />
+            <Button
+                android:id="@+id/btnFF"
+                android:layout_marginBottom="3dp"
+                android:layout_marginLeft="4dp"
+                android:layout_weight=".25"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text=">>"
+                android:textColor="#ffffff" />
+            <Button
+                android:id="@+id/btnNext"
+                android:layout_marginBottom="3dp"
+                android:layout_marginLeft="4dp"
+                android:layout_weight=".25"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text="@string/next"
+                android:textColor="#ffffff" />
+        </TableRow>
+        <TableRow>
+            <Button
+                android:id="@+id/btnStop"
+                android:layout_marginTop="3dp"
+                android:layout_weight=".33"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text="STOP"
+                android:textColor="#ffffff" />
+            <Button
+                android:id="@+id/btnPlay"
+                android:layout_marginBottom="33dp"
+                android:layout_marginTop="3dp"
+                android:layout_weight=".33"
+                android:background="@color/colorPrimaryDark"
+                android:onClick="onButtonPressed"
+                android:text="PLAY"
+                android:textColor="#ffffff" />
+            <Button
+                android:id="@+id/btnInfo"
+                android:layout_marginTop="3dp"
+                android:layout_weight=".33"
+                android:background="@color/colorPrimary"
+                android:onClick="onButtonPressed"
+                android:text="INFO"
+                android:textColor="#ffffff" />
+        </TableRow>
+    </TableLayout>
 </RelativeLayout>

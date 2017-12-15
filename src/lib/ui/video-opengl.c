@@ -1,3 +1,6 @@
+#ifdef HAVE_CONFIG_H
+#include "../../config.h"
+#endif
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
@@ -6,8 +9,16 @@
 
 #define GL_GLEXT_PROTOTYPES
 
-#include <GL/gl.h>
-#include <GL/glext.h>
+#ifdef ENABLE_GLES2
+#	include <GLES2/gl2.h>
+#else
+#	include <GL/gl.h>
+#endif
+
+#ifdef ENABLE_VC4
+#	include "video-vc4.h"
+#	include <GLES2/gl2ext.h>
+#endif
 
 #define LOG_MODULE "video-opengl"
 
@@ -45,14 +56,27 @@ struct mbv_surface
 
 /* GL driver */
 static GLuint bgra_program = 0, yuv420p_program = 0;
-static GLint bgra_texcoords, bgra_pos, bgra_texture;
+static GLuint vertex_buffer;
+static GLint bgra_texcoords, bgra_pos, bgra_texture, bgra_target;
 static GLint yuv420p_y, yuv420p_u, yuv420p_v, yuv420p_pos, yuv420p_texcoords;
 static struct mbv_surface *root_surface;
-static const GLfloat surface_texcoords[] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f };
-static const GLfloat display_texcoords[] = { 0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f };
-static const GLfloat vertices[] = { -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f };
-static const GLenum draw_buffers[] = { GL_COLOR_ATTACHMENT0, GL_NONE };
+static GLfloat texcoords[] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f };
+static GLfloat texcoords_yuv[] = {
+	0.0f, 1.0f,
+	1.0f, 1.0f,
+	0.0f, 0.0f,
+	1.0f, 0.0f,
+};
 static void (*swap_buffers)(void);
+
+#ifdef ENABLE_VC4
+static GLuint mmal_program;
+static GLint mmal_texcoords, mmal_pos, mmal_texture;
+#endif
+
+
+#define TARGET_SURFACE	(0)
+#define TARGET_DISPLAY	(1)
 
 
 #ifndef NDEBUG
@@ -64,8 +88,11 @@ do { \
 	if ((_err = glGetError()) != GL_NO_ERROR) { \
 		switch (_err) { \
 		case GL_INVALID_OPERATION: LOG_VPRINT_ERROR("GL error (%d): Invalid operation", __LINE__); break; \
-		default: LOG_VPRINT_ERROR("GL error: 0x%x", _err); abort(); \
+		case GL_OUT_OF_MEMORY: LOG_VPRINT_ERROR("GL error (%d): Out of memory", __LINE__); break; \
+		case GL_INVALID_VALUE: LOG_VPRINT_ERROR("GL error (%d): Invalid value", __LINE__); break; \
+		default: LOG_VPRINT_ERROR("GL error (%d): 0x%x", __LINE__, _err); break; \
 		} \
+		abort(); \
 	} \
 } while (0)
 
@@ -74,6 +101,38 @@ do { \
 #define DEBUG_ERROR_CHECK()	(void) 0
 #define DEBUG_THREAD_CHECK()	(void) 0
 #endif
+
+
+static inline void
+avbox_glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsizei w, GLsizei h,
+	GLenum format, GLenum type, const GLvoid *data, int pitch, int pixsz)
+{
+#if 1 || defined(ENABLE_GLES2)
+	/* this is way too slow. find a better way. */
+	int yy;
+	const uint8_t *pdata = ((const uint8_t*)data) + ((h - 1) * pitch);
+	(void) pixsz;
+	for (yy = y; yy < y + h; pdata -= pitch, yy++) {
+		glTexSubImage2D(target, level, x, yy, w, 1, format, type, pdata);
+	}
+#else
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, pitch / pixsz);
+	glTexSubImage2D(target, level, x, y, w, h, format, type, data);
+#endif
+}
+
+
+static inline void
+avbox_glTexImage2D(GLenum target, GLint level,
+	GLint internal_format, GLsizei w, GLsizei h,
+	GLint border, GLenum format, GLenum type, const GLvoid * data, int pitch, int pixsz)
+{
+	glTexImage2D(target, level, internal_format, w, h,
+		border, format, type, NULL);
+	avbox_glTexSubImage2D(target, level, 0, 0, w, h, format,
+		type, data, pitch, pixsz);
+}
+
 
 static int
 surface_doublebuffered(const struct mbv_surface * const surface)
@@ -103,15 +162,17 @@ surface_new(struct mbv_surface *parent,
 	inst->parent = parent;
 	inst->framebuffer = 0;
 	inst->lockflags = 0;
+	inst->buf = NULL;
 
 	if (parent != NULL) {
 		inst->real = parent->real;
 		inst->realx = parent->realx + inst->x;
 		inst->realy = parent->realy + inst->y;
+		inst->texture = parent->texture;
 		inst->pitch = parent->pitch;
 		inst->bufsz = 0;
-		inst->buf = ((uint8_t*)parent->buf) + (inst->pitch * inst->y) + inst->x;
-		inst->texture = inst->parent->texture;
+		inst->buf = ((uint8_t*)parent->buf) + (inst->pitch * inst->y) + (inst->x * 4);
+
 	} else {
 		inst->real = inst;
 		inst->realx = 0;
@@ -132,7 +193,6 @@ surface_new(struct mbv_surface *parent,
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, inst->w, inst->h,
 			0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 		DEBUG_ERROR_CHECK();
@@ -146,16 +206,29 @@ static GLuint
 surface_framebuffer(struct mbv_surface * const inst)
 {
 	if (inst->framebuffer == 0 && inst == inst->real) {
+
 		glGenFramebuffers(1, &inst->framebuffer);
 		glBindFramebuffer(GL_FRAMEBUFFER, inst->framebuffer);
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, inst->texture, 0);
-#ifdef NDEBUG
-		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-			LOG_PRINT_ERROR("Could not create surface framebuffer!");
+#ifndef NDEBUG
+		GLenum status;
+		if ((status = glCheckFramebufferStatus(GL_FRAMEBUFFER)) != GL_FRAMEBUFFER_COMPLETE) {
+			const char *str;
+			switch (status) {
+			case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT: str = "GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT"; break;
+			case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT: str = "GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT"; break;
+			/* case GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS: str = "GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS"; break; */
+			case GL_FRAMEBUFFER_UNSUPPORTED: str = "GL_FRAMEBUFFER_UNSUPPORTED"; break;
+			default: str = "???";
+			}
+			LOG_VPRINT_ERROR("Could not create surface framebuffer (status=0x%x): %s",
+				status, str);
 			glDeleteFramebuffers(1, &inst->framebuffer);
+			abort();
 			return -1;
 		}
 #endif
+		ASSERT(inst->framebuffer != 0);
 	}
 	return inst->framebuffer;
 }
@@ -168,16 +241,20 @@ surface_lock(struct mbv_surface * const inst,
 	DEBUG_THREAD_CHECK();
 	ASSERT(inst != NULL);
 	ASSERT(inst->lockflags == 0);
+	ASSERT(inst->buf != NULL);
 	ASSERT(flags != 0);
 
+	*pitch = inst->pitch;
+
 	if (flags & MBV_LOCKFLAGS_READ) {
+		#if 0
 		glPixelStorei(GL_PACK_ROW_LENGTH, inst->pitch / 4);
 		glBindTexture(GL_TEXTURE_2D, inst->texture);
 		glGetTexImage(GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_BYTE, inst->real->buf);
 		DEBUG_ERROR_CHECK();
+		#endif
 	}
 
-	*pitch = inst->pitch;
 	inst->lockflags = flags;
 	return inst->buf;
 }
@@ -197,25 +274,66 @@ surface_blitbuf(
 		GLuint planes[3];
 		const int uv_w = w >> 1, uv_h = h >> 1;
 
+		glVertexAttribPointer(yuv420p_texcoords, 2, GL_FLOAT, GL_FALSE, 0, texcoords_yuv);
+		glEnableVertexAttribArray(yuv420p_texcoords);
+
 		/* upload each plane to a texture */
 		glGenTextures(3, planes);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
-		glPixelStorei(GL_UNPACK_ROW_LENGTH, pitch[0]);
 		glBindTexture(GL_TEXTURE_2D, planes[0]);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, w, h, 0,
-			GL_ALPHA, GL_UNSIGNED_BYTE, buf[0]);
+		if (pitch[0] == w) {
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, w, h, 0,
+				GL_ALPHA, GL_UNSIGNED_BYTE, buf[0]);
+		} else {
+			int i;
+			uint8_t *pbuf = buf[0];
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, w, h, 0,
+				GL_ALPHA, GL_UNSIGNED_BYTE, NULL);
+			for (i = 0; i < h; i++) {
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, i, w, 1,
+					GL_ALPHA, GL_UNSIGNED_BYTE, pbuf);
+				pbuf += pitch[0];
+			}
+		}
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-		glPixelStorei(GL_UNPACK_ROW_LENGTH, pitch[1]);
 		glBindTexture(GL_TEXTURE_2D, planes[1]);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, uv_w, uv_h, 0,
-			GL_ALPHA, GL_UNSIGNED_BYTE, buf[1]);
-		glPixelStorei(GL_UNPACK_ROW_LENGTH, pitch[2]);
+		if (pitch[1] == uv_w) {
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, uv_w, uv_h, 0,
+				GL_ALPHA, GL_UNSIGNED_BYTE, buf[1]);
+		} else {
+			int i;
+			uint8_t *pbuf = buf[1];
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, uv_w, uv_h, 0,
+				GL_ALPHA, GL_UNSIGNED_BYTE, NULL);
+			for (i = 0; i < uv_h; i++) {
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, i, uv_w, 1,
+					GL_ALPHA, GL_UNSIGNED_BYTE, pbuf);
+				pbuf += pitch[1];
+			}
+		}
+
+		DEBUG_ERROR_CHECK();
+
 		glBindTexture(GL_TEXTURE_2D, planes[2]);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, uv_w, uv_h, 0,
-			GL_ALPHA, GL_UNSIGNED_BYTE, buf[2]);
+		if (pitch[2] == uv_w) {
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, uv_w, uv_h, 0,
+				GL_ALPHA, GL_UNSIGNED_BYTE, buf[2]);
+		} else {
+			int i;
+			uint8_t *pbuf = buf[2];
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, uv_w, uv_h, 0,
+				GL_ALPHA, GL_UNSIGNED_BYTE, NULL);
+			for (i = 0; i < uv_h; i++) {
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, i, uv_w, 1,
+					GL_ALPHA, GL_UNSIGNED_BYTE, pbuf);
+				pbuf += pitch[2];
+			}
+		}
+
+		DEBUG_ERROR_CHECK();
 
 		/* prepare shaders */
 		glUseProgram(yuv420p_program);
@@ -229,30 +347,67 @@ surface_blitbuf(
 		glBindTexture(GL_TEXTURE_2D, planes[2]);
 		glUniform1i(yuv420p_v, 2);
 		glActiveTexture(GL_TEXTURE0);
-		glVertexAttribPointer(yuv420p_pos, 2, GL_FLOAT, GL_FALSE, 0, vertices);
-		glVertexAttribPointer(yuv420p_texcoords, 2, GL_FLOAT, GL_FALSE, 0, surface_texcoords);
+
+		glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+		glVertexAttribPointer(yuv420p_pos, 2, GL_FLOAT, GL_FALSE, 0, 0);
 		glEnableVertexAttribArray(yuv420p_pos);
-		glEnableVertexAttribArray(yuv420p_texcoords);
 
 		/* convert and render to texture */
 		glBindFramebuffer(GL_FRAMEBUFFER, surface_framebuffer(inst));
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 			GL_TEXTURE_2D, inst->texture, 0);
-		glViewport(inst->x, inst->y, inst->w, inst->h);
-		glDrawBuffers(1, draw_buffers);
+		glViewport(inst->x, inst->h - (y + h), inst->w, inst->h);
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
 		glDeleteTextures(3, planes);
 		DEBUG_ERROR_CHECK();
 		return 0;
-
 	}
+#ifdef ENABLE_VC4
+	case AVBOX_PIXFMT_MMAL:
+	{
+		GLuint texture;
+
+		/* assign mmal buffer to texture */
+		glGenTextures(1, &texture);
+		glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture);
+		glTexParameterf(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameterf(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameterf(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameterf(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		avbox_video_vc4_mmal2texture(buf[0], texture);
+		DEBUG_ERROR_CHECK();
+
+		glBindFramebuffer(GL_FRAMEBUFFER, surface_framebuffer(inst));
+		DEBUG_ERROR_CHECK();
+
+		glVertexAttribPointer(mmal_texcoords, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
+		glEnableVertexAttribArray(mmal_texcoords);
+
+		glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+		glVertexAttribPointer(mmal_pos, 2, GL_FLOAT, GL_FALSE, 0, 0);
+		glEnableVertexAttribArray(mmal_pos);
+		DEBUG_ERROR_CHECK();
+
+		glUseProgram(mmal_program);
+		DEBUG_ERROR_CHECK();
+		glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture);
+		DEBUG_ERROR_CHECK();
+
+		glViewport(x, inst->h - (y + h), w, h);
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glDeleteTextures(1, &texture);
+		DEBUG_ERROR_CHECK();
+		break;
+	}
+#endif
 	case AVBOX_PIXFMT_BGRA:
 	{
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-		glPixelStorei(GL_UNPACK_ROW_LENGTH, *pitch / 4);
 		glBindTexture(GL_TEXTURE_2D, inst->texture);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, inst->realx + x, inst->realy + y, w, h,
-			GL_BGRA, GL_UNSIGNED_BYTE, *buf);
+		avbox_glTexSubImage2D(GL_TEXTURE_2D, 0, inst->realx + x, inst->realy + y, w, h,
+			GL_RGBA, GL_UNSIGNED_BYTE, buf[0], pitch[0], 4);
 		DEBUG_ERROR_CHECK();
 		break;
 	}
@@ -276,22 +431,31 @@ surface_scaleblit(
 	if (flags & MBV_BLITFLAGS_ALPHABLEND) {
 		glEnable(GL_BLEND);
 	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, surface_framebuffer(dst));
+	DEBUG_ERROR_CHECK();
+
+	glVertexAttribPointer(bgra_texcoords, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
+	glEnableVertexAttribArray(bgra_texcoords);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+	glVertexAttribPointer(bgra_pos, 2, GL_FLOAT, GL_FALSE, 0, 0);
+	glEnableVertexAttribArray(bgra_pos);
+
 	glUseProgram(bgra_program);
 	glBindTexture(GL_TEXTURE_2D, src->texture);
 	glUniform1i(bgra_texture, 0);
-	glVertexAttribPointer(bgra_pos, 2, GL_FLOAT, GL_FALSE, 0, vertices);
-	glVertexAttribPointer(bgra_texcoords, 2, GL_FLOAT, GL_FALSE, 0, surface_texcoords);
-	glEnableVertexAttribArray(bgra_pos);
-	glEnableVertexAttribArray(bgra_texcoords);
-	glBindFramebuffer(GL_FRAMEBUFFER, surface_framebuffer(dst));
-	glDrawBuffers(1, draw_buffers);
-	glViewport(x, y, w, h);
+	glUniform1i(bgra_target, TARGET_SURFACE);
+
+	glViewport(x, dst->h - (y + h), w, h);
+	DEBUG_ERROR_CHECK();
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	DEBUG_ERROR_CHECK();
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	if (flags & MBV_BLITFLAGS_ALPHABLEND) {
 		glDisable(GL_BLEND);
 	}
 
-	DEBUG_ERROR_CHECK();
 	return 0;
 }
 
@@ -315,11 +479,11 @@ surface_unlock(struct mbv_surface * const inst)
 	ASSERT(inst->lockflags != 0);
 
 	if (inst->lockflags & MBV_LOCKFLAGS_WRITE) {
+		const int y = inst->real->h - (inst->realy + inst->h);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-		glPixelStorei(GL_UNPACK_ROW_LENGTH, inst->pitch / 4);
 		glBindTexture(GL_TEXTURE_2D, inst->texture);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, inst->realx, inst->realy, inst->w, inst->h,
-			GL_BGRA, GL_UNSIGNED_BYTE, inst->buf);
+		avbox_glTexSubImage2D(GL_TEXTURE_2D, 0, inst->realx, y, inst->w, inst->h,
+			GL_RGBA, GL_UNSIGNED_BYTE, inst->buf, inst->pitch, 4);
 		DEBUG_ERROR_CHECK();
 	}
 	inst->lockflags = 0;
@@ -330,24 +494,26 @@ static inline
 void
 surface_render(struct mbv_surface * const inst, unsigned int flags, GLenum buffer)
 {
-	if (flags & MBV_BLITFLAGS_ALPHABLEND) {
-		glEnable(GL_BLEND);
-	}
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	DEBUG_ERROR_CHECK();
+
+	glVertexAttribPointer(bgra_texcoords, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
+	glEnableVertexAttribArray(bgra_texcoords);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
 	glUseProgram(bgra_program);
 	glBindTexture(GL_TEXTURE_2D, inst->texture);
 	glUniform1i(bgra_texture, 0);
-	glVertexAttribPointer(bgra_pos, 2, GL_FLOAT, GL_FALSE, 0, vertices);
-	glVertexAttribPointer(bgra_texcoords, 2, GL_FLOAT, GL_FALSE, 0, display_texcoords);
-	glEnableVertexAttribArray(bgra_pos);
-	glEnableVertexAttribArray(bgra_texcoords);
-	glViewport(inst->x, root_surface->h - (inst->y + inst->h), inst->w, inst->h);
-	glDrawBuffer(buffer);
+	glUniform1i(bgra_target, TARGET_DISPLAY);
+	glViewport(inst->x, inst->y, inst->w, inst->h);
+	DEBUG_ERROR_CHECK();
+
+#ifndef ENABLE_GLES2
+	/* glDrawBuffer(buffer); */
+#endif
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-	glFlush();
-	if (flags & MBV_BLITFLAGS_ALPHABLEND) {
-		glDisable(GL_BLEND);
-	}
+	DEBUG_ERROR_CHECK();
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	DEBUG_ERROR_CHECK();
 }
 
@@ -366,6 +532,9 @@ surface_update(struct mbv_surface * const inst, int blitflags, int update)
 		swap_buffers();
 	} else {
 		if (update) {
+			/* this works with OpenGL under X but it doesn't
+			 * work under DRM/EGL so at the moment this code will
+			 * never run as it's disable on video.c */
 			surface_render(inst, blitflags, GL_FRONT);
 		} else {
 			surface_blit(root_surface, inst, blitflags, inst->x, inst->y);
@@ -425,17 +594,18 @@ avbox_video_opengl_compile_program(const char *name,
 	program = glCreateProgram();
 	glCompileShader(vertex);
 	glCompileShader(fragment);
+	DEBUG_ERROR_CHECK();
 
 #ifndef NDEBUG
 	GLsizei len;
 	char log[4096];
 	/* print logs */
 	glGetShaderInfoLog(vertex, 4096, &len, log);
-	if (strcmp(log, "")) {
+	if (strcmp(log, "") && len > 0) {
 		LOG_VPRINT_ERROR("vertex: %s", log);
 	}
 	glGetShaderInfoLog(fragment, 4096, &len, log);
-	if (strcmp(log, "")) {
+	if (strcmp(log, "") && len > 0) {
 		LOG_VPRINT_ERROR("fragment: %s", log);
 	}
 #endif
@@ -447,7 +617,7 @@ avbox_video_opengl_compile_program(const char *name,
 
 #ifndef NDEBUG
 	glGetProgramInfoLog(program, 4086, &len, log);
-	if (strcmp(log, "")) {
+	if (strcmp(log, "") && len > 0) {
 		LOG_VPRINT_ERROR("Link: %s", log);
 	}
 #endif
@@ -462,7 +632,7 @@ avbox_video_opengl_compile_program(const char *name,
 static void
 avbox_video_opengl_prepare_shaders(void)
 {
-	const char * bgra_vertex_source = GLSL(120,
+	const char * vertex_source = GLSL(120,
 		attribute vec4 pos;
 		attribute vec2 texcoords;
 		varying vec2 v_texcoords;
@@ -473,10 +643,15 @@ avbox_video_opengl_prepare_shaders(void)
 		});
 	const char * bgra_fragment_source = GLSL(120,
 		uniform sampler2D texture;
+		uniform int target;
 		varying vec2 v_texcoords;
 		void main()
 		{
-			gl_FragColor = texture2D(texture, v_texcoords).rgba;
+			if (target == 1) {
+				gl_FragColor = vec4(texture2D(texture, v_texcoords).rgb, 1.0);
+			} else {
+				gl_FragColor = texture2D(texture, v_texcoords).bgra;
+			}
 		});
 
 	const char * yuv420p_vertex_source = GLSL(120,
@@ -530,14 +705,14 @@ avbox_video_opengl_prepare_shaders(void)
 			float b = y + 1.1772 * u;
 			*/
 
-			gl_FragColor = vec4(r,g,b,1);
+			gl_FragColor = vec4(b,g,r,1);
 
 		});
 
 
 	DEBUG_PRINT(LOG_MODULE, "Compiling shaders...");
 	bgra_program = avbox_video_opengl_compile_program("bgra",
-		bgra_vertex_source, bgra_fragment_source);
+		vertex_source, bgra_fragment_source);
 	yuv420p_program = avbox_video_opengl_compile_program("yuv420p",
 		yuv420p_vertex_source, yuv420p_fragment_source);
 
@@ -552,7 +727,28 @@ avbox_video_opengl_prepare_shaders(void)
 	bgra_pos = glGetAttribLocation(bgra_program, "pos");
 	bgra_texcoords = glGetAttribLocation(bgra_program, "texcoords");
 	bgra_texture = glGetUniformLocation(bgra_program, "texture");
+	bgra_target = glGetUniformLocation(bgra_program, "target");
 	DEBUG_ERROR_CHECK();
+
+#ifdef ENABLE_VC4
+	const char * mmal_fragment_source =
+		"#extension GL_OES_EGL_image_external : require\n"
+		"varying vec2 v_texcoords;\n"
+		"uniform samplerExternalOES zztexture;\n"
+		"void main()\n"
+		"{\n"
+		"	gl_FragColor = texture2D(zztexture, v_texcoords).bgra;\n"
+		"}\n";
+
+	mmal_program = avbox_video_opengl_compile_program("mmal",
+		vertex_source, mmal_fragment_source);
+	mmal_pos = glGetAttribLocation(mmal_program, "pos");
+	mmal_texcoords = glGetAttribLocation(mmal_program, "texcoords");
+	mmal_texture = glGetUniformLocation(mmal_program, "zztexture");
+	DEBUG_ERROR_CHECK();
+#endif
+
+
 }
 
 
@@ -563,6 +759,12 @@ struct mbv_surface *
 avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int height,
 	void (*swap_buffers_fn)(void))
 {
+
+	const GLfloat vertices[] = { -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f };
+
+	DEBUG_VPRINT(LOG_MODULE, "Initializing GL driver (width=%d, height=%d)",
+		width, height);
+
 #ifndef NDEBUG
 	/* remember the main thread */
 	gl_thread = pthread_self();
@@ -574,6 +776,7 @@ avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int heig
 	swap_buffers = swap_buffers_fn;
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	DEBUG_ERROR_CHECK();
 
 	/* create the root surface */
 	if ((root_surface = surface_new(NULL, 0, 0, width, height)) == NULL) {
@@ -584,7 +787,9 @@ avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int heig
 	LOG_VPRINT_INFO("Vendor:\t%s", glGetString(GL_VENDOR));
 	LOG_VPRINT_INFO("Renderer:\t%s", glGetString(GL_RENDERER));
 	LOG_VPRINT_INFO("Version:\t%s", glGetString(GL_VERSION));
+#ifndef ENABLE_GLES2
 	LOG_VPRINT_INFO("GLSL:\t%s", glGetString(GL_SHADING_LANGUAGE_VERSION));
+#endif
 
 #if 0
 	char *gl_exts;
@@ -604,6 +809,20 @@ avbox_video_glinit(struct mbv_drv_funcs * const funcs, int width, const int heig
 #endif
 
 	avbox_video_opengl_prepare_shaders();
+
+	/* upload surface vertices to buffer object */
+	glGenBuffers(1, &vertex_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), 
+		vertices, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+	glVertexAttribPointer(bgra_pos, 2, GL_FLOAT, GL_FALSE, 0, 0);
+	glEnableVertexAttribArray(bgra_pos);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	DEBUG_ERROR_CHECK();
+
+	glVertexAttribPointer(yuv420p_texcoords, 2, GL_FLOAT, GL_FALSE, 0, texcoords_yuv);
+	glEnableVertexAttribArray(yuv420p_texcoords);
 
 	return root_surface;
 }

@@ -14,17 +14,33 @@ MEDIABOX_LICENSE = OTHER
 MEDIABOX_LICENSE_FILES = COPYING
 MEDIABOX_INSTALL_STAGING = NO
 MEDIABOX_AUTORECONF = YES
-MEDIABOX_DEPENDENCIES = libcurl libupnp directfb openssl mediatomb avmount
+MEDIABOX_DEPENDENCIES = libcurl libupnp openssl mediatomb avmount pango cairo \
+	alsa-lib ffmpeg
 
-MEDIABOX_CONF_OPTS = --without-systemd
+MEDIABOX_CONF_OPTS = --without-systemd --enable-ionice
 
 ifeq ($(BR2_PACKAGE_MEDIABOX_DEBUG),y)
 MEDIABOX_CONF_OPTS += --enable-debug
 endif
 
+ifeq ($(BR2_PACKAGE_MEDIABOX_DIRECTFB),y)
+MEDIABOX_CONF_OPTS += --enable-directfb
+MEDIABOX_DEPENDENCIES += directfb
+endif
+
+ifeq ($(BR2_PACKAGE_MEDIABOX_LIBINPUT),y)
+MEDIABOX_CONF_OPTS += --enable-libinput
+MEDIABOX_DEPENDENCIES += libinput
+endif
+
 ifeq ($(BR2_PACKAGE_MEDIABOX_BLUETOOTH),y)
-MEDIABOX_DEPENDENCIES += bluealsa
+MEDIABOX_DEPENDENCIES += bluez5_utils bluealsa
 MEDIABOX_CONF_OPTS += --enable-bluetooth
+endif
+
+ifeq ($(BR2_PACKAGE_MEDIABOX_VC4),y)
+MEDIABOX_CONF_OPTS += --enable-vc4
+MEDIABOX_DEPENDENCIES += rpi-userland
 endif
 
 # we need xorg here just so we can get a
@@ -32,7 +48,7 @@ endif
 # need this
 ifeq ($(BR2_PACKAGE_MEDIABOX_LIBDRM),y)
 MEDIABOX_CONF_OPTS += --enable-libdrm
-MEDIABOX_DEPENDENCIES += libdrm mesa3d xserver_xorg-server
+MEDIABOX_DEPENDENCIES += libdrm mesa3d
 endif
 
 ifeq ($(BR2_PACKAGE_MEDIABOX_X11),y)

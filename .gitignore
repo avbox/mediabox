@@ -36,3 +36,4 @@ config.log
 config.status
 compile
 depcomp
+ar-lib

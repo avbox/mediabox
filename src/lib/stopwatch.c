@@ -3,6 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/time.h>
+#include <inttypes.h>
 
 #define LOG_MODULE "stopwatch"
 
@@ -28,10 +29,17 @@ void
 avbox_stopwatch_reset(struct avbox_stopwatch * const inst, int64_t value)
 {
 	struct timespec now;
+	DEBUG_VPRINT(LOG_MODULE, "Resseting stopwath to %"PRIi64,
+		value);
+
 	clock_gettime(CLOCK_ID, &now);
+	ASSERT(now.tv_sec >= 0 && now.tv_nsec >= 0);
 	inst->reset = utimediff(&now, NULL);
 	inst->value = value;
 	inst->running = 0;
+
+	DEBUG_VPRINT(LOG_MODULE, "After reset inst->value=%"PRIi64" value=%"PRIi64" time=%"PRIi64,
+		inst->value, value, avbox_stopwatch_time(inst));
 }
 
 
@@ -44,7 +52,10 @@ avbox_stopwatch_time(const struct avbox_stopwatch * const inst)
 	if (inst->running) {
 		struct timespec now;
 		clock_gettime(CLOCK_ID, &now);
-		return (utimediff(&now, NULL) - inst->reset) + inst->value;
+		const int64_t ret = (utimediff(&now, NULL) - inst->reset) + inst->value;
+		/* DEBUG_VPRINT(LOG_MODULE, "Returning %"PRIi64" now_s=%"PRIi64" now_ns=%"PRIi64" reset=%"PRIi64" value=%"PRIi64,
+			ret, (int64_t) now.tv_sec, (int64_t) now.tv_nsec, inst->reset, inst->value); */
+		return ret;
 	} else {
 		return inst->value;
 	}
@@ -72,7 +83,6 @@ void
 avbox_stopwatch_stop(struct avbox_stopwatch * const inst)
 {
 	ASSERT(inst != NULL);
-	ASSERT(inst->running);
 	avbox_stopwatch_reset(inst,
 		avbox_stopwatch_time(inst));
 }

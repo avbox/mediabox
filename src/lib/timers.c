@@ -65,7 +65,7 @@ static int nextid = 1;
  * mbt_timers_thread() -- Waits until the next timer should elapsed,
  * processes it, and goes back to sleep
  */
-void *
+static void *
 avbox_timers_thread(void *arg)
 {
 	struct timespec last_sleep, elapsed, now, sleeptime;
@@ -164,13 +164,13 @@ avbox_timers_getnextid(void)
 /**
  * Cancel a timer.
  */
-int
+EXPORT int
 avbox_timer_cancel(int timer_id)
 {
 	struct avbox_timer_state *tmr;
 	int ret = -1;
 
-	DEBUG_VPRINT("timers", "Cancelling timer id %i", timer_id);
+	/* DEBUG_VPRINT("timers", "Cancelling timer id %i", timer_id); */
 
 	pthread_mutex_lock(&timers_lock);
 
@@ -192,10 +192,11 @@ avbox_timer_cancel(int timer_id)
 /**
  * Register a timer.
  */
-int
+EXPORT int
 avbox_timer_register(struct timespec *interval,
 	enum avbox_timer_flags flags, struct avbox_object *msgobj, avbox_timer_callback func, void *data)
 {
+	int ret = -1;
 	struct avbox_timer_state *timer;
 
 	/* DEBUG_PRINT("timers", "Registering timer"); */
@@ -218,21 +219,21 @@ avbox_timer_register(struct timespec *interval,
 
 	/* add entry to list */
 	pthread_mutex_lock(&timers_lock);
-	timer->public.id = avbox_timers_getnextid();
+	ret = timer->public.id = avbox_timers_getnextid();
 	LIST_ADD(&timers, timer);
 	pthread_mutex_unlock(&timers_lock);
 
 	/* wake the timers thread */
 	pthread_cond_signal(&timers_signal);
 
-	return timer->public.id;
+	return ret;
 }
 
 
 /**
  * Initialize the timers system.
  */
-int
+INTERNAL int
 avbox_timers_init(void)
 {
 	DEBUG_PRINT("timers", "Initializing timers system");
@@ -251,7 +252,7 @@ avbox_timers_init(void)
 /**
  * Shutdown the timers system.
  */
-void
+INTERNAL void
 avbox_timers_shutdown(void)
 {
 	struct avbox_timer_state *tmr;
@@ -267,4 +268,3 @@ avbox_timers_shutdown(void)
 		free(tmr);
 	});
 }
-

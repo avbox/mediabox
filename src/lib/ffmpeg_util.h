@@ -62,6 +62,7 @@ avbox_pixfmt_to_libav(enum avbox_pixel_format pix_fmt)
 	case AVBOX_PIXFMT_UNKNOWN: return 0;
 	case AVBOX_PIXFMT_BGRA: return AV_PIX_FMT_BGRA;
 	case AVBOX_PIXFMT_YUV420P: return AV_PIX_FMT_YUV420P;
+	case AVBOX_PIXFMT_MMAL: return 0;
 	}
 	return 0;
 }

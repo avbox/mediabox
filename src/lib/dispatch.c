@@ -256,7 +256,7 @@ avbox_object_handler(struct avbox_object *object, struct avbox_message * const m
 /**
  * Get the type of a message
  */
-int
+EXPORT int
 avbox_message_id(struct avbox_message * const msg)
 {
 	ASSERT(msg != NULL);
@@ -267,7 +267,7 @@ avbox_message_id(struct avbox_message * const msg)
 /**
  * Get the message payload.
  */
-void *
+EXPORT void *
 avbox_message_payload(struct avbox_message * const msg)
 {
 	ASSERT(msg != NULL);
@@ -278,7 +278,7 @@ avbox_message_payload(struct avbox_message * const msg)
 /**
  * Gets a message from the queue.
  */
-struct avbox_message*
+INTERNAL struct avbox_message*
 avbox_dispatch_getmsg(void)
 {
 	struct avbox_message *msg;
@@ -310,7 +310,7 @@ avbox_dispatch_getmsg(void)
 /**
  * Peek the next message in the thread's queue.
  */
-struct avbox_message *
+INTERNAL struct avbox_message *
 avbox_dispatch_peekmsg(void)
 {
 	struct avbox_message *msg;
@@ -336,7 +336,6 @@ avbox_dispatch_peekmsg(void)
 	}
 
 	return msg;
-
 }
 
 
@@ -381,7 +380,7 @@ avbox_dispatch_destdup(struct avbox_object **dest)
 /**
  * Sends a message.
  */
-struct avbox_message*
+EXPORT struct avbox_message*
 avbox_object_sendmsg(struct avbox_object **dest,
 	int id, int flags, void * const payload)
 {
@@ -453,7 +452,7 @@ avbox_object_sendmsg(struct avbox_object **dest,
  * EINVAL - The queue for this thread has not been initialized.
  * ENOMEM - Out of memory.
  */
-struct avbox_object*
+EXPORT struct avbox_object*
 avbox_object_new(avbox_message_handler handler, void *context)
 {
 	struct avbox_object *obj;
@@ -494,7 +493,7 @@ avbox_object_new(avbox_message_handler handler, void *context)
 /**
  * Destroy a dispatch object.
  */
-void
+EXPORT void
 avbox_object_destroy(struct avbox_object * object)
 {
 	ASSERT(object != NULL);
@@ -509,7 +508,7 @@ avbox_object_destroy(struct avbox_object * object)
 /**
  * Initialized a dispatch queue for the current thread.
  */
-int
+INTERNAL int
 avbox_dispatch_init()
 {
 	struct avbox_dispatch_queue *q;
@@ -551,7 +550,7 @@ avbox_dispatch_init()
 /**
  * Close the dispatch queue.
  */
-void
+INTERNAL void
 avbox_dispatch_close(void)
 {
 	struct avbox_dispatch_queue *q;
@@ -567,7 +566,7 @@ avbox_dispatch_close(void)
 /**
  * Destroys the queue for the current thread.
  */
-void
+INTERNAL void
 avbox_dispatch_shutdown(void)
 {
 	struct avbox_dispatch_queue *q;
@@ -608,7 +607,7 @@ avbox_dispatch_shutdown(void)
 /**
  * Run the main dispatch loop
  */
-void
+INTERNAL void
 avbox_message_dispatch(struct avbox_message * msg)
 {
 	assert(msg != NULL);

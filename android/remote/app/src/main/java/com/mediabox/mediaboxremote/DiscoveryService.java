@@ -3,8 +3,10 @@ package com.mediabox.mediaboxremote;
 import android.app.Service;
 import android.content.Intent;
 import android.os.Binder;
+import android.os.Handler;
 import android.os.IBinder;
 import android.util.Log;
+import android.widget.Toast;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -13,6 +15,7 @@ import java.net.UnknownHostException;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.concurrent.RunnableFuture;
 
 public class DiscoveryService extends Service
 {
@@ -23,6 +26,7 @@ public class DiscoveryService extends Service
     private static final int ANNOUNCEMENTS_PORT = 49550;
 
     private DatagramSocket socket = null;
+    private Handler main_thread = null;
     private final ServiceBinder binder = new ServiceBinder();
     private final Object device_list_lock = new Object();
     private final Map<String, Device> device_list = new HashMap<>();
@@ -70,28 +74,6 @@ public class DiscoveryService extends Service
         @Override
         public void run()
         {
-            InetAddress ip = null;
-            while (!Thread.interrupted())
-            {
-                try
-                {
-                    ip = InetAddress.getByName("255.255.255.255");
-                    break;
-                }
-                catch (UnknownHostException e)
-                {
-                    Log.d("DiscoveryService", "Could not resolve 255.255.255.255!!");
-                    try
-                    {
-                        Thread.sleep(10 * 1000L);
-                    }
-                    catch (InterruptedException ex)
-                    {
-                        /* nothing */
-                    }
-                }
-            }
-
             while (!Thread.interrupted())
             {
                 try
@@ -99,7 +81,7 @@ public class DiscoveryService extends Service
                     byte[] buf = new byte[15000];
                     if (socket == null || socket.isClosed())
                     {
-                        socket = new DatagramSocket(ANNOUNCEMENTS_PORT, ip);
+                        socket = new DatagramSocket(ANNOUNCEMENTS_PORT);
                         socket.setBroadcast(true);
                     }
 
@@ -109,11 +91,19 @@ public class DiscoveryService extends Service
                     processMessage(packet.getAddress().getHostAddress(),
                             new String(packet.getData()).trim());
                 }
-                catch (Exception ex)
+                catch (final Exception ex)
                 {
                     Log.d("DiscoveryService", ex.toString());
                     try
                     {
+                        main_thread.post(new Runnable() {
+                             @Override
+                             public void run() {
+                                 Toast.makeText(DiscoveryService.this,
+                                         String.format("Listen %s", ex.getMessage()),
+                                         Toast.LENGTH_LONG).show();
+                             }
+                         });
                         Thread.sleep(10 * 1000L);
                     }
                     catch (InterruptedException e)
@@ -197,6 +187,7 @@ public class DiscoveryService extends Service
     public void onCreate()
     {
         super.onCreate();
+        this.main_thread = new Handler();
         this.listener_thread.start();
         this.gc_thread.start();
     }

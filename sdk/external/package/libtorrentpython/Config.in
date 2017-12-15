@@ -1,0 +1,8 @@
+config BR2_PACKAGE_LIBTORRENTPYTHON
+	bool "libtorrent-rasterbar python bindings"
+	depends on BR2_PACKAGE_LIBTORRENTRB
+	select BR2_PACKAGE_BOOST_PYTHON
+	help
+	  Command-line bittorrent client.
+
+	  http://deluge-torrent.org

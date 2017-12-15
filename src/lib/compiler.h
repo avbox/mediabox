@@ -38,4 +38,18 @@
 #define ATOMIC_INC(addr) (__sync_fetch_and_add(addr, 1))
 #define ATOMIC_DEC(addr) (__sync_fetch_and_sub(addr, 1))
 
+/*
+ * Access modifiers.
+ *
+ * STATIC - directly accessible only in file scope
+ * INTERNAL - directly accessible to other objects at link-time but not exported
+ * EXPORT - exported and can be overriden by LD_PRELOAD
+ * PROTECTED - exported and cannot be overriden.
+ */
+#define STATIC		static
+#define INTERNAL	__attribute__ ((visibility("hidden")))
+#define EXPORT		__attribute__ ((visibility("default")))
+#define PROTECTED	__attribute__ ((visibility("protected")))
+
+
 #endif

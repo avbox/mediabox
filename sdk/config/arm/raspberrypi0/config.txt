@@ -1,0 +1,25 @@
+# Please note that this is only a sample, we recommend you to change it to fit
+# your needs.
+# You should override this file using a post-build script.
+# See http://buildroot.org/manual.html#rootfs-custom
+# and http://elinux.org/RPiconfig for a description of config.txt syntax
+
+kernel=zImage
+
+# Disable overscan assuming the display supports displaying the full resolution
+# If the text shown on the screen disappears off the edge, comment this out
+# disable_overscan=1
+
+#sdtv_mode=0
+#hdmi_drive=2
+#hdmi_ignore_hotplug=1
+#force_hdmi_hotplug=1
+disable_splash=1
+
+dtparam=audio=on
+dtoverlay=dwc2
+dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
+
+# How much memory in MB to assign to the GPU on Pi models having
+# 256, 512 or 1024 MB total memory
+gpu_mem_512=128

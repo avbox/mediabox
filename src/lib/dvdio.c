@@ -724,7 +724,7 @@ avbox_dvdio_destroy(struct avbox_dvdio * const inst)
 /**
  * Opens a DVD device for reading.
  */
-struct avbox_player_stream *
+INTERNAL struct avbox_player_stream *
 avbox_dvdio_open(const char * const path, struct avbox_player * const player,
 	struct avbox_player_stream * const stream)
 {

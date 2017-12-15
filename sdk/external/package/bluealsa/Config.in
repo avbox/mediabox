@@ -1,8 +1,10 @@
 config BR2_PACKAGE_BLUEALSA
 	bool "bluealsa"
 	depends on BR2_TOOLCHAIN_HAS_THREADS_NPTL
-	depends on BR2_TOOLCHAIN_GCC_AT_LEAST_4_5
-	depends on !BR2_TOOLCHAIN_USES_MUSL # sigval_t issue
-	depends on BR2_PACKAGE_READLINE
+	select BR2_PACKAGE_READLINE
+	select BR2_PACKAGE_BLUEZ5_UTILS
+	select BR2_PACKAGE_SBC
+	select BR2_PACKAGE_ORTP
+	select BR2_PACKAGE_LIBBSD
 	help
-	  Set-top box system.
+	  ALSA <-> Bluetooth bridge.

@@ -34,7 +34,6 @@
 
 #include "video.h"
 #include "video-drv.h"
-#include "video-directfb.h"
 #include "input.h"
 #include "../debug.h"
 #include "../linkedlist.h"
@@ -43,15 +42,19 @@
 #include "../delegate.h"
 
 
-#define ENABLE_DIRECTFB 1
 #define FORCE_FULL_SCREEN_REPAINTS 1
 
-
+#ifdef ENABLE_DIRECTFB
+#	include "video-directfb.h"
+#endif
+#ifdef ENABLE_VC4
+#	include "video-vc4.h"
+#endif
 #ifdef ENABLE_LIBDRM
-#include "video-drm.h"
+#	include "video-drm.h"
 #endif
 #ifdef ENABLE_X11
-#include "video-x11.h"
+#	include "video-x11.h"
 #endif
 
 #define ALIGNED(addr, bytes) \
@@ -88,6 +91,7 @@ struct avbox_window
 	int flags;
 	int damaged;
 	int decor_dirty;
+	int dirty;
 	uint32_t foreground_color;
 	uint32_t background_color;
 	void *user_context;
@@ -160,7 +164,7 @@ __window_cairobegin(struct avbox_window * const window)
 	int pitch;
 	void *buf;
 
-	assert(window != NULL);
+	ASSERT(window != NULL);
 
 	if ((buf = driver.surface_lock(window->surface, MBV_LOCKFLAGS_READ | MBV_LOCKFLAGS_WRITE, &pitch)) == NULL) {
 		LOG_PRINT_ERROR("Could not lock surface!!!");
@@ -175,11 +179,14 @@ __window_cairobegin(struct avbox_window * const window)
 	}
 
 	window->cairo_context = cairo_create(surface);
-	cairo_surface_destroy(surface);
 	if (window->cairo_context == NULL) {
 		driver.surface_unlock(window->surface);
+	} else {
+		cairo_set_operator(window->cairo_context, CAIRO_OPERATOR_SOURCE);
 	}
-		
+
+	cairo_surface_destroy(surface);
+
 	return window->cairo_context;
 }
 
@@ -302,7 +309,7 @@ void avbox_window_cairo_end(struct avbox_window * const window)
 void avbox_window_clear(struct avbox_window * const window)
 {
 	assert(window != NULL);
-	__window_clear(window, window->background_color);
+	__window_clear(window, AVBOX_COLOR_PREMULT(window->background_color));
 }
 
 
@@ -602,11 +609,9 @@ avbox_window_paint(struct avbox_window * const window, int update)
 		blitflags |= MBV_BLITFLAGS_ALPHABLEND;
 	}
 
-	/* if the window has no repaint handler then
-	 * just invoke the repaint handler for all child
-	 * windows */
-	if (window->paint != NULL) {
-		/* invoke the user-defined repaint handler */
+	/* if the window is dirty invoke the user defined
+	 * paint handler */
+	if (window->paint != NULL && window->dirty) {
 		window->paint(window, window->draw_context);
 	}
 
@@ -646,12 +651,8 @@ avbox_window_paintdecor(struct avbox_window * const window, void * const ctx)
 {
 	cairo_t *context;
 	PangoLayout *layout;
-	int font_height = default_font_height;
 
-	assert(window->content_window != window); /* is a window WITH title */
-
-	/* DEBUG_VPRINT("video", "avbox_window_repaint_decoration(\"%s\")",
-		window->identifier); */
+	ASSERT(window->content_window != window); /* is a window WITH title */
 
 	if (window->decor_dirty) {
 		if ((context = __window_cairobegin(window)) != NULL) {
@@ -659,16 +660,36 @@ avbox_window_paintdecor(struct avbox_window * const window, void * const ctx)
 			/* first clear the title window */
 			cairo_move_to(context, 0, 0);
 			cairo_line_to(context, window->rect.w, 0);
-			cairo_line_to(context, window->rect.w, font_height + FONT_PADDING);
-			cairo_line_to(context, 0, font_height + FONT_PADDING);
+			cairo_line_to(context, window->rect.w, window->rect.h);
+			cairo_line_to(context, 0, window->rect.h);
 			cairo_line_to(context, 0, 0);
-			cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->background_color));
+			cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(AVBOX_COLOR(0xcccccc00)));
 			cairo_fill(context);
 
-			if ((layout = pango_cairo_create_layout(context)) != NULL) {
+			/* a custom shape that could be wrapped in a function */
+			const double degrees = M_PI / 180.0;
+			const double x = 0;
+			const double y = 0;
+			const double w = (double) window->rect.w;
+			const double h = (double) window->rect.h;
+			const double corner_radius = 19.0;
+			const double aspect = 1.0;
+			const double radius = corner_radius / aspect;
 
-				/* DEBUG_VPRINT("video", "Font size %i",
-					mbv_getfontsize(font_desc) / PANGO_SCALE); */
+			cairo_new_sub_path(context);
+			cairo_arc(context, x + w - radius, y + radius, radius, -90 * degrees, 0 * degrees);
+			cairo_arc(context, x + w - radius, y + h - radius, radius, 0 * degrees, 90 * degrees);
+			cairo_arc(context, x + radius, y + h - radius, radius, 90 * degrees, 180 * degrees);
+			cairo_arc(context, x + radius, y + radius, radius, 180 * degrees, 270 * degrees);
+			cairo_close_path(context);
+
+			cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->background_color));
+			cairo_fill_preserve(context);
+			cairo_set_source_rgba(context, CAIRO_COLOR_RGBA(window->foreground_color));
+			cairo_set_line_width(context, 2.0);
+			cairo_stroke(context);
+
+			if ((layout = pango_cairo_create_layout(context)) != NULL) {
 
 				pango_layout_set_font_description(layout, font_desc);
 				pango_layout_set_width(layout, window->rect.w * PANGO_SCALE);
@@ -682,12 +703,6 @@ avbox_window_paintdecor(struct avbox_window * const window, void * const ctx)
 
 				/* free the layout */
 				g_object_unref(layout);
-
-				/* draw line after title */
-				cairo_set_line_width(context, 2.0);
-				cairo_move_to(context, 0, font_height + FONT_PADDING);
-				cairo_line_to(context, window->rect.w, font_height + FONT_PADDING);
-				cairo_stroke(context);
 
 				window->decor_dirty = 0;
 
@@ -898,6 +913,7 @@ avbox_window_subwindow(struct avbox_window * const window,
 	new_window->background_color = window->background_color;
 	new_window->decor_dirty = 1;
 	new_window->damaged = 0;
+	new_window->dirty = 1;
 	new_window->stack_node.window = new_window;
 	LIST_INIT(&new_window->children);
 
@@ -933,6 +949,24 @@ avbox_window_subwindow(struct avbox_window * const window,
 }
 
 
+/**
+ * Get the window's dirty bit
+ */
+int
+avbox_window_dirty(const struct avbox_window * const window)
+{
+	return window->dirty;
+}
+
+
+/**
+ * Set the window's dirty bit.
+ */
+void
+avbox_window_setdirty(struct avbox_window * const window, int value)
+{
+	window->dirty = (value != 0);
+}
 
 
 /**
@@ -1003,6 +1037,7 @@ avbox_window_new(
 	window->parent = &root_window;
 	window->visible = 0;
 	window->decor_dirty = 1;
+	window->dirty = 1;
 	window->damaged = 0;
 	window->stack_node.window = window;
 
@@ -1050,8 +1085,8 @@ avbox_window_new(
 
 		window->paint = &avbox_window_paintdecor;
 		window->content_window = avbox_window_new(window,
-			cidentifier, subflags, 0, (font_height + (FONT_PADDING)),
-			w, h - (font_height + (FONT_PADDING)),
+			cidentifier, subflags, 5, (font_height + (FONT_PADDING)),
+			w - 10, h - (font_height + (FONT_PADDING)) - 5,
 			NULL,
 			draw, NULL);
 		if (window->content_window == NULL) {
@@ -1399,7 +1434,8 @@ avbox_video_drm_working()
 #endif
 
 
-#ifdef ENABLE_DIRECTFB
+#if defined(ENABLE_DIRECTFB) && \
+	(defined(ENABLE_LIBDRM) || defined(ENABLE_X11) || defined(ENABLE_VC4))
 static int
 avbox_video_directfb_working()
 {
@@ -1415,7 +1451,9 @@ int
 avbox_video_init(int argc, char **argv)
 {
 	int w = 0, h = 0, i;
+#ifdef ENABLE_X11
 	int startx = 0;
+#endif
 	char font_desc_str[16];
 	char *driver_string = NULL;
 
@@ -1426,14 +1464,18 @@ avbox_video_init(int argc, char **argv)
 			char *arg = argv[i] + 8;
 			if (!strncmp(arg, "driver=", 7)) {
 				driver_string = arg + 7;
+#ifdef ENABLE_X11
 			} else if (!strcmp("startx", arg)) {
 				startx = 1;
+#endif
 			}
 		}
 	}
 
 	if (driver_string == NULL) {
-#ifdef ENABLE_LIBDRM
+#ifdef ENABLE_VC4
+		driver_string = "vc4";
+#elif defined(ENABLE_LIBDRM)
 #ifdef ENABLE_X11
 		if (getenv("DISPLAY") != NULL) {
 			driver_string = "x11";
@@ -1466,7 +1508,7 @@ avbox_video_init(int argc, char **argv)
 #elif defined(ENABLE_X11)
 		if (getenv("DISPLAY") != NULL) {
 			driver_string = "x11";
-		} else if (startx && avbox_player_can_startx()) {
+		} else if (startx && avbox_video_can_startx()) {
 			avbox_video_startx();
 			driver_string = "x11";
 		} else
@@ -1475,16 +1517,20 @@ avbox_video_init(int argc, char **argv)
 			driver_string = "directfb";
 		} else
 #endif
-		if (avbox_player_can_startx()) {
-			avbox_player_startx();
+		if (avbox_video_can_startx()) {
+			avbox_video_startx();
 			driver_string = "x11";
 		} else {
 			driver_string = "null";
 		}
 
 /*** We only have DirectFB ***/
+#elif defined(ENABLE_DIRECTFB)
+		driver_string = "directfb";
+
+/*** we have no video :( **/
 #else
-		driver_string = "directfb"
+		driver_string = "";
 #endif
 	}
 
@@ -1504,6 +1550,17 @@ avbox_video_init(int argc, char **argv)
 	}
 #endif
 
+#ifdef ENABLE_VC4
+	if (!strcmp(driver_string, "vc4")) {
+		/* attempt to initialize the vc4 driver */
+		avbox_video_vc4_initft(&driver);
+		root_window.surface = driver.init(&driver, argc, argv, &w, &h);
+		if (root_window.surface == NULL) {
+			LOG_PRINT_ERROR("Could not initialize VC4 driver!");
+		}
+	}
+#endif
+
 #if ENABLE_X11
 	if (!strcmp(driver_string, "x11")) {
 		avbox_video_x11_initft(&driver);
@@ -1513,6 +1570,7 @@ avbox_video_init(int argc, char **argv)
 		}
 	}
 #endif
+#ifdef ENABLE_DIRECTFB
 	if (!strcmp(driver_string, "directfb")) {
 		/* initialize directfb driver */
 		mbv_dfb_initft(&driver);
@@ -1521,6 +1579,7 @@ avbox_video_init(int argc, char **argv)
 			LOG_PRINT_ERROR("Could not initialize DirectFB driver. Exiting!");
 		}
 	}
+#endif
 
 	if (root_window.surface == NULL) {
 		LOG_PRINT_ERROR("Could not find a suitable driver!");
@@ -1544,6 +1603,7 @@ avbox_video_init(int argc, char **argv)
 	root_window.object = NULL;
 	root_window.flags = AVBOX_WNDFLAGS_NONE;
 	root_window.stack_node.window = &root_window;
+	root_window.dirty = 1;
 
 	if ((root_window.identifier = strdup("root_window")) == NULL) {
 		ASSERT(errno == ENOMEM);

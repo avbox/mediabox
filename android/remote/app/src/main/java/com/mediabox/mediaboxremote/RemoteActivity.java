@@ -8,33 +8,27 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.graphics.Point;
-import android.net.Uri;
+import android.os.Handler;
 import android.os.Parcelable;
 import android.preference.PreferenceManager;
 import android.support.v4.app.DialogFragment;
 import android.support.v4.app.FragmentManager;
-import android.support.v4.app.FragmentTransaction;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.Display;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
 import android.widget.Toast;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetAddress;
@@ -49,6 +43,7 @@ public class RemoteActivity extends AppCompatActivity
     private Socket socket = null;
     private BluetoothSocket btsocket = null;
     private BluetoothAdapter btdev = BluetoothAdapter.getDefaultAdapter();
+    private Handler mHandler = null;
 
     private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
         public void onReceive(Context context, Intent intent)
@@ -212,7 +207,7 @@ public class RemoteActivity extends AppCompatActivity
     protected void onCreate(Bundle savedInstanceState)
     {
         super.onCreate(savedInstanceState);
-
+        mHandler = new Handler();
         setContentView(R.layout.activity_remote);
 
         /* Start the discovery service */
@@ -222,6 +217,7 @@ public class RemoteActivity extends AppCompatActivity
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         /* Enable the action bar even on devices with a menu key */
+        /*
         try
         {
             ViewConfiguration config = ViewConfiguration.get(this);
@@ -234,8 +230,8 @@ public class RemoteActivity extends AppCompatActivity
         }
         catch (Exception ex)
         {
-            /* Nothing */
         }
+        */
 
         this.findViewById(R.id.btnMenu).setOnLongClickListener(new View.OnLongClickListener() {
             @Override
@@ -318,7 +314,11 @@ public class RemoteActivity extends AppCompatActivity
             SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
             SharedPreferences.Editor editor = prefs.edit();
             editor.putString("device", BT_ADDRESS);
-            editor.apply();
+            if (android.os.Build.VERSION.SDK_INT >= 9) {
+                editor.apply();
+            } else {
+                editor.commit();
+            }
             openSocket();
         }
         else if (id == R.id.about)
@@ -345,19 +345,7 @@ public class RemoteActivity extends AppCompatActivity
     {
         super.onStart();
         this.openSocket();
-        Display display = getWindowManager().getDefaultDisplay();
-        Point size = new Point();
-        display.getSize(size);
-        int width = (size.x / 4) - 16;
-        ((Button) this.findViewById(R.id.btnPrev)).setMinWidth(width);
-        ((Button) this.findViewById(R.id.btnRew)).setMinWidth(width);
-        ((Button) this.findViewById(R.id.btnFF)).setMinWidth(width);
-        ((Button) this.findViewById(R.id.btnNext)).setMinWidth(width);
 
-        ((Button) this.findViewById(R.id.btnPrev)).setWidth(width);
-        ((Button) this.findViewById(R.id.btnRew)).setWidth(width);
-        ((Button) this.findViewById(R.id.btnFF)).setWidth(width);
-        ((Button) this.findViewById(R.id.btnNext)).setWidth(width);
     }
 
 
@@ -463,11 +451,14 @@ public class RemoteActivity extends AppCompatActivity
         @Override
         public void run()
         {
+            InetAddress deviceAddress = null;
+            String address = null;
             try
             {
-                SharedPreferences prefs = PreferenceManager.
+                final SharedPreferences prefs = PreferenceManager.
                         getDefaultSharedPreferences(RemoteActivity.this);
-                if (prefs.getString("device", "").equals(BT_ADDRESS))
+                if (android.os.Build.VERSION.SDK_INT >= 15 &&
+                        prefs.getString("device", "").equals(BT_ADDRESS))
                 {
                     Log.d("RemoteActivity", "Opening Bluetooth socket");
 
@@ -506,16 +497,45 @@ public class RemoteActivity extends AppCompatActivity
                 else
                 {
                     Log.d("RemoteActivity", "Opening TCP socket");
-                    InetAddress deviceAddress = InetAddress.getByName(prefs.getString("device", "10.10.0.14"));
-                    socket = new Socket(deviceAddress, SERVER_PORT);
+                    address = prefs.getString("device", "10.10.0.14");
+                    socket = new Socket(address, SERVER_PORT);
+
+                    final String addr = address;
+                    mHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(RemoteActivity.this,
+                                String.format("Connected to %s", addr),
+                                Toast.LENGTH_LONG).show();
+                        }
+                    });
                 }
             }
             catch (UnknownHostException e1)
             {
+                final String addr = address;
+                mHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        Toast.makeText(RemoteActivity.this,
+                            String.format("Unknown Host: %s", addr),
+                            Toast.LENGTH_LONG).show();
+                    }
+                });
                 e1.printStackTrace();
             }
-            catch (IOException e1)
+            catch (final IOException e1)
             {
+                final String addr = address;
+                mHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        Toast.makeText(RemoteActivity.this,
+                            String.format("Error: %s: %s", e1.getMessage(), addr),
+                            Toast.LENGTH_LONG).show();
+                    }
+                });
+
                 if (socket != null)
                 {
                     if (socket.isConnected())
@@ -532,7 +552,8 @@ public class RemoteActivity extends AppCompatActivity
                 }
                 if (btsocket != null)
                 {
-                    if (btsocket.isConnected())
+                    if (android.os.Build.VERSION.SDK_INT <= 14 ||
+                            btsocket.isConnected())
                     {
                         try
                         {

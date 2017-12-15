@@ -160,17 +160,17 @@ rebind:
 				continue;
 			}
 
-			state->fd = newsockfd;
-			state->quit = 0;
-			state->closed_callback = mbi_bluetooth_socket_closed;
+			ctx->fd = newsockfd;
+			ctx->quit = 0;
+			ctx->closed_callback = avbox_input_bluetooth_socket_closed;
 
-			LIST_ADD(&sockets, state);
+			LIST_ADD(&sockets, ctx);
 
-			if (pthread_create(&state->thread, &attr, &mbi_socket_connection, ctx) != 0) {
+			if (pthread_create(&ctx->thread, &attr, &avbox_input_bluetooth_listener, ctx) != 0) {
 				LOG_PRINT_ERROR("Could not create bluetooth socket thread");
-				LIST_REMOVE(state);
+				LIST_REMOVE(ctx);
 				close(newsockfd);
-				free(state);
+				free(ctx);
 				continue;
 			}
 		}

@@ -34,7 +34,7 @@ swap_buffers(void)
 /**
  * Initialize the X11 driver.
  */
-struct mbv_surface *
+static struct mbv_surface *
 init(struct mbv_drv_funcs * const driver, int argc, char **argv, int * const w, int * const h)
 {
 	GLint att[] = { GLX_RGBA, GLX_DOUBLEBUFFER, None };
@@ -136,7 +136,7 @@ shutdown(void)
 }
 
 
-void
+INTERNAL void
 avbox_video_x11_initft(struct mbv_drv_funcs * const funcs)
 {
 	memset(funcs, 0, sizeof(struct mbv_drv_funcs));

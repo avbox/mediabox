@@ -733,7 +733,7 @@ avbox_process_monitor_thread(void *arg)
  * NOTE: The PID cannot be used to identify a process using the process
  * API since a process may crash or get restarted and get a new PID.
  */
-pid_t
+EXPORT pid_t
 avbox_process_getpid(int id)
 {
 	struct avbox_process *proc;
@@ -753,7 +753,7 @@ avbox_process_getpid(int id)
  * manager stops managing the file descriptor so you must call close()
  * on it when you're done using it.
  */
-int
+EXPORT int
 avbox_process_openfd(int id, int std_fileno)
 {
 	int result = -1;
@@ -796,7 +796,7 @@ avbox_process_openfd(int id, int std_fileno)
  * Set the amount of time, in seconds, to wait for a process
  * to exit after sending SIGTERM before sending SIGKILL.
  */
-int
+EXPORT int
 avbox_process_setsigkilldelay(int procid, unsigned delay)
 {
 	struct avbox_process * const proc =
@@ -812,7 +812,7 @@ avbox_process_setsigkilldelay(int procid, unsigned delay)
 /**
  * Starts and monitors a child process.
  */
-int
+EXPORT int
 avbox_process_start(const char *binary, const char * const argv[],
 	enum avbox_process_flags flags, const char *name, avbox_process_exit exit_callback,
 	void *callback_data)
@@ -918,7 +918,7 @@ avbox_process_start(const char *binary, const char * const argv[],
  * NOTE: This function will fail if AVBOX_PROCESS_WAIT is not set
  * when starting the process!
  */
-int
+EXPORT int
 avbox_process_wait(int id, int *exit_status)
 {
 	int ret = -1;
@@ -966,7 +966,7 @@ end:
 /**
  * Stops a running child process.
  */
-int
+EXPORT int
 avbox_process_stop(int id)
 {
 	struct avbox_process *proc;
@@ -1019,7 +1019,7 @@ avbox_process_stop(int id)
 /**
  * Initialize the process manager.
  */
-int
+INTERNAL int
 avbox_process_init(void)
 {
 	DEBUG_PRINT(LOG_MODULE, "Initializing process monitor");
@@ -1047,7 +1047,7 @@ avbox_process_init(void)
 /**
  * Shutdown the process manager.
  */
-void
+INTERNAL void
 avbox_process_shutdown(void)
 {
 	struct avbox_process *proc;

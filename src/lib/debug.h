@@ -128,5 +128,10 @@ do { \
 #define DEBUG_VABORT(module, fmt, ...) abort()
 #endif
 
+#define ABORT(str) \
+do { \
+	LOG_PRINT_ERROR(str); \
+	abort(); \
+} while (0)
 
 #endif

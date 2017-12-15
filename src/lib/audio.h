@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+
+#define AVBOX_AUDIOSTREAM_UNDERRUN		(1)
+#define AVBOX_AUDIOSTREAM_CRITICAL_ERROR	(2)
 /**
  * Opaque stream structure
  */
@@ -10,10 +13,17 @@ struct avbox_audiostream;
 
 
 /**
+ * Check if the stream is blocking another thread on write().
+ */
+int
+avbox_audiostream_blocking(struct avbox_audiostream * const stream);
+
+
+/**
  * Stream dried callback.
  */
-typedef void (*avbox_audiostream_underrun_callback)(
-	struct avbox_audiostream * const inst, void * const context);
+typedef void (*avbox_audiostream_callback)(
+	struct avbox_audiostream * const inst, int msg, void * const context);
 
 
 /**
@@ -97,7 +107,7 @@ avbox_audiostream_drain(struct avbox_audiostream * const inst);
  */
 struct avbox_audiostream *
 avbox_audiostream_new(int max_frames,
-	avbox_audiostream_underrun_callback underrun_callback,
+	avbox_audiostream_callback underrun_callback,
 	void * const callback_context);
 
 

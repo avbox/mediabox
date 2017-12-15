@@ -28,21 +28,26 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <sys/signal.h>
 
 #define LOG_MODULE "input"
 
 #include "input.h"
-#include "input-directfb.h"
-#include "input-libinput.h"
 #include "input-tcp.h"
-#include "input-bluetooth.h"
 #include "../linkedlist.h"
 #include "../debug.h"
 #include "../log.h"
 #include "../dispatch.h"
-#include "../bluetooth.h"
 
+#ifdef ENABLE_DIRECTFB
+#	include "input-directfb.h"
+#endif
+#ifdef ENABLE_LIBINPUT
+#	include "input-libinput.h"
+#endif
+#ifdef ENABLE_BLUETOOTH
+#	include "../bluetooth.h"
+#	include "input-bluetooth.h"
+#endif
 
 LISTABLE_STRUCT(avbox_input_endpoint,
 	struct avbox_object *object;
@@ -51,8 +56,12 @@ LISTABLE_STRUCT(avbox_input_endpoint,
 
 static pthread_mutex_t endpoints_lock = PTHREAD_MUTEX_INITIALIZER;
 static LIST endpoints;
+#ifdef ENABLE_DIRECTFB
 static int using_directfb = 0;
+#endif
+#ifdef ENABLE_LIBINPUT
 static int using_libinput = 0;
+#endif
 static int using_tcp = 0;
 #ifdef ENABLE_BLUETOOTH
 static int using_bluetooth = 0;
@@ -253,9 +262,17 @@ int
 avbox_input_init(int argc, char **argv)
 {
 	int i;
+#ifdef ENABLE_DIRECTFB
 	char *driver_string = "directfb";
+#elif defined(ENABLE_LIBINPUT)
+	char *driver_string = "libinput";
+#else
+	char *driver_string = "";
+#endif
 
 	DEBUG_PRINT("input", "Starting input dispatcher");
+
+	(void) driver_string;
 
 	for (i = 1; i < argc; i++) {
 		if (!strncmp(argv[i], "--input:", 8)) {
@@ -270,6 +287,7 @@ avbox_input_init(int argc, char **argv)
 	/* initialize endpoints stack */
 	LIST_INIT(&endpoints);
 
+#ifdef ENABLE_DIRECTFB
 	if (!strcmp(driver_string, "directfb")) {
 		/* initialize directfb input provider */
 		if (mbi_directfb_init() == -1) {
@@ -278,13 +296,22 @@ avbox_input_init(int argc, char **argv)
 			using_directfb = 1;
 		}
 	}
+#endif
 
+#ifdef ENABLE_LIBINPUT
+#ifndef ENABLE_DIRECTFB
+#define using_directfb 0
+#endif
 	/* initialize libinput driver */
 	if (!using_directfb && mbi_libinput_init() == -1) {
 		LOG_PRINT_ERROR("Could not initialize libinput driver");
 	} else if (!using_directfb) {
 		using_libinput = 1;
 	}
+#ifdef using_directfb
+#undef using_directfb
+#endif
+#endif
 
 	/* initialize the tcp remote input provider */
 	if (mbi_tcp_init() == -1) {
@@ -313,9 +340,11 @@ avbox_input_init(int argc, char **argv)
 void
 avbox_input_shutdown(void)
 {
+#ifdef ENABLE_DIRECTFB
 	if (using_directfb) {
 		mbi_directfb_destroy();
 	}
+#endif
 	if (using_tcp) {
 		mbi_tcp_destroy();
 	}
@@ -325,8 +354,10 @@ avbox_input_shutdown(void)
 		using_bluetooth = 0;
 	}
 #endif
+#ifdef ENABLE_LIBINPUT
 	if (using_libinput) {
 		mbi_libinput_destroy();
 	}
+#endif
 }
 

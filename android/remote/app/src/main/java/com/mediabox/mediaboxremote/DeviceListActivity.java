@@ -74,8 +74,11 @@ public class DeviceListActivity extends ListActivity
         {
             SharedPreferences.Editor editor = prefs.edit();
             editor.putString("device", dev.address);
-            editor.apply();
-
+            if (android.os.Build.VERSION.SDK_INT >= 9) {
+                editor.apply();
+            } else {
+                editor.commit();
+            }
             Log.d("DeviceList", "Settings updated.");
         }
         finish();

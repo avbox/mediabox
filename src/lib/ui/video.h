@@ -40,22 +40,30 @@
 #define AVBOX_COLOR_B(x) (((x) >>  8) & 0xFF)
 #define AVBOX_COLOR_A(x) ((x) & 0xFF)
 
+#define AVBOX_COLOR_PREMULT(color) \
+	(((color) & 0xFF000000) | \
+	(((((color) >> 24) * (((color) >> 16) & 0xFF)) >> 8) << 16) | \
+	(((((color) >> 24) * (((color) >>  8) & 0xFF)) >> 8) <<  8) | \
+	(((((color) >> 24) * (((color) >>  0) & 0xFF)) >> 8) <<  0))
+
 #define AVBOX_COLOR(color) \
-	(AVBOX_COLOR_A((color)) << 24 | ((AVBOX_COLOR_R((color)) * AVBOX_COLOR_A((color))) / 0XFF) << 16 | \
-	((AVBOX_COLOR_G((color)) * AVBOX_COLOR_A((color))) / 0xFF) <<  8 | \
-	((AVBOX_COLOR_B((color)) * AVBOX_COLOR_A((color))) / 0xFF))
+	(AVBOX_COLOR_A((color)) << 24 | \
+	AVBOX_COLOR_R((color)) << 16 | \
+	AVBOX_COLOR_G((color)) <<  8 | \
+	AVBOX_COLOR_B((color)))
+
 
 #define MBV_DEFAULT_FONT        ("/usr/share/fonts/dejavu/DejaVuSansCondensed-Bold.ttf")
 #define MBV_DEFAULT_FOREGROUND  AVBOX_COLOR(0xFFFFFFFF)
-#define MBV_DEFAULT_BACKGROUND  AVBOX_COLOR(0x0951AFFF)
+#define MBV_DEFAULT_BACKGROUND  AVBOX_COLOR(0x0951AFBF)
 #define MBV_DEFAULT_OPACITY     (100)
 
 /* convenience macros for converting colors to RGBA floating point
  * for cairo */
-#define CAIRO_COLOR_RGBA_A(x) (((double)((x >> 24) & 0xFF)) / 255.0F)
-#define CAIRO_COLOR_RGBA_R(x) (((double)((x >> 16) & 0xFF)) / 255.0F)
-#define CAIRO_COLOR_RGBA_G(x) (((double)((x >>  8) & 0xFF)) / 255.0F)
-#define CAIRO_COLOR_RGBA_B(x) (((double)((x      ) & 0xFF)) / 255.0F)
+#define CAIRO_COLOR_RGBA_A(x) (((double)((x >> 24) & 0xFF)) / 255.0)
+#define CAIRO_COLOR_RGBA_R(x) (((double)((x >> 16) & 0xFF)) / 255.0)
+#define CAIRO_COLOR_RGBA_G(x) (((double)((x >>  8) & 0xFF)) / 255.0)
+#define CAIRO_COLOR_RGBA_B(x) (((double)((x      ) & 0xFF)) / 255.0)
 #define CAIRO_COLOR_RGBA(color) \
 	CAIRO_COLOR_RGBA_R(color), \
 	CAIRO_COLOR_RGBA_G(color), \
@@ -71,7 +79,8 @@ enum avbox_pixel_format
 {
 	AVBOX_PIXFMT_UNKNOWN = 0,
 	AVBOX_PIXFMT_BGRA = 1,
-	AVBOX_PIXFMT_YUV420P = 2
+	AVBOX_PIXFMT_YUV420P = 2,
+	AVBOX_PIXFMT_MMAL = 3
 };
 
 
@@ -147,6 +156,19 @@ avbox_window_lock(struct avbox_window * const window, int flags, int *pitch);
  */
 void
 avbox_window_unlock(struct avbox_window * const window);
+
+
+/**
+ * Get the window's dirty bit
+ */
+int
+avbox_window_dirty(const struct avbox_window * const window);
+
+/**
+ * Set the window's dirty bit.
+ */
+void
+avbox_window_setdirty(struct avbox_window * const window, int value);
 
 
 int

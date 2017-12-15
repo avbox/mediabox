@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
 #include <linux/reboot.h>
@@ -297,7 +298,7 @@ avbox_application_findsubscriber(avbox_application_eventhandler handler, void *c
  * Subscribe to application events. This function can only
  * be called from the main thread.
  */
-int
+EXPORT int
 avbox_application_subscribe(avbox_application_eventhandler handler, void *context)
 {
 	struct avbox_application_subscriber *subscriber;
@@ -327,7 +328,7 @@ avbox_application_subscribe(avbox_application_eventhandler handler, void *contex
  * Unsubscribe from application events. This function can only
  * be called from the application thread.
  */
-int
+EXPORT int
 avbox_application_unsubscribe(avbox_application_eventhandler handler, void *context)
 {
 	struct avbox_application_subscriber *subscriber;
@@ -346,7 +347,7 @@ avbox_application_unsubscribe(avbox_application_eventhandler handler, void *cont
 /**
  * Gets the command line arguments
  */
-const char **
+EXPORT const char **
 avbox_application_args(int * const argc)
 {
 	*argc = app_argc;
@@ -357,12 +358,13 @@ avbox_application_args(int * const argc)
 /**
  * Initialize application.
  */
-int
+EXPORT int
 avbox_application_init(int argc, char **cargv, const char *logf)
 {
 	int i, nolog = 0;
 	char **argv;
 	const char * logfile = NULL;
+	struct sched_param parms;
 
 	pid1 = (getpid() == 1);
 
@@ -450,11 +452,20 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 	} else if (!pid1 && logfile != NULL) {
 		FILE *f;
 		if ((f = fopen(logfile, "a")) == NULL) {
-			LOG_VPRINT_ERROR("Could not open logfile %s: %s\n",
+			fprintf(stderr, "Could not open logfile %s: %s\n",
 				logfile, strerror(errno));
 			exit(EXIT_FAILURE);
 		}
 		log_setfile(f);
+	}
+
+	/* set the priority of the main thread to realtime */
+	/* NOTE: This will fail when running as a regular user so we
+	 * must call it after the log is initialized or else the
+	 * LOG_PRINT_ERROR() will cause a SEGFAULT. */
+	parms.sched_priority = sched_get_priority_max(SCHED_FIFO);
+	if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &parms) != 0) {
+		LOG_PRINT_ERROR("Could not send main thread priority");
 	}
 
 #ifdef ENABLE_BLUETOOTH
@@ -493,7 +504,7 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 /**
  * Application main loop.
  */
-int
+EXPORT int
 avbox_application_run(void)
 {
 	int quit = 0;
@@ -579,7 +590,7 @@ avbox_application_run(void)
  * Dispatch the next message in the thread's
  * queue.
  */
-int
+EXPORT int
 avbox_application_doevents()
 {
 	struct avbox_message *msg;
@@ -599,7 +610,7 @@ avbox_application_doevents()
 /**
  * Quit the application.
  */
-int
+EXPORT int
 avbox_application_quit(int status)
 {
 	result = status;

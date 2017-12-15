@@ -25,6 +25,7 @@
 #include "input.h"
 #include "../linkedlist.h"
 #include "../dispatch.h"
+#include "../ffmpeg_util.h"
 
 #define AVBOX_PLAYER_SEEK_ABSOLUTE	(0x01)
 #define AVBOX_PLAYER_SEEK_CHAPTER	(0x02)
@@ -134,11 +135,13 @@ struct avbox_player_state_info
 {
 	int64_t pos;
 	int64_t duration;
+	int mmal;
 	char *title;
 	struct avbox_size video_res;
 	struct avbox_size scaled_res;	/* this is the scaled video size */
 	enum avbox_aspect_ratio aspect_ratio;
 	enum avbox_pixel_format pix_fmt;
+	AVRational time_base;
 };
 
 

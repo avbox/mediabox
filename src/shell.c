@@ -39,6 +39,7 @@
 #include "lib/dispatch.h"
 #include "lib/application.h"
 #include "lib/settings.h"
+#include "lib/thread.h"
 #include "mainmenu.h"
 #include "discovery.h"
 #include "downloads-backend.h"
@@ -110,7 +111,7 @@ mbox_shell_draw(struct avbox_window *window, void * const ctx)
 
 	if ((context = avbox_window_cairo_begin(window)) != NULL) {
 		if ((layout_time = pango_cairo_create_layout(context)) != NULL) {
-			if ((font_desc = pango_font_description_from_string("Sans Bold 128px")) != NULL) {
+			if ((font_desc = pango_font_description_from_string("Sans Bold 100px")) != NULL) {
 				pango_layout_set_font_description(layout_time, font_desc);
 				pango_layout_set_width(layout_time, w * PANGO_SCALE);
 				pango_layout_set_alignment(layout_time, PANGO_ALIGN_CENTER);
@@ -589,6 +590,26 @@ mbox_shell_shutdown(void)
 }
 
 
+static void *
+mbox_shell_addurl(void *data)
+{
+	if (!strncmp("magnet:", data, 7)) {
+		DEBUG_VPRINT(LOG_MODULE, "Received magnet url: %s",
+			data);
+		if (mb_downloadmanager_addurl(data) != 0) {
+			LOG_VPRINT_ERROR("Could not add URL: %s",
+				data);
+		}
+	} else {
+		LOG_VPRINT_ERROR("Unsupported URL: %s",
+			data);
+	}
+	free(data);
+
+	return NULL;
+}
+
+
 /**
  * Handle incomming messages.
  */
@@ -757,18 +778,11 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 		case MBI_EVENT_URL:
 		{
 			ASSERT(event->payload != NULL);
-			if (!strncmp("magnet:", (char*) event->payload, 7)) {
-				DEBUG_VPRINT(LOG_MODULE, "Received magnet url: %s",
-					event->payload);
-				if (mb_downloadmanager_addurl((char*) event->payload) != 0) {
-					LOG_VPRINT_ERROR("Could not add URL: %s",
-						event->payload);
-				}
-			} else {
-				LOG_VPRINT_ERROR("Unsupported URL: %s",
-					event->payload);
+			struct avbox_delegate * del;
+			if ((del = avbox_workqueue_delegate(mbox_shell_addurl, event->payload)) == NULL) {
+				LOG_VPRINT_ERROR("Could not add url: %s", strerror(errno));
+				abort();
 			}
-			free(event->payload);
 			event->payload = NULL;
 			break;
 		}
@@ -847,7 +861,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 /**
  * Initialize the MediaBox shell
  */
-int
+INTERNAL int
 mbox_shell_init(void)
 {
 	int w, h;
@@ -918,10 +932,6 @@ mbox_shell_init(void)
 	/* initialize the volume control */
 	if (avbox_volume_init(dispatch_object) != 0) {
 		LOG_PRINT_ERROR("Could not initialize volume control!");
-		avbox_object_destroy(dispatch_object);
-		avbox_object_destroy(avbox_player_object(player));
-		avbox_window_destroy(main_window);
-		return -1;
 	}
 
 	/* subscribe to player notifications */
@@ -950,7 +960,7 @@ mbox_shell_init(void)
 /**
  * Start the shell.
  */
-int
+INTERNAL int
 mbox_shell_show(void)
 {
 	/* start the clock timer */
@@ -968,7 +978,7 @@ mbox_shell_show(void)
 }
 
 
-void
+INTERNAL void
 mbox_shell_reboot(void)
 {
 	if (avbox_gainroot() == 0) {

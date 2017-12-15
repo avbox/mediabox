@@ -580,7 +580,7 @@ mbox_downloads_new(struct avbox_object *parent)
 
 	/* create a new window for the menu dialog */
 	inst->window = avbox_window_new(NULL, "downloads",
-		AVBOX_WNDFLAGS_DECORATED,
+		AVBOX_WNDFLAGS_DECORATED | AVBOX_WNDFLAGS_ALPHABLEND,
 		(xres / 2) - (window_width / 2),
 		(yres / 2) - (window_height / 2),
 		window_width, window_height, mbox_downloads_messagehandler, NULL, inst);

@@ -24,11 +24,14 @@
 #include "dispatch.h"
 
 
+#define AVBOX_THREAD_REALTIME	(0x01)
+
+
 /**
  * Create a new thread.
  */
 struct avbox_thread *
-avbox_thread_new(avbox_message_handler handler, void * const context);
+avbox_thread_new(avbox_message_handler handler, void * const context, int flags);
 
 
 /**

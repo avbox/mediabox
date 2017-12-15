@@ -93,8 +93,8 @@ timeadd(const struct timespec * const time1, const struct timespec * const time2
 	struct timespec tmp;
 	const int64_t nsec = time1->tv_nsec + time2->tv_nsec;
 	tmp.tv_sec = time1->tv_sec + time2->tv_sec;
-	tmp.tv_sec += nsec / (1000L * 1000L * 1000L);
-	tmp.tv_nsec = nsec % (1000L * 1000L * 1000L);
+	tmp.tv_sec += nsec / (1000LL * 1000LL * 1000LL);
+	tmp.tv_nsec = nsec % (1000LL * 1000LL * 1000LL);
 	return tmp;
 }
 
@@ -113,7 +113,7 @@ timediff(const struct timespec *start, const struct timespec *end)
 
 	if ((end->tv_nsec - start->tv_nsec) < 0) {
 		temp.tv_sec = (end->tv_sec - start->tv_sec) - 1;
-		temp.tv_nsec = (1000L * 1000L * 1000L) + (end->tv_nsec - start->tv_nsec);
+		temp.tv_nsec = (1000LL * 1000LL * 1000LL) + (end->tv_nsec - start->tv_nsec);
 	} else {
 		temp.tv_sec = end->tv_sec - start->tv_sec;
 		temp.tv_nsec = end->tv_nsec - start->tv_nsec;
@@ -131,9 +131,9 @@ abstime(struct timespec * const tv)
 {
 	struct timeval now; 
 	gettimeofday(&now, NULL);
-	long int abstime_ns_large = now.tv_usec * 1000L;
-	tv->tv_sec = now.tv_sec + (abstime_ns_large / 1000000000L);
-	tv->tv_nsec = abstime_ns_large % 1000000000L;
+	long int abstime_ns_large = now.tv_usec * 1000LL;
+	tv->tv_sec = now.tv_sec + (abstime_ns_large / 1000000000LL);
+	tv->tv_nsec = abstime_ns_large % 1000000000LL;
 	return tv;
 }
 
@@ -166,8 +166,8 @@ utimediff(const struct timespec * a, const struct timespec * b)
 	if (UNLIKELY(b == NULL)) {
 		b = &zerotime;
 	}
-	const int64_t aa = ((a->tv_sec * 1000L * 1000L * 1000L) + a->tv_nsec) / 1000L;
-	const int64_t bb = ((b->tv_sec * 1000L * 1000L * 1000L) + b->tv_nsec) / 1000L;
+	const int64_t aa = ((a->tv_sec * 1000.0 * 1000.0 * 1000.0) + a->tv_nsec) / 1000.0;
+	const int64_t bb = ((b->tv_sec * 1000.0 * 1000.0 * 1000.0) + b->tv_nsec) / 1000.0;
 	return (aa - bb);
 }
 
@@ -179,7 +179,7 @@ utimediff(const struct timespec * a, const struct timespec * b)
 void
 timeaddu(struct timespec * const tv, const int64_t usecs)
 {
-	tv->tv_sec += usecs / (1000L * 1000L);
-	tv->tv_nsec += (usecs % (1000L * 1000L)) * 1000L;;
+	tv->tv_sec += usecs / (1000.0 * 1000.0);
+	tv->tv_nsec += (usecs % (1000LL * 1000LL)) * 1000LL;;
 }
 

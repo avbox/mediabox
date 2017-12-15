@@ -1,0 +1,4 @@
+config BR2_PACKAGE_RASPI_GPIO
+	bool "raspi-gpio"
+	help
+	  Dump the state of the BCM270x GPIOs

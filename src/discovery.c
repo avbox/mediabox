@@ -83,8 +83,9 @@ static char *
 mbox_discovery_hostname()
 {
 	int fd;
+	unsigned int checksum = 0;
 	ssize_t ret;
-	char *hostname;
+	char *hostname, *phostname;
 
 #define BUFSZ			(64)
 
@@ -112,6 +113,17 @@ mbox_discovery_hostname()
 
 	hostname[ret--] = '\0';
 	hostname[ret] = '\0';
+
+	/* calculate the hostname checksum */
+	for (phostname = hostname; *phostname != '\0'; phostname++) {
+		checksum += (unsigned int) *phostname;
+	}
+
+	/* seed the RNG with the hostname checksum. This will
+	 * ensure that every system gets a unique id (as long as
+	 * their hostnames are different) */
+	srand(checksum);
+
 	return hostname;
 }
 

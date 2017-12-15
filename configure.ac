@@ -14,6 +14,8 @@ AM_INIT_AUTOMAKE([1.9 -Wall std-options gnu])
 AC_PROG_CC
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
+AC_PROG_RANLIB
+AM_PROG_AR
 AC_PATH_PROG([RM], [rm])
 
 # Checks for typedefs, structures, and compiler characteristics.
@@ -65,7 +67,7 @@ AC_ARG_ENABLE([debug], [extra debugging code])
 AM_CONDITIONAL(ENABLE_DEBUG, test x"$enable_debug" = xyes)
 if test x"$enable_debug" = xyes; then
 	AC_DEFINE([DEBUG],1,[Define to 1 to compile debug code])
-	CFLAGS="-ggdb -O1 -DDEBUG -DHAVE_CONFIG_H"
+	CFLAGS="-rdynamic -fPIC -ggdb -O1 -DDEBUG -DHAVE_CONFIG_H -D_GNU_SOURCE"
 else
 	AC_DEFINE([NDEBUG],1,[Define to 1  to disable debug code])
 	CFLAGS="-O2 -DNDEBUG -DHAVE_CONFIG_H"
@@ -88,12 +90,39 @@ if test x"$enable_branch_optimization" = xyes; then
 	AC_DEFINE([ENABLE_BRANCH_OPTIMIZATION], 1, [Define to 1 to enable branch optimization])
 fi
 
+AC_ARG_ENABLE([libinput], [Define to 1 to enable the libinput driver])
+AM_CONDITIONAL([ENABLE_LIBINPUT], [test x$enable_libinput = xyes])
+if test x"$enable_libinput" = xyes; then
+	AC_DEFINE([ENABLE_LIBINPUT], 1, [Define to 1 to enable libinput support])
+fi
+
+
+AC_ARG_ENABLE([directfb], [Define to 1 to enable the DirectFB driver])
+AM_CONDITIONAL([ENABLE_DIRECTFB], [test x$enable_directfb = xyes])
+if test x"$enable_directfb" = xyes; then
+	AC_DEFINE([ENABLE_DIRECTFB], 1, [Define to 1 to enable the DirectFB support])
+fi
+
+
 AC_ARG_ENABLE([libdrm], [Define to 1 to enable the libdrm driver])
 AM_CONDITIONAL([ENABLE_LIBDRM], [test x$enable_libdrm = xyes])
 if test x"$enable_libdrm" = xyes; then
 	AC_DEFINE([ENABLE_LIBDRM], 1, [Define to 1 to enable libdrm support])
 fi
 
+
+AC_ARG_ENABLE([vc4], [Define to 1 to enable the VC4 driver])
+AM_CONDITIONAL([ENABLE_VC4], [test x$enable_vc4 = xyes])
+if test x"$enable_vc4" = xyes; then
+	AC_DEFINE([ENABLE_VC4], 1, [Define to 1 to enable VC4 support])
+	AC_DEFINE([ENABLE_OPENGL], 1, [Define to 1 to enable OpenGL support])
+	AC_DEFINE([ENABLE_GLES2], 1, [Define to 1 to use GLES2 instead of OpenGL])
+	AC_DEFINE([ENABLE_MMAL], 1, [Define to 1 to enable hardware decoding on the VC4])
+	AM_CONDITIONAL(ENABLE_OPENGL, [test xyes = xyes])
+fi
+
+
+AC_ARG_ENABLE([gles2], [Define to 1 to enable the X11 driver])
 AC_ARG_ENABLE([x11], [Define to 1 to enable the X11 driver])
 AM_CONDITIONAL([ENABLE_X11], [test x"$enable_x11" = xyes])
 if test x"$enable_x11" = xyes; then
@@ -101,6 +130,7 @@ if test x"$enable_x11" = xyes; then
 	AC_DEFINE([ENABLE_OPENGL], 1, [Define to 1 to enable OpenGL support])
 	AM_CONDITIONAL(ENABLE_OPENGL, [test xyes = xyes])
 fi
+
 
 AC_ARG_ENABLE([dvd], [DVD Disc support])
 AM_CONDITIONAL(ENABLE_DVD, test x"$enable_dvd" = xyes)
@@ -139,11 +169,15 @@ CC="$PTHREAD_CC"
 PKG_CHECK_MODULES([PANGOCAIRO], [pangocairo], ,
 	AC_MSG_ERROR('Unable to find pango library. Please make sure library and header files are installed.'))
 
-PKG_CHECK_MODULES(DIRECTFB, [directfb >= 1.4.9], ,
-	AC_MSG_ERROR('Unable to find DirectFB. Please make sure library and header files are installed.'))
+if test x"$enable_directfb" = xyes; then
+	PKG_CHECK_MODULES(DIRECTFB, [directfb >= 1.4.9], ,
+		AC_MSG_ERROR('Unable to find DirectFB. Please make sure library and header files are installed.'))
+fi
 
-PKG_CHECK_MODULES(LIBINPUT, [libinput], ,
-	AC_MSG_ERROR('Unable to find libinput. Please make sure library and header files are installed.'))
+if test x"$enable_libinput" = xyes; then
+	PKG_CHECK_MODULES(LIBINPUT, [libinput], ,
+		AC_MSG_ERROR('Unable to find libinput. Please make sure library and header files are installed.'))
+fi
 
 
 PKG_CHECK_MODULES(ALSA, [alsa], ,
@@ -186,9 +220,25 @@ if test x"$enable_x11" = xyes; then
 	AC_SEARCH_LIBS([XOpenDisplay], [X11], [], [
 		AC_MSG_ERROR([required library libX not found])
 	])
-	AC_SEARCH_LIBS([glBegin], [GL], [], [
-		AC_MSG_ERROR([required library libGL not found])
+	if test x"$enable_gles2" = xyes; then
+		AC_DEFINE([ENABLE_GLES2], 1, [Define to 1 to use GLES2 instead of OpenGL])
+		AC_SEARCH_LIBS([glUseProgram], [GLESv2], [], [
+			AC_MSG_ERROR([required library libGLESv2 not found])
+		])
+	else
+		AC_SEARCH_LIBS([glBegin], [GL], [], [
+			AC_MSG_ERROR([required library libGL not found])
+		])
+	fi
+fi
+
+if test x"$enable_vc4" == xyes; then
+	PKG_CHECK_MODULES(EGL, egl, , 
+		AC_MSG_ERROR('Unable to find libEGL'))
+	AC_SEARCH_LIBS([glUseProgram], [GLESv2], [], [
+		AC_MSG_ERROR([required library libGLESv2 not found])
 	])
+	LIBS="${LIBS} -lmmal -lbcm_host -lmmal_core -lmmal_components -lmmal_util"
 fi
 
 #

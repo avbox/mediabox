@@ -608,8 +608,7 @@ mbox_browser_messagehandler(void *context, struct avbox_message *msg)
 struct mbox_browser *
 mbox_browser_new(struct avbox_object *parent)
 {
-	int resx, resy, width;
-	const int height = 450;
+	int resx, resy, width, height;
 	struct mbox_browser *inst;
 
 	/* allocate memory */
@@ -632,13 +631,24 @@ mbox_browser_new(struct avbox_object *parent)
 		width = 800;
 	} else if (resx >= 800) {
 		width = 700;
+	} else if (resx >= 720) {
+		width = 600;
 	} else {
 		width = 300;
 	}
 
+	if (resy >= 450) {
+		height = 380;
+	} else {
+		height = resy;
+	}
+
+	DEBUG_VPRINT(LOG_MODULE, "Creating window (w=%i,h=%i|screen w=%i h=%i)",
+		width, height, resx, resy);
+
 	/* create a new window for the library dialog */
 	inst->window = avbox_window_new(NULL, "browser",
-		AVBOX_WNDFLAGS_DECORATED,
+		AVBOX_WNDFLAGS_DECORATED | AVBOX_WNDFLAGS_ALPHABLEND,
 		(resx / 2) - (width / 2),
 		(resy / 2) - (height / 2),
 		width, height,

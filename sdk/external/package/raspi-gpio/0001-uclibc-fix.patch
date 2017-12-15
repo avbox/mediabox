@@ -1,0 +1,13 @@
+diff --git a/raspi-gpio.c b/raspi-gpio.c
+index 3f348a8..8d257ce 100644
+--- a/raspi-gpio.c
++++ b/raspi-gpio.c
+@@ -629,7 +629,7 @@ int main(int argc, char *argv[])
+     if(!hwbase)
+       return 1;
+ 
+-    if ((fd = open ("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC) ) < 0)
++    if ((fd = open ("/dev/mem", O_RDWR | O_SYNC) ) < 0)
+     {
+       printf("Unable to open /dev/mem: %s\n", strerror (errno)) ;
+       return 1;

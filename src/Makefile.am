@@ -5,7 +5,6 @@ AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
 	-DLOCALSTATEDIR="$(localstatedir)" \
 	@CFLAGS@ \
 	@PTHREAD_CFLAGS@ \
-	@DIRECTFB_CFLAGS@ \
 	@ALSA_CFLAGS@ \
 	@PANGOCAIRO_CFLAGS@ \
 	@CURL_CFLAGS@ \
@@ -15,16 +14,15 @@ AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
 	@LIBAVFILTER_CFLAGS@ \
 	@GLIB_CFLAGS@ \
 	@GIO_CFLAGS@ \
-	@LIBINPUT_CFLAGS@ \
 	@SQLITE3_CFLAGS@ \
 	@LIBUDEV_CFLAGS@ \
 	@LIBDVDCSS_CFLAGS@ \
-	@LIBDVDNAV_CFLAGS@
+	@LIBDVDNAV_CFLAGS@ \
+	@EGL_CFLAGS@
 
 AM_LDFLAGS = -lz -lm -lswscale \
 	@LIBS@ \
 	@PTHREAD_LIBS@ \
-	@DIRECTFB_LIBS@ \
 	@ALSA_LIBS@ \
 	@PANGOCAIRO_LIBS@ \
 	@CURL_LIBS@ \
@@ -34,11 +32,11 @@ AM_LDFLAGS = -lz -lm -lswscale \
 	@LIBAVFILTER_LIBS@ \
 	@GLIB_LIBS@ \
 	@GIO_LIBS@ \
-	@LIBINPUT_LIBS@ \
 	@SQLITE3_LIBS@ \
 	@LIBUDEV_LIBS@ \
 	@LIBDVDCSS_LIBS@ \
-	@LIBDVDNAV_LIBS@
+	@LIBDVDNAV_LIBS@ \
+	@EGL_LIBS@
 
 bin_PROGRAMS = mediabox
 
@@ -68,17 +66,14 @@ mediabox_SOURCES = \
 	lib/stream.c \
 	lib/stopwatch.c \
 	lib/ui/video.c \
-	lib/ui/video-directfb.c \
 	lib/ui/video-software.c \
+	lib/ui/player.c \
 	lib/ui/listview.c \
 	lib/ui/textview.c \
 	lib/ui/progressview.c \
 	lib/ui/input.c \
-	lib/ui/input-libinput.c \
-	lib/ui/input-directfb.c \
 	lib/ui/input-socket.c \
 	lib/ui/input-tcp.c \
-	lib/ui/player.c \
 	shell.c \
 	mainmenu.c \
 	downloads.c \
@@ -89,6 +84,18 @@ mediabox_SOURCES = \
 	browser.c \
 	overlay.c \
 	main.c
+
+if ENABLE_LIBINPUT
+AM_CFLAGS += @LIBINPUT_CFLAGS@
+AM_LDFLAGS += @LIBINPUT_LIBS@
+mediabox_SOURCES += lib/ui/input-libinput.c
+endif
+
+if ENABLE_DIRECTFB
+AM_CFLAGS += @DIRECTFB_CFLAGS@
+AM_LDFLAGS += @DIRECTFB_LIBS@
+mediabox_SOURCES += lib/ui/video-directfb.c lib/ui/input-directfb.c
+endif
 
 if ENABLE_BLUETOOTH
 AM_CFLAGS += @BLUEZ_CFLAGS@
@@ -108,6 +115,13 @@ endif
 
 if ENABLE_X11
 mediabox_SOURCES += lib/ui/video-x11.c
+endif
+
+if ENABLE_VC4
+noinst_LIBRARIES = libvc4.a
+libvc4_a_SOURCES = lib/ui/video-vc4.c lib/ui/mmaldecode.c
+libvc4_a_CFLAGS = $(AM_CFLAGS) -std=gnu89
+mediabox_LDADD = $(AM_LDFLAGS) libvc4.a
 endif
 
 if ENABLE_OPENGL

@@ -117,6 +117,8 @@ if [ ${CLEAN} -eq 1 ] || [ ! -f "${BUILDROOT_WORKDIR}/Config.in" ]; then
 	cp "config/${ARCH}/${BOARD}/buildroot" "${BUILDROOT_WORKDIR}/.config"
 	cp "config/${ARCH}/${BOARD}/busybox" "${BUILDROOT_WORKDIR}/package/busybox/busybox.config"
 	cp "config/${ARCH}/${BOARD}/linux" "${BUILDROOT_WORKDIR}/.linux-config"
+	cp "external/overlay/*" "${BUILDROOT_WORKDIR}/package"
+	rm -rf "${BUILDROOT_WORKDIR}/package/rpi-firmware/rpi-firmware.hash"
 	cd "${BUILDROOT_WORKDIR}"
 	if [ "${MENUCONFIG}" == "1" ]; then
 		make BR2_EXTERNAL=$(realpath ../../../external) menuconfig
