@@ -79,9 +79,12 @@ struct avbox_player
 	int audio_decoder_flushed;
 	int flushing;
 	int underrun;
+	int stopping;
+	int paused;
 
 	avbox_player_time_fn getmastertime;
 	AVFormatContext *fmt_ctx;
+	AVFrame *last_video_frame;
 	pthread_mutex_t state_lock;
 	LIST subscribers;
 

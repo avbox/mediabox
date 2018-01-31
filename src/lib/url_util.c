@@ -26,6 +26,11 @@
 #include <curl/curl.h>
 #include <ctype.h>
 
+#define LOG_MODULE "url-util"
+
+#include "avbox.h"
+
+
 struct MemoryStruct
 {
 	char *memory;
@@ -94,8 +99,15 @@ WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp)
 }
 
 
+/**
+ * Download the contents of a given URL to memory synchronously and
+ * in one shot. Then save the malloc'd buffer pointer to dest and it's
+ * size to *size. If *size >= 0 then it will be used as a size limit.
+ * Otherwise this function will block until the entire file is
+ * downloaded.
+ */
 int
-mb_url_fetch2mem(char *url, void **dest, size_t *size)
+avbox_net_geturl(const char * const url, void **dest, size_t *size)
 {
 	CURL *curl_handle;
 	CURLcode res;
@@ -103,17 +115,19 @@ mb_url_fetch2mem(char *url, void **dest, size_t *size)
 
 	struct MemoryStruct chunk;
 
+	chunk.limit = (*size > 0) ? *size : 0;
 	chunk.memory = malloc(1);
 	chunk.size = 0;
 	if (chunk.memory == NULL) {
 		return -1;
 	}
 
+
 	curl_global_init(CURL_GLOBAL_ALL);
 
 	/* init the curl session */
 	if ((curl_handle = curl_easy_init()) == NULL) {
-		fprintf(stderr, "url_util: curl_easy_init() failed\n");
+		LOG_PRINT_ERROR("curl_easy_init() failed");
 		goto end;
 	}
 
@@ -121,7 +135,8 @@ mb_url_fetch2mem(char *url, void **dest, size_t *size)
 	curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 	curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
 	curl_easy_setopt(curl_handle, CURLOPT_ACCEPT_ENCODING, "");
-	curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "mediabox/" PACKAGE_VERSION);
+	curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "AVBoX/" PACKAGE_VERSION);
+	curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, FALSE);
 	//curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "Mozilla/5.0 (X11; Linux x86_64; rv:46.0) Gecko/20100101 Firefox/46.0");
 
 	/* get it! */
@@ -129,7 +144,7 @@ mb_url_fetch2mem(char *url, void **dest, size_t *size)
 
 	/* check for errors */
 	if(res != CURLE_OK) {
-		fprintf(stderr, "curl_easy_perform() failed: %s\n",
+		LOG_VPRINT_ERROR("curl_easy_perform failed: %s",
 			curl_easy_strerror(res));
 		goto end;
 

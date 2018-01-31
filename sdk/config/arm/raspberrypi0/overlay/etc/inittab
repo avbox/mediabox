@@ -14,38 +14,40 @@
 # process   == program to run
 
 # Mount filesystems
-::sysinit:/bin/mount -t proc proc /proc
-::sysinit:/bin/mkdir -p /dev/pts
-::sysinit:/bin/mkdir -p /dev/shm
-::sysinit:/bin/mount -a
+null::sysinit:/bin/mount -t proc proc /proc
+null::sysinit:/bin/mkdir -p /dev/pts
+null::sysinit:/bin/mkdir -p /dev/shm
+null::sysinit:/sbin/fsck -y /dev/mmcblk0p3
+null::sysinit:/sbin/fsck -y /dev/mmcblk0p4
+null::sysinit:/bin/mount -a
 
 # Initialize /var
-::sysinit:/bin/mkdir -p /var/log
-::sysinit:/bin/mkdir -p /var/lib/mediabox
-::sysinit:/bin/ln -sf /data /var/lib/mediabox/store
-::sysinit:/bin/mkdir -p /var/lib/mediabox/store/Audio
-::sysinit:/bin/mkdir -p /var/lib/mediabox/store/Video
-::sysinit:/bin/mkdir -p /var/lib/dropbear
-::sysinit:/bin/ln -s /tmp /var/run
+null::sysinit:/bin/mkdir -p /var/log
+null::sysinit:/bin/mkdir -p /var/lib/mediabox
+null::sysinit:/bin/ln -sf /data /var/lib/mediabox/store
+null::sysinit:/bin/mkdir -p /var/lib/mediabox/store/Audio
+null::sysinit:/bin/mkdir -p /var/lib/mediabox/store/Video
+null::sysinit:/bin/mkdir -p /var/lib/dropbear
+null::sysinit:/bin/ln -s /tmp /var/run
 
 # Network setup
-::sysinit:/bin/hostname -F /boot/hostname
-::sysinit:/sbin/ifup -a
-::sysinit:/usr/sbin/wpa_supplicant -B -Dnl80211 -iwlan0 -c /etc/wpa_supplicant.conf
-::sysinit:/sbin/udhcpc -b -iwlan0
-::sysinit:/usr/sbin/ntpd -q -p ptbtime1.ptb.de
-::sysinit:/usr/sbin/dropbear -R -B
+null::sysinit:/bin/hostname -F /boot/hostname
+null::sysinit:/sbin/ifup -a
+null::sysinit:/usr/sbin/wpa_supplicant -B -Dnl80211 -iwlan0 -c /etc/wpa_supplicant.conf
+null::sysinit:/sbin/udhcpc -b -iwlan0
+null::sysinit:/usr/sbin/ntpd -q -p ptbtime1.ptb.de
+null::sysinit:/usr/sbin/dropbear -R -B
 
 # Rotate logs and start mediabox
-::sysinit:/bin/mv -f /var/log/mediabox.log /var/log/mediabox.log.1 2>&1 > /dev/null
-::sysinit:/bin/mv -f /var/log/avmount-mediabox.log /var/log/avmount-mediabox.log.1 2>&1 >/dev/null
-::sysinit:/sbin/start-stop-daemon -S -q -x /usr/bin/mediabox -p /tmp/mediabox.pid -b -m -- --avbox:logfile /var/log/mediabox.log --no-mediatomb
+null::sysinit:/bin/mv -f /var/log/mediabox.log /var/log/mediabox.log.1 2>&1 > /dev/null
+null::sysinit:/bin/mv -f /var/log/avmount-mediabox.log /var/log/avmount-mediabox.log.1 2>&1 >/dev/null
+null::sysinit:/sbin/start-stop-daemon -S -q -x /usr/bin/mediabox -p /tmp/mediabox.pid -b -m -- --avbox:logfile /var/log/mediabox.log --no-mediatomb --avbox:decode_cache_size 1000
 
 # now run any rc scripts
-::sysinit:/etc/init.d/rcS
+null::sysinit:/etc/init.d/rcS
 
 # Put a getty on the serial port
-tty::respawn:/sbin/getty -L console 0 vt100 # Default console
+console::respawn:/sbin/getty -L console 0 vt100 # Default console
 
 # Stuff to do before rebooting
 ::shutdown:/etc/init.d/rcK

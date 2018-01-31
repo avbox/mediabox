@@ -76,6 +76,13 @@ avbox_stopwatch_start(struct avbox_stopwatch * const inst)
 }
 
 
+int
+avbox_stopwatch_running(const struct avbox_stopwatch * const inst)
+{
+	return inst->running;
+}
+
+
 /**
  * Stops the stopwatch.
  */

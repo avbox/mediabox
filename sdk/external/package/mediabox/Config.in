@@ -2,6 +2,7 @@ config BR2_PACKAGE_MEDIABOX
 	bool "MediaBox"
 	depends on BR2_TOOLCHAIN_HAS_THREADS_NPTL
 	depends on BR2_TOOLCHAIN_GCC_AT_LEAST_4_5
+	depends on BR2_TOOLCHAIN_BUILDROOT_CXX
 	select BR2_PACKAGE_CAIRO
 	select BR2_PACKAGE_LIBCURL
 	select BR2_PACKAGE_LIBUPNP
@@ -12,10 +13,10 @@ config BR2_PACKAGE_MEDIABOX
 	select BR2_PACKAGE_OPENSSL
 	select BR2_PACKAGE_MEDIATOMB
 	select BR2_PACKAGE_AVMOUNT
-	select BR2_PACKAGE_DELUGE
 	select BR2_PACKAGE_DEJAVU
+	select BR2_PACKAGE_LIBTORRENTRB
 	help
-	  A media player designed for set-top boxes.
+	  A media player.
 
 if BR2_PACKAGE_MEDIABOX
 
@@ -82,5 +83,11 @@ config BR2_PACKAGE_MEDIABOX_DVD
 	select BR2_PACKAGE_LIBDVDNAV
 	help
 	  Enable DVD playback
+
+config BR2_PACKAGE_MEDIABOX_REALTIME
+	bool "Enable realtime scheduling"
+	help
+	  Enables EXPERIMENTAL realtime scheduling support.
+	  This may lead to deadlocks!
 
 endif # BR2_PACKAGE_MEDIABOX

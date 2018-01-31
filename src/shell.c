@@ -24,6 +24,7 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+#include <time.h>
 
 #define LOG_MODULE "shell"
 
@@ -40,6 +41,7 @@
 #include "lib/application.h"
 #include "lib/settings.h"
 #include "lib/thread.h"
+#include "lib/string_util.h"
 #include "mainmenu.h"
 #include "discovery.h"
 #include "downloads-backend.h"
@@ -200,25 +202,39 @@ static enum avbox_timer_result
 mbox_shell_welcomescreen(int id, void *data)
 {
 	time_t now;
-	static char old_time_string[256] = { 0 };
+	static time_t earlier = 0, one_min = 0;
 
 	(void) id;
 	(void) data;
 
-	/* format the time string */
 	now = time(NULL);
-	strftime(time_string, sizeof(time_string), "%I:%M %p",
-		localtime(&now));
 
-	/* if the time has not changed there's no need to redraw */
-	if (!strcmp(old_time_string, time_string)) {
-		return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
-	} else {
-		/* save the time string */
-		strcpy(old_time_string, time_string);
+	/* find out how much is 1 minute in time_t units */
+	if (!one_min) {
+		struct tm t1 = *localtime(&now);
+		struct tm t2 = t1;
+		t2.tm_sec++;
+		one_min = (mktime(&t2) - mktime(&t1)) * 60;
+		DEBUG_VPRINT(LOG_MODULE, "one_sec=%" PRIi64 "(time_t units)",
+			(int64_t) (one_min / 60));
+
+		/* I'm not sure why this is needed with the X11 driver */
+		avbox_window_update(main_window);
+		avbox_window_update(main_window);
+		avbox_window_update(main_window);
 	}
 
-	/* format date string */
+	/* if a minute has not elapsed since the last update then
+	 * there's nothing to do, otherwise save the current time */
+	if ((earlier + one_min) > now) {
+		return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
+	} else {
+		earlier = now;
+	}
+
+	/* format the time string */
+	strftime(time_string, sizeof(time_string), "%I:%M %p",
+		localtime(&now));
 	strftime(date_string, sizeof(time_string), "%B %d, %Y",
 		localtime(&now));
 
@@ -432,12 +448,12 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 
 				DEBUG_PRINT("shell", "Initializing progress bar");
 
-				assert(progressbar == NULL);
+				ASSERT(progressbar == NULL);
 
 				/* clear the root window */
 				/* TODO: This is not needed now */
 				root_window = avbox_video_getrootwindow(0);
-				assert(root_window != NULL);
+				ASSERT(root_window != NULL);
 				avbox_window_clear(root_window);
 				avbox_window_update(root_window);
 
@@ -467,8 +483,8 @@ mbox_shell_playerstatuschanged(struct avbox_player *inst,
 				avbox_window_show(progress);
 
 			} else {
-				assert(progress != NULL);
-				assert(progressbar != NULL);
+				ASSERT(progress != NULL);
+				ASSERT(progressbar != NULL);
 
 				/* update the progress bar */
 				avbox_progressview_setvalue(progressbar, avbox_player_bufferstate(inst));
@@ -593,19 +609,28 @@ mbox_shell_shutdown(void)
 static void *
 mbox_shell_addurl(void *data)
 {
-	if (!strncmp("magnet:", data, 7)) {
+	if (!strncmp("magnet:", data, 7) || !strncmp(data, "http", 4)) {
 		DEBUG_VPRINT(LOG_MODULE, "Received magnet url: %s",
 			data);
-		if (mb_downloadmanager_addurl(data) != 0) {
-			LOG_VPRINT_ERROR("Could not add URL: %s",
-				data);
-		}
+		avbox_player_play(player, data);
 	} else {
 		LOG_VPRINT_ERROR("Unsupported URL: %s",
 			data);
 	}
 	free(data);
 
+	return NULL;
+}
+
+
+static void *
+mbox_shell_download_url(void * const data)
+{
+	if (mbox_dlman_addurl(data) != 0) {
+		LOG_VPRINT_ERROR("Could not download URL: %s",
+			data);
+	}
+	free(data);
 	return NULL;
 }
 
@@ -780,6 +805,18 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 			ASSERT(event->payload != NULL);
 			struct avbox_delegate * del;
 			if ((del = avbox_workqueue_delegate(mbox_shell_addurl, event->payload)) == NULL) {
+				LOG_VPRINT_ERROR("Could not add url: %s", strerror(errno));
+				abort();
+			}
+			event->payload = NULL;
+			break;
+		}
+		case MBI_EVENT_DOWNLOAD:
+		{
+			DEBUG_PRINT(LOG_MODULE, "Received DOWNLOAD event");
+			ASSERT(event->payload != NULL);
+			struct avbox_delegate * del;
+			if ((del = avbox_workqueue_delegate(mbox_shell_download_url, event->payload)) == NULL) {
 				LOG_VPRINT_ERROR("Could not add url: %s", strerror(errno));
 				abort();
 			}

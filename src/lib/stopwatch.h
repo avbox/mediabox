@@ -7,6 +7,9 @@
 struct avbox_stopwatch;
 
 
+int
+avbox_stopwatch_running(const struct avbox_stopwatch * const inst);
+
 
 /**
  * Sets the stopwatch and stops it.

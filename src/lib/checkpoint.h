@@ -106,7 +106,7 @@ avbox_checkpoint_wait(avbox_checkpoint_t * const checkpoint, int64_t timeout)
 	if (checkpoint->state == AVBOX_CHECKPOINT_ENABLED) {
 		struct timespec tv;
 		tv.tv_sec = 0;
-		tv.tv_nsec = timeout;
+		tv.tv_nsec = timeout * 1000LL;
 		delay2abstime(&tv);
 		pthread_cond_timedwait(&checkpoint->halted, &checkpoint->mutex, &tv);
 		if (checkpoint->state != AVBOX_CHECKPOINT_ENABLED) {

@@ -46,6 +46,10 @@ init(struct mbv_drv_funcs * const driver, int argc, char **argv, int * const w, 
 	XWindowAttributes gwa;
 	XSetWindowAttributes swa;
 	Atom wm_state, wm_state_fullscreen;
+	char cursor_data = 0;
+	Pixmap blank;
+	XColor dummy;
+	Cursor cursor;
 
 	if ((xdisplay = XOpenDisplay(NULL)) == NULL) {
 		LOG_PRINT_ERROR("Could not open display!");
@@ -89,6 +93,18 @@ init(struct mbv_drv_funcs * const driver, int argc, char **argv, int * const w, 
 		XSendEvent(xdisplay, root_window, False,
 			SubstructureRedirectMask | SubstructureNotifyMask,
 			(XEvent*) &msg);
+	}
+
+	/* hide cursor */
+	if ((blank = XCreateBitmapFromData(xdisplay, xwindow, &cursor_data, 1, 1)) == None) {
+		LOG_PRINT_ERROR("Could not create invisible cursor pixmap!");
+	} else {
+		if ((cursor = XCreatePixmapCursor(xdisplay, blank, blank, &dummy, &dummy, 0, 0)) == None) {
+			LOG_PRINT_ERROR("Could not create invisible cursor!");
+		} else {
+			XDefineCursor(xdisplay, xwindow, cursor);
+		}
+		XFreePixmap(xdisplay, blank);
 	}
 
 	/* create GL context */

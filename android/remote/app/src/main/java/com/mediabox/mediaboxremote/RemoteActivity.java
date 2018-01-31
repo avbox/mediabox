@@ -15,6 +15,7 @@ import android.support.v4.app.DialogFragment;
 import android.support.v4.app.FragmentManager;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Base64;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.Menu;
@@ -26,6 +27,9 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.Toast;
 
 import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
@@ -37,6 +41,9 @@ import java.net.UnknownHostException;
 
 public class RemoteActivity extends AppCompatActivity
 {
+    public static final int ACTION_DOWNLOAD = 0;
+    public static final int ACTION_STREAM = 1;
+
     private static final int SERVER_PORT = 2048;
     private static final String BT_ADDRESS = "00:02:72:13:75:93";
 
@@ -186,14 +193,51 @@ public class RemoteActivity extends AppCompatActivity
         }
     }
 
+    private String readTorrent(String filename) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 9) {
+                File f = new File(filename);
+                if (f.length() <= Integer.MAX_VALUE) {
+                    FileInputStream fs = new FileInputStream(filename);
+                    byte data[] = new byte[(int) f.length()];
+                    if (fs.read(data, 0, (int) f.length()) > 0) {
+                        return Base64.encodeToString(data, Base64.DEFAULT);
+                    }
+                }
+            }
+        } catch (FileNotFoundException e) {
+            Log.d("RemoteActivity", e.toString());
+        } catch (IOException e) {
+            Log.d("RemoteActivity", e.toString());
+        }
+        return "";
+    }
+
     private void handleIntent(Intent intent)
     {
         if (intent != null) {
-            if (intent.getAction().equals("android.intent.action.VIEW")) {
+            if (intent.getAction().equals("android.intent.action.VIEW") ||
+                    intent.getAction().equals("android.intent.action.EDIT")) {
                 StreamOpenDialog dialog = new StreamOpenDialog();
-                dialog.setUrl(intent.getData().toString());
+                if (intent.getScheme().equals("file")) {
+                    dialog.setUrl(String.format("torrent: %s",
+                            readTorrent(intent.getData().toString())));
+                } else {
+                    dialog.setUrl(intent.getData().toString());
+                }
                 dialog.show(getSupportFragmentManager(), "dialog");
+            } else if (intent.getAction().equals("android.intent.action.SEND")) {
+                String url;
+                if ((url = intent.getStringExtra(Intent.EXTRA_TEXT)) != null) {
+                    StreamOpenDialog dialog = new StreamOpenDialog();
+                    dialog.setUrl(url);
+                    dialog.show(getSupportFragmentManager(), "dialog");
+                    Log.d("RemoteActivity",
+                            String.format("URL Received: %s", url));
+                }
             }
+        } else {
+            Log.d("Intent", intent.getAction());
         }
     }
 
@@ -289,10 +333,15 @@ public class RemoteActivity extends AppCompatActivity
         return true;
     }
 
-    public void onSendURL(String url)
+    public void onSendURL(String url, int action)
     {
-        Log.d("RemoteActivity", String.format("Sending %s", url));
-        sendMessage(String.format("URL:%s", url));
+        if (action == ACTION_STREAM) {
+            Log.d("RemoteActivity", String.format("Sending %s", url));
+            sendMessage(String.format("URL:%s", url));
+        } else {
+            Log.d("RemoteActivity", String.format("Downloading %s", url));
+            sendMessage(String.format("DOWNLOAD:%s", url));
+        }
     }
 
     public boolean onOptionsItemSelected(MenuItem item)

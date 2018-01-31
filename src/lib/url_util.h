@@ -27,11 +27,14 @@ urldecode(char *dst, const char *src);
 
 
 /**
- * mb_url_fetch_to_mem() -- Fetch to content of a url to a
- * malloc() allocated buffer
+ * Download the contents of a given URL to memory synchronously and
+ * in one shot. Then save the malloc'd buffer pointer to dest and it's
+ * size to *size. If *size >= 0 then it will be used as a size limit.
+ * Otherwise this function will block until the entire file is
+ * downloaded.
  */
 int
-mb_url_fetch2mem(char *url, void **dest, size_t *size);
+avbox_net_geturl(const char * const url, void **dest, size_t *size);
 
 
 #endif

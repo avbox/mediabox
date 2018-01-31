@@ -50,6 +50,7 @@ print_usage(const char * const prog)
 	printf(" --no-accel\t\tDisable video acceleration\n");
 	printf(" --dfb:XXX\t\tDirectFB options. See directfbrc(5)\n");
 	printf(" --logfile\t\tLog file\n");
+	printf(" --avbox:decode_cache_size\tSet the size of the decode cache\n");
 	printf(" --help\t\t\tShow this help\n");
 	printf("\n");
 }
@@ -89,6 +90,8 @@ main (int argc, char **argv)
 			if (!strcmp(argv[i], "--avbox:logfile")) {
 				/* pass through */
 				i++; /* ignore next */
+			} else if (!strcmp(argv[i], "--avbox:decode_cache_size")) {
+				i++;
 			}
 		} else if (!strncmp(argv[i], "--video:", 8)) {
 			/* let video args pass */

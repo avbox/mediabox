@@ -30,7 +30,7 @@
 /**
  * MB_DEBUG_SET_THREAD_NAME() -- Set the thread name as seen in debugger.
  */
-#if !defined(NDEBUG) && defined(_GNU_SOURCE)
+#if defined(_GNU_SOURCE)
 #define DEBUG_SET_THREAD_NAME(name) pthread_setname_np(pthread_self(), name)
 #else
 #define DEBUG_SET_THREAD_NAME(name) (void) name

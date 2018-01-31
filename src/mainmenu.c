@@ -360,7 +360,7 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 #ifdef ENABLE_BLUETOOTH
 		(avbox_bluetooth_ready() && avbox_listview_additem(inst->menu, "BLUETOOTH AUDIO", "A2DP") == -1) ||
 #endif
-		avbox_listview_additem(inst->menu, "DOWNLOADS", "DOWN") == -1 ||
+		avbox_listview_additem(inst->menu, "FILE TRANSFERS", "DOWN") == -1 ||
 		avbox_listview_additem(inst->menu, "GAMING CONSOLES", "CONSOLES") == -1 ||
 		avbox_listview_additem(inst->menu, "SETTINGS", "SETTINGS") == -1 ||
 		avbox_listview_additem(inst->menu, "ABOUT MEDIABOX", "ABOUT") == -1) {

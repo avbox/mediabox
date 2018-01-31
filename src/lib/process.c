@@ -213,6 +213,14 @@ avbox_process_fork(struct avbox_process *proc)
 
 	/**** Child process falls through ****/
 
+#ifdef ENABLE_REALTIME
+	struct sched_param parms;
+	parms.sched_priority = 0;
+	if (pthread_setschedparam(pthread_self(), SCHED_OTHER, &parms) != 0) {
+		LOG_PRINT_ERROR("Could not set main thread priority");
+	}
+#endif
+
 	/* close parent end of pipes */
 	close(in[1]);
 	if (out[0] != -1) {

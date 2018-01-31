@@ -98,7 +98,7 @@ sysinit_mount()
 /**
  * Configure the coredump directory.
  */
-static void
+void
 sysinit_coredump()
 {
 	int fd;

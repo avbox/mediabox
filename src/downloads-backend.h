@@ -21,9 +21,27 @@
 #ifndef __MB_DLBE_H__
 #define __MB_DLBE_H__
 
+struct mbox_dlman_download_item
+{
+	int type;
+	int percent;
+	void *stream;
+	const char *id;
+	const char *name;
+};
+
+
 
 int
-mb_downloadmanager_addurl(char *url);
+mbox_dlman_addurl(const char * const url);
+
+
+struct mbox_dlman_download_item*
+mbox_dlman_next(struct mbox_dlman_download_item * const current);
+
+
+void
+mbox_dlman_item_unref(struct mbox_dlman_download_item * const inst);
 
 
 int

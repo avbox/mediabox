@@ -39,12 +39,14 @@
 #include "input-socket.h"
 #include "../linkedlist.h"
 #include "../debug.h"
+#include "../avbox.h"
 
 
 static int sockfd = -1;
 static int newsockfd = -1;
 static int server_quit = 0;
-static pthread_t thread;
+static struct avbox_thread *thread = NULL;
+static struct avbox_delegate *worker = NULL;
 
 
 LIST_DECLARE_STATIC(sockets);
@@ -166,15 +168,23 @@ avbox_tcp_listener(void *arg)
 
 
 /**
- * mbi_tcp_init() -- Initialize the tcp input server
+ * Initialize the tcp input server
  */
 int
 mbi_tcp_init(void)
 {
 	LIST_INIT(&sockets);
 
-	if (pthread_create(&thread, NULL, avbox_tcp_listener, NULL) != 0) {
-		LOG_PRINT_ERROR("Could not start TCP listener");
+	if ((thread = avbox_thread_new(NULL, NULL, AVBOX_THREAD_REALTIME, -5)) == NULL) {
+		LOG_VPRINT_ERROR("Could not create TCP listener thread: %s",
+			strerror(errno));
+		return -1;
+	}
+	if ((worker = avbox_thread_delegate(thread, avbox_tcp_listener, NULL)) == NULL) {
+		LOG_VPRINT_ERROR("Could not delegate TCP listener worker: %s",
+			strerror(errno));
+		avbox_thread_destroy(thread);
+		thread = NULL;
 		return -1;
 	}
 	return 0;
@@ -200,5 +210,9 @@ mbi_tcp_destroy(void)
 		close(newsockfd);
 	}
 	close(sockfd);
-	pthread_join(thread, NULL);
+
+	avbox_delegate_wait(worker, NULL);
+	avbox_thread_destroy(thread);
+	thread = NULL;
+
 }

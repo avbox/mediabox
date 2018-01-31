@@ -435,7 +435,6 @@ avbox_audiostream_output(void *arg)
 	snd_pcm_sframes_t frames;
 	snd_pcm_uframes_t period = 1024, silence_len,
 		start_thres, stop_thres, silen_thres;
-	struct sched_param parms;
 	const snd_pcm_uframes_t fragment = 1024;
 
 	DEBUG_SET_THREAD_NAME("audio_output");
@@ -447,10 +446,13 @@ avbox_audiostream_output(void *arg)
 	ASSERT(inst->paused == 0);
 
 	/* set the thread priority to realtime */
-	parms.sched_priority = sched_get_priority_max(SCHED_FIFO);
-	if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &parms) != 0) {
+#ifdef ENABLE_REALTIME
+	struct sched_param parms;
+	parms.sched_priority = sched_get_priority_max(SCHED_RR) - 21;
+	if (pthread_setschedparam(pthread_self(), SCHED_RR, &parms) != 0) {
 		LOG_PRINT_ERROR("Could not send main thread priority");
 	}
+#endif
 
 	snd_pcm_hw_params_alloca(&params);
 	snd_pcm_sw_params_alloca(&swparams);
@@ -748,7 +750,6 @@ avbox_audiostream_output(void *arg)
 		}
 		pthread_cond_broadcast(&inst->wake);
 		pthread_mutex_unlock(&inst->lock);
-		sched_yield();
 	}
 
 end:

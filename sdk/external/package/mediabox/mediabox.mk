@@ -14,10 +14,11 @@ MEDIABOX_LICENSE = OTHER
 MEDIABOX_LICENSE_FILES = COPYING
 MEDIABOX_INSTALL_STAGING = NO
 MEDIABOX_AUTORECONF = YES
-MEDIABOX_DEPENDENCIES = libcurl libupnp openssl mediatomb avmount pango cairo \
-	alsa-lib ffmpeg
+MEDIABOX_DEPENDENCIES = libcurl libupnp openssl pango cairo \
+	alsa-lib ffmpeg libtorrentrb
 
-MEDIABOX_CONF_OPTS = --without-systemd --enable-ionice
+#MEDIABOX_CONF_ENV = PKG_CONFIG_PATH=/home/fernan/Projects/mediabox/sdk/build/arm/raspberrypi0/output/host/usr/lib/pkgconfig
+MEDIABOX_CONF_OPTS = --without-systemd --enable-ionice --enable-libtorrent
 
 ifeq ($(BR2_PACKAGE_MEDIABOX_DEBUG),y)
 MEDIABOX_CONF_OPTS += --enable-debug
@@ -59,6 +60,10 @@ endif
 ifeq ($(BR2_PACKAGE_MEDIABOX_DVD),y)
 MEDIABOX_CONF_OPTS += --enable-dvd
 MEDIABOX_DEPENDENCIES += libdvdnav
+endif
+
+ifeq ($(BR2_PACKAGE_MEDIABOX_REALTIME),y)
+MEDIABOX_CONF_OPTS += --enable-realtime
 endif
 
 # remove from package cache

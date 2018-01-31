@@ -46,4 +46,12 @@ strreplace(char *str, const char * const what, const char * const with);
 char *
 strtrim(char * const str);
 
+
+/**
+ * Return 1 if str1 ends with str2. Zero otherwise.
+ */
+int
+strendswith(const char * const str1, const char * const str2);
+
+
 #endif

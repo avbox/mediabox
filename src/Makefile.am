@@ -1,6 +1,6 @@
 AUTOMAKE_OPTIONS = subdir-objects
 
-AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
+AM_SHARED_FLAGS = \
 	-DDATADIR="$(datadir)" \
 	-DLOCALSTATEDIR="$(localstatedir)" \
 	@CFLAGS@ \
@@ -19,6 +19,9 @@ AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE \
 	@LIBDVDCSS_CFLAGS@ \
 	@LIBDVDNAV_CFLAGS@ \
 	@EGL_CFLAGS@
+
+AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE $(AM_SHARED_FLAGS)
+AM_CXXFLAGS = -std=c++11 -Wall $(AM_SHARED_FLAGS)
 
 AM_LDFLAGS = -lz -lm -lswscale \
 	@LIBS@ \
@@ -122,6 +125,12 @@ noinst_LIBRARIES = libvc4.a
 libvc4_a_SOURCES = lib/ui/video-vc4.c lib/ui/mmaldecode.c
 libvc4_a_CFLAGS = $(AM_CFLAGS) -std=gnu89
 mediabox_LDADD = $(AM_LDFLAGS) libvc4.a
+endif
+
+if ENABLE_LIBTORRENT
+mediabox_SOURCES += lib/torrent_stream.cpp lib/torrent_in.c
+AM_CXXFLAGS += @LIBTORRENT_CFLAGS@
+AM_LDFLAGS += @LIBTORRENT_LIBS@
 endif
 
 if ENABLE_OPENGL

@@ -1,0 +1,12 @@
+diff --git a/include/libtorrent/aux_/session_interface.hpp b/include/libtorrent/aux_/session_interface.hpp
+index 8a646a2..866b1b8 100644
+--- a/include/libtorrent/aux_/session_interface.hpp
++++ b/include/libtorrent/aux_/session_interface.hpp
+@@ -33,6 +33,7 @@ POSSIBILITY OF SUCH DAMAGE.
+ #ifndef TORRENT_SESSION_INTERFACE_HPP_INCLUDED
+ #define TORRENT_SESSION_INTERFACE_HPP_INCLUDED
+ 
++#include <cstdarg>
+ #include "libtorrent/config.hpp"
+ #include "libtorrent/peer_id.hpp"
+ #include "libtorrent/address.hpp"

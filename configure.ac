@@ -17,6 +17,7 @@ AC_PROG_MAKE_SET
 AC_PROG_RANLIB
 AM_PROG_AR
 AC_PATH_PROG([RM], [rm])
+AC_PROG_CXX
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_UID_T
@@ -72,6 +73,9 @@ else
 	AC_DEFINE([NDEBUG],1,[Define to 1  to disable debug code])
 	CFLAGS="-O2 -DNDEBUG -DHAVE_CONFIG_H"
 fi
+
+AM_CONDITIONAL(ENABLE_LIBTORRENT, test xyes = xyes)
+AC_DEFINE([ENABLE_LIBTORRENT], 1, [Define to 1 to enable libtorrent support])
 
 
 AC_ARG_ENABLE([ionice], [realtime IO priority for main process])
@@ -129,6 +133,11 @@ if test x"$enable_x11" = xyes; then
 	AC_DEFINE([ENABLE_X11], 1, [Define to 1 to enable X11 support])
 	AC_DEFINE([ENABLE_OPENGL], 1, [Define to 1 to enable OpenGL support])
 	AM_CONDITIONAL(ENABLE_OPENGL, [test xyes = xyes])
+fi
+
+AC_ARG_ENABLE([realtime], [Define to 1 to enable realtime scheduling support])
+if test x"$enable_realtime" = xyes; then
+	AC_DEFINE([ENABLE_REALTIME], 1, [Define to 1 to enable realtime scheduling support])
 fi
 
 
@@ -280,6 +289,12 @@ if test x"$enable_bluetooth" = xyes; then
 		AC_MSG_ERROR('Unable to find gio. Please make sure library and header files are installed.'))
 fi
 
+
+#
+# libtorrent
+#
+PKG_CHECK_MODULES(LIBTORRENT, [libtorrent-rasterbar >= 1.1.5], ,
+	AC_MSG_ERROR('Unable to find libtorrent. Please make sure library and header files are installed.'))
 
 
 #

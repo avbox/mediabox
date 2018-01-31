@@ -236,6 +236,8 @@ mbox_icon_draw(struct avbox_window * const window, void * const ctx)
 			break;
 		}
 		default:
+			DEBUG_VPRINT(LOG_MODULE, "Invalid state: %i",
+				inst->state);
 			ABORT("Invalid state!");
 		}
 
@@ -697,7 +699,7 @@ mbox_overlay_new(struct avbox_player *player)
 	inst->player = player;
 	inst->duration = 0;
 	inst->position = 0;
-	inst->state = -1;
+	inst->state = MBOX_OVERLAY_STATE_READY;
 	inst->last_state = -1;
 	inst->last_bar_pos = -1;
 	inst->last_duration = -1;

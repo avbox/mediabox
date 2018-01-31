@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#include "config.h"
+#	include "config.h"
 #endif
 #include <stdlib.h>
 #include <stdio.h>
@@ -32,110 +32,95 @@
 #include <sys/stat.h>
 #include <sys/sendfile.h>
 
-#ifdef ENABLE_IONICE
-#include "lib/ionice.h"
-#endif
-#include "lib/process.h"
-#include "lib/debug.h"
-#include "lib/log.h"
-#include "lib/file_util.h"
+#define LOG_MODULE "download-manager"
 
-#define DELUGE_BIN "/usr/bin/deluge-console"
-#define DELUGED_BIN "/usr/bin/deluged"
+#include "lib/avbox.h"
+#include "downloads-backend.h"
+
 #define PREFIX "/usr/local"
 
 #define STRINGIZE2(x)	#x
 #define STRINGIZE(x)	STRINGIZE2(x)
 
 
-int daemon_id = -1;
+#define MBOX_DOWNLOADTYPE_NONE		(0)
+#define MBOX_DOWNLOADTYPE_TORRENT	(1)
 
 
-/**
- * mb_downloadmanager_addurl() -- Adds a URL to the download queue.
- */
-int
-mb_downloadmanager_addurl(char *url)
+struct mbox_dlman_download_item*
+mbox_dlman_next(struct mbox_dlman_download_item * const current)
 {
-	int process_id, exit_status = -1;
+	ASSERT(current != NULL);
 
-	char * const args[] =
-	{
-		"deluge-console",
-		"connect",
-		"127.0.0.1",
-		"mediabox",
-		"mediabox;",
-		"add",
-		url,
-		NULL
-	};
-
-	/* launch the deluged process */
-	if ((process_id = avbox_process_start(DELUGE_BIN, (const char **) args,
-		AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
-		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_WAIT,
-		"deluge-console", NULL, NULL)) == -1) {
-		LOG_VPRINT(MB_LOGLEVEL_ERROR, "download-backend",
-			"Could not execute deluge-console (errno=%i)", errno);
-		return -1;
+	if (current->type == MBOX_DOWNLOADTYPE_NONE ||
+		current->type == MBOX_DOWNLOADTYPE_TORRENT) {
+		struct avbox_torrent * next = avbox_torrent_next(current->stream);
+		if (next == NULL) {
+			return NULL;
+		} else {
+			int64_t total_bytes, downloaded_bytes;
+			current->stream = next;
+			current->id = avbox_torrent_id(next);
+			current->name = avbox_torrent_name(next);
+			current->percent = 0;
+			if ((total_bytes = avbox_torrent_size(next)) != -1) {
+				downloaded_bytes = avbox_torrent_downloaded(next);
+				current->percent = (((downloaded_bytes * 100) / total_bytes) * 100) / 100;
+			}
+			return current;
+		}
+	} else {
+		ABORT("Invalid download type!");
 	}
+}
 
-	/* wait for process to exit */
-	avbox_process_wait(process_id, &exit_status);
-
-	return exit_status;
+void
+mbox_dlman_item_unref(struct mbox_dlman_download_item * const inst)
+{
+	avbox_torrent_unref(inst->stream);
 }
 
 
 /**
- * mb_downloadmanager_init() -- Initialize the download manager.
+ * Adds a URL to the download queue.
+ */
+int
+mbox_dlman_addurl(const char * const url)
+{
+	if (!strncmp(url, "magnet:", 7)) {
+		struct avbox_torrent *torrent;
+		if ((torrent = avbox_torrent_open(url, NULL,
+			AVBOX_TORRENTFLAGS_NONE, NULL)) == NULL) {
+			LOG_VPRINT_ERROR("Could not open torrent stream (%s): %s",
+				url, strerror(errno));
+			return -1;
+		}
+		avbox_torrent_moveonfinish(torrent, STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/store/Video");
+		return 0;
+	} else {
+		LOG_VPRINT_ERROR("URI scheme not supported: %s",
+			url);
+		errno = ENOTSUP;
+		return -1;
+	}
+}
+
+
+/**
+ * Initialize the download manager.
  */
 int
 mb_downloadmanager_init(void)
 {
-	char * const args[] =
-	{
-		"deluged",
-		"-d",
-		"-p",
-		"58846",
-		"-c",
-		STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/",
-		NULL
-	};
-
-	DEBUG_PRINT("download-backend", "Initializing download manager");
-
-	/* create all config files for deluged */
-	umask(000);
-
-	mkdir_p(STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/plugins", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-	cp(STRINGIZE(DATADIR) "/mediabox/deluge/core.conf", STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/core.conf");
-	cp(STRINGIZE(DATADIR) "/mediabox/deluge/auth", STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/auth");
-	unlink(STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/deluge/deluged.pid");
-
-	/* launch the deluged process */
-	if ((daemon_id = avbox_process_start(DELUGED_BIN, (const char **) args,
-		AVBOX_PROCESS_AUTORESTART | AVBOX_PROCESS_NICE | AVBOX_PROCESS_IONICE_IDLE |
-		AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_STDERR_LOG | AVBOX_PROCESS_STDOUT_LOG,
-		"Deluge Daemon", NULL, NULL)) == -1) {
-		fprintf(stderr, "download-backend: Could not start deluge daemon\n");
-		return -1;
-	}
 	return 0;
 }
 
 
 /**
- * mb_downloadmanager_destroy() -- Shutdown the download manager.
+ * Shutdown the download manager.
  */
 void
 mb_downloadmanager_destroy(void)
 {
 	DEBUG_PRINT("download-backend", "Shutting down download manager");
-
-	if (daemon_id != -1) {
-		avbox_process_stop(daemon_id);
-	}
 }

@@ -57,6 +57,7 @@
 #define AVBOX_PLAYERCTL_SET_DURATION			(0x14)
 #define AVBOX_PLAYERCTL_SET_POSITION			(0x15)
 #define AVBOX_PLAYERCTL_UPDATE				(0x16)
+#define AVBOX_PLAYERCTL_BUFFER_UPDATE			(0x17)
 
 
 struct avbox_player;
@@ -69,11 +70,13 @@ struct avbox_player_stream
 {
 	void *self;
 	void *avio;
+	int manages_position;
 
 	void (*play)(void *self, const int skip_to_menu);
 	void (*seek)(void *self, int flags, int64_t pos);
 	void (*close)(void *self);
 	void (*destroy)(void *self);
+	void (*buffer_state)(void *self, int64_t * const count, int64_t * const capacity);
 
 	int (*underrun_expected)(void *self);
 	int (*can_pause)(void *self);

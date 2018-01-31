@@ -9,6 +9,8 @@ config BR2_PACKAGE_LIBTORRENTRB
 	select BR2_PACKAGE_BOOST_THREAD
 	select BR2_PACKAGE_BOOST_FILESYSTEM
 	select BR2_PACKAGE_BOOST_DATE_TIME
+	select BR2_PACKAGE_BOOST_CHRONO
+	select BR2_PACKAGE_BOOST_RANDOM
 	help
 	  C++ BitTorrent implementation focusing on efficiency and scalability
 

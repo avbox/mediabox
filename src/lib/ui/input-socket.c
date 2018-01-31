@@ -120,7 +120,14 @@ avbox_input_socket_connect(void *arg)
 		}
 
 		/* process the command */
-		if (!strncmp("MENU_LONG", buffer, 9)) {
+		if (!strncmp("DOWNLOAD:", buffer, 9)) {
+			char *url;
+			if ((url = strdup(buffer + 9)) == NULL) {
+				LOG_PRINT_ERROR("Could not allocate memory for DOWNLOAD link");
+			} else {
+				avbox_input_sendevent(MBI_EVENT_DOWNLOAD, url);
+			}
+		} else if (!strncmp("MENU_LONG", buffer, 9)) {
 			avbox_input_sendevent(MBI_EVENT_CONTEXT, NULL);
 		} else if (!strncmp("MENU", buffer, 4)) {
 			avbox_input_sendevent(MBI_EVENT_MENU, NULL);

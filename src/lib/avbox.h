@@ -50,10 +50,17 @@
 #include "thread.h"
 #include "stopwatch.h"
 #include "syncarg.h"
+#include "file_util.h"
+#include "string_util.h"
+#include "url_util.h"
 
 #ifdef ENABLE_DVD
 #	include "dvdio.h"
 #endif
 
+#ifdef ENABLE_LIBTORRENT
+#	include "torrent_stream.h"
+#	include "torrent_in.h"
+#endif
 
 #endif

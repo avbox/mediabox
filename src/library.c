@@ -2282,6 +2282,15 @@ mbox_library_local_inotify(void * const arg)
 	DEBUG_SET_THREAD_NAME("library-inotify");
 	DEBUG_PRINT(LOG_MODULE, "Starting inotify loop");
 
+#ifdef ENABLE_REALTIME
+	struct sched_param parms;
+	parms.sched_priority = 0;
+	if (pthread_setschedparam(pthread_self(), SCHED_IDLE, &parms) != 0) {
+		LOG_PRINT_ERROR("Could not set main thread priority");
+	}
+#endif
+
+
 	while (!local_inotify_quit) {
 
 		if (read(local_inotify_fd, buf, sizeof(buf)) == -1) {
@@ -2626,9 +2635,6 @@ mbox_library_init(void)
 
 	/* parse command line arguments */
 	for (i = 0, argv = avbox_application_args(&argc); i < argc; i++) {
-		DEBUG_VPRINT(LOG_MODULE, "Got argument: '%s'",
-			argv[i]);
-
 		if (!strncmp(argv[i], "--store=", 8)) {
 			if ((store = strdup(argv[i] + 8)) == NULL) {
 				ASSERT(errno == ENOMEM);

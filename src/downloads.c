@@ -47,7 +47,7 @@
 #include "lib/su.h"
 #endif
 
-#define DELUGE_BIN "/usr/bin/deluge-console"
+#include "downloads-backend.h"
 
 
 LISTABLE_STRUCT(mbox_download,
@@ -118,8 +118,6 @@ static void *
 mbox_downloads_updateitem(void *arg)
 {
 	struct mbox_downloads_update_context * const ctx = arg;
-	DEBUG_VPRINT("downloads", "Updating listview item (name=%s)",
-		ctx->name);
 	avbox_listview_setitemtext(ctx->list, ctx->id, ctx->name);
 	return NULL;
 }
@@ -143,15 +141,12 @@ mbox_downloads_updatewindow(void *arg)
  * which is called from a background thread.
  */
 static int
-mbox_downloads_updateentry(struct mbox_downloads *inst, char *id, char *name)
+mbox_downloads_updateentry(struct mbox_downloads *inst, const char *id, char *name)
 {
 	int found = 0;
 	struct mbox_download *dl;
 	struct mbox_downloads_update_context ctx;
 	struct avbox_delegate *del;
-
-	DEBUG_VPRINT("downloads", "Updating entry (id=%s, name=%s)",
-		id, name);
 
 	LIST_FOREACH(struct mbox_download*, dl, &inst->downloads) {
 		if (!strcmp(dl->id, id)) {
@@ -237,137 +232,48 @@ mbox_downloads_freeitems(void *item, void *data)
 static void*
 mbox_downloads_populatelistasync(void *data)
 {
-	int process_id, exit_status = -1;
-	FILE *f;
-	size_t n = 0;;
-	char *str = NULL, *name = NULL, *id = NULL, *progress = NULL, *progressbar = NULL;
 	char buf[512];
+	struct mbox_download *dl;
 	struct mbox_downloads * const inst = data;
 	struct avbox_delegate * del;
-	const char * const deluge_args[] =
-	{
-		"deluge-console",
-		"connect",
-		"127.0.0.1",
-		"mediabox",
-		"mediabox;",
-		"info",
-		NULL
-	};
+	struct mbox_dlman_download_item itemmem = {0};
+	struct mbox_dlman_download_item *item = &itemmem;
 
-	DEBUG_PRINT("downloads", "Populating list (background)");
+	/* clear the updated flag on all items */
+	LIST_FOREACH_SAFE(struct mbox_download*, dl, &inst->downloads, {
+		dl->updated = 0;
+	});
 
-	/* run the deluge-console process */
-	if ((process_id = avbox_process_start(DELUGE_BIN, deluge_args,
-		AVBOX_PROCESS_NICE | AVBOX_PROCESS_SUPERUSER | AVBOX_PROCESS_STDOUT_PIPE |
-		AVBOX_PROCESS_WAIT, "deluge-console", NULL, NULL)) == -1) {
-		LOG_PRINT_ERROR("Could not execute deluge-console");
-		return (void*) (intptr_t) -1;
+	/* update the in-memory list */
+	while ((item = mbox_dlman_next(item)) != NULL) {
+		snprintf(buf, 512, "%s (%i%%)",
+			item->name, item->percent);
+		mbox_downloads_updateentry(inst, item->id, buf);
+		mbox_dlman_item_unref(item);
 	}
 
-	f = fdopen(avbox_process_openfd(process_id, STDOUT_FILENO), "r");
-	if (f == NULL) {
-		LOG_PRINT_ERROR("Could not open stream");
-		return (void*) (intptr_t) -1;
-	} else {
-		while (getline(&str, &n, f) != -1) {
-			if (str != NULL) {
-				if (!memcmp(str, "Name: ", 6)) {
-					str[strlen(str) - 1] = '\0';
-					name = strdup(str + 6);
-					if (name == NULL) {
-						LOG_PRINT_ERROR("Out of memory");
-					}
-					/* fprintf(stderr, "Name: %s\n", name); */
-
-				} else if (!memcmp("ID: ", str, 4)) {
-					if (name != NULL) {
-						str[strlen(str) - 1] = '\0';
-						id = strdup(str + 4);
-						if (id == NULL) {
-							LOG_PRINT_ERROR("Out of memory");
-							free(name);
-							name = NULL;
-						} else {
-							/* fprintf(stderr, "ID: %s\n", id); */
-						}
-					}
-
-				} else if (!memcmp("Progress: ", str, 10)) {
-					if (id != NULL) {
-						progress = str + 10;
-						progressbar = progress;
-
-						while (*progressbar != ' ') {
-							progressbar++;
-						}
-						*progressbar++ = '\0';
-						progressbar[strlen(progressbar) -1] = '\0';
-
-						if ((progress = strdup(progress)) == NULL) {
-							LOG_PRINT_ERROR("Out of memory");
-							free(id);
-							free(name);
-							id = NULL;
-							name = NULL;
-						} else if ((progressbar = strdup(progressbar)) == NULL) {
-							LOG_PRINT_ERROR("Out of memory");
-							free(progress);
-							free(id);
-							free(name);
-							progress = NULL;
-							id = NULL;
-							name = NULL;
-						} else {
-							snprintf(buf, 512, "%s (%s)",
-								name, progress);
-
-							mbox_downloads_updateentry(inst, id, buf);
-
-							free(name);
-							free(progress);
-							free(progressbar);
-							free(id);
-							name = NULL;
-							progress = NULL;
-							progressbar = NULL;
-							id = NULL;
-						}
-					}
-				}
-				free(str);
-				str = NULL;
-				n = 0;
-			}
-		}
-		fclose(f);
-
-		if (str != NULL) {
-			free(str);
-		}
-
-		struct mbox_download *dl;
-		LIST_FOREACH_SAFE(struct mbox_download*, dl, &inst->downloads, {
-			if (!dl->updated) {
-				struct mbox_downloads_update_context ctx;
-				ctx.list = inst->menu;
-				ctx.id = dl->id;
-				if ((del = avbox_window_delegate(inst->window,
-					mbox_downloads_removeitem, &ctx)) == NULL) {
-					LOG_VPRINT_ERROR("Could not remove entry: %s",
-						strerror(errno));
-				} else {
-					avbox_delegate_wait(del, NULL);
-				}
-				LIST_REMOVE(dl);
-				free(dl->id);
-				free(dl->name);
-				free(dl);
+	/* update all the items that where found and remove the
+	 * rest */
+	LIST_FOREACH_SAFE(struct mbox_download*, dl, &inst->downloads, {
+		if (!dl->updated) {
+			struct mbox_downloads_update_context ctx;
+			ctx.list = inst->menu;
+			ctx.id = dl->id;
+			if ((del = avbox_window_delegate(inst->window,
+				mbox_downloads_removeitem, &ctx)) == NULL) {
+				LOG_VPRINT_ERROR("Could not remove entry: %s",
+					strerror(errno));
 			} else {
-				dl->updated = 0;
+				avbox_delegate_wait(del, NULL);
 			}
-		});
-	}
+			LIST_REMOVE(dl);
+			free(dl->id);
+			free(dl->name);
+			free(dl);
+		} else {
+			dl->updated = 0;
+		}
+	});
 
 	/* update the window from the main thread */
 	if ((del = avbox_window_delegate(inst->window,
@@ -378,14 +284,7 @@ mbox_downloads_populatelistasync(void *data)
 		avbox_delegate_wait(del, NULL);
 	}
 
-	/* wait for process to exit */
-	if (avbox_process_wait(process_id, &exit_status) == -1) {
-		LOG_PRINT(MB_LOGLEVEL_ERROR, "download", "avbox_process_wait() failed");
-		return (void*) (intptr_t) -1;
-	}
-
-	DEBUG_PRINT("downloads", "List populated");
-	return (void*) (intptr_t) ((exit_status == 0) ? 0 : -1);
+	return 0;
 }
 
 
@@ -406,7 +305,6 @@ mbox_downloads_populatelist(int id, void *data)
 		/* check if it finished and collect result */
 		if (avbox_delegate_finished(inst->worker)) {
 			void *result;
-			DEBUG_PRINT("downloads", "Worker completed");
 			avbox_delegate_wait(inst->worker, &result);
 			inst->worker = NULL;
 			if ((intptr_t) result != 0) {
@@ -415,7 +313,6 @@ mbox_downloads_populatelist(int id, void *data)
 			}
 		}
 	} else {
-		DEBUG_PRINT("downloads", "Populating list");
 		/* populate the list from a background thread */
 		if ((inst->worker = avbox_workqueue_delegate(
 			mbox_downloads_populatelistasync, data)) == NULL) {
@@ -464,7 +361,6 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 	{
 		struct avbox_timer_data * const timer_data =
 			avbox_message_payload(msg);
-		DEBUG_PRINT(LOG_MODULE, "Timer callback received");
 		if (inst->update_timer_id == timer_data->id) {
 			if (inst->destroying) {
 				inst->update_timer_id = -1;
@@ -492,8 +388,6 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 	}
 	case AVBOX_MESSAGETYPE_DESTROY:
 	{
-		DEBUG_PRINT(LOG_MODULE, "Destroying downloads window");
-
 		inst->destroying = 1;
 
 		/* hide the window */
@@ -505,7 +399,6 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 		/* if the update timer is still running wait for
 		 * it to stop */
 		if (inst->update_timer_id != -1) {
-			DEBUG_PRINT(LOG_MODULE, "Delaying destruction. Timer pending");
 			return AVBOX_DISPATCH_CONTINUE;
 		}
 
@@ -514,7 +407,6 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 		if (inst->worker != NULL) {
 			DEBUG_PRINT("downloads", "Waiting for worker");
 			if (!avbox_delegate_finished(inst->worker)) {
-				DEBUG_PRINT(LOG_MODULE, "Delaying destruction. Worker running");
 				return AVBOX_DISPATCH_CONTINUE;
 			} else {
 				avbox_delegate_wait(inst->worker, NULL);
@@ -589,7 +481,7 @@ mbox_downloads_new(struct avbox_object *parent)
 		free(inst);
 		return NULL;
 	}
-	if (avbox_window_settitle(inst->window, "DOWNLOADS") == -1) {
+	if (avbox_window_settitle(inst->window, "FILE TRANSFERS") == -1) {
 		LOG_VPRINT_ERROR("Could not set window title: %s",
 			strerror(errno));
 	}

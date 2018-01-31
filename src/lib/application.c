@@ -53,6 +53,9 @@
 #ifdef ENABLE_IONICE
 #include "ionice.h"
 #endif
+#ifdef ENABLE_LIBTORRENT
+#include "torrent_stream.h"
+#endif
 
 
 LISTABLE_STRUCT(avbox_application_subscriber,
@@ -364,7 +367,6 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 	int i, nolog = 0;
 	char **argv;
 	const char * logfile = NULL;
-	struct sched_param parms;
 
 	pid1 = (getpid() == 1);
 
@@ -439,11 +441,33 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 		return -1;
 	}
 
+#ifdef ENABLE_REALTIME
+	/* set the priority to the highest realtime priority of the
+	 * video threads (any threads created during initialization of
+	 * the video driver */
+	struct sched_param parms;
+	parms.sched_priority = sched_get_priority_max(SCHED_RR) - 20;
+	if (pthread_setschedparam(pthread_self(), SCHED_RR, &parms) != 0) {
+		LOG_PRINT_ERROR("Could not send main thread priority");
+	}
+#endif
+
 	/* initialize video device */
 	if (avbox_video_init(argc, argv) == -1) {
 		LOG_PRINT_ERROR("Could not initialize video subsystem");
 		return -1;
 	}
+
+#ifdef ENABLE_REALTIME
+	/* set the priority of the main thread to the highest realtime priority */
+	/* NOTE: This will fail when running as a regular user so we
+	 * must call it after the log is initialized or else the
+	 * LOG_PRINT_ERROR() will cause a SEGFAULT. */
+	parms.sched_priority = sched_get_priority_max(SCHED_RR);
+	if (pthread_setschedparam(pthread_self(), SCHED_RR, &parms) != 0) {
+		LOG_PRINT_ERROR("Could not send main thread priority");
+	}
+#endif
 
 	/* initialize system */
 	if (pid1 && sysinit_init(logfile) != 0) {
@@ -457,15 +481,14 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 			exit(EXIT_FAILURE);
 		}
 		log_setfile(f);
-	}
 
-	/* set the priority of the main thread to realtime */
-	/* NOTE: This will fail when running as a regular user so we
-	 * must call it after the log is initialized or else the
-	 * LOG_PRINT_ERROR() will cause a SEGFAULT. */
-	parms.sched_priority = sched_get_priority_max(SCHED_FIFO);
-	if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &parms) != 0) {
-		LOG_PRINT_ERROR("Could not send main thread priority");
+#ifndef NDEBUG
+		sysinit_coredump();
+#endif
+	} else {
+#ifndef NDEBUG
+		sysinit_coredump();
+#endif
 	}
 
 #ifdef ENABLE_BLUETOOTH
@@ -490,6 +513,13 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 #ifdef ENABLE_IONICE
 	if (ioprio_set(IOPRIO_WHO_PROCESS, getpid(), IOPRIO_PRIO_VALUE(IOPRIO_CLASS_RT, 4)) == -1) {
 		LOG_PRINT_ERROR("Could not set priority to realtime");
+	}
+#endif
+
+#ifdef ENABLE_LIBTORRENT
+	if (avbox_torrent_init() == -1) {
+		LOG_PRINT_ERROR("Could not start torrent engine");
+		return -1;
 	}
 #endif
 
@@ -555,6 +585,7 @@ avbox_application_run(void)
 	}
 
 	/* cleanup */
+	avbox_torrent_shutdown();
 	avbox_audiostream_shutdown();
 	avbox_process_shutdown();
 	avbox_timers_shutdown();

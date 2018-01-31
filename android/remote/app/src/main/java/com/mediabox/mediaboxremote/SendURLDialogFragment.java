@@ -35,7 +35,8 @@ public class SendURLDialogFragment extends AppCompatDialogFragment {
                 .setPositiveButton("Send", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        ((RemoteActivity) getActivity()).onSendURL(input.getText().toString());
+                        ((RemoteActivity) getActivity()).onSendURL(input.getText().toString(),
+                                RemoteActivity.ACTION_STREAM);
                     }
                 })
                 .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {

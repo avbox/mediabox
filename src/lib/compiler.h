@@ -48,8 +48,12 @@
  */
 #define STATIC		static
 #define INTERNAL	__attribute__ ((visibility("hidden")))
-#define EXPORT		__attribute__ ((visibility("default")))
 #define PROTECTED	__attribute__ ((visibility("protected")))
+#ifdef __cplusplus
+#define EXPORT		extern "C" __attribute__ ((visibility("default")))
+#else
+#define EXPORT		__attribute__ ((visibility("default")))
+#endif
 
 
 #endif

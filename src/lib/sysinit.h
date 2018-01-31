@@ -24,7 +24,12 @@
 int
 sysinit_init(const char * const filepath);
 
+
 void
 sysinit_shutdown(void);
+
+
+void
+sysinit_coredump();
 
 #endif

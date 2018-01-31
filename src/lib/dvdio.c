@@ -806,6 +806,7 @@ avbox_dvdio_open(const char * const path, struct avbox_player * const player,
 	/* fill the funtion table */
 	stream->self = inst;
 	stream->avio = inst->avio_ctx;
+	stream->manages_position = 1;
 	stream->play = (void*) &avbox_dvdio_play;
 	stream->seek = (void*) &avbox_dvdio_seek;
 	stream->close = (void*) &avbox_dvdio_close;

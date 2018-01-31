@@ -31,7 +31,7 @@
  * Create a new thread.
  */
 struct avbox_thread *
-avbox_thread_new(avbox_message_handler handler, void * const context, int flags);
+avbox_thread_new(avbox_message_handler handler, void * const context, int flags, int prio);
 
 
 /**

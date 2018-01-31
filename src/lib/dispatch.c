@@ -116,22 +116,16 @@ avbox_dispatch_getqueue(const pid_t tid)
 }
 
 
-/**
- * Reference a dispatch object.
- */
-static struct avbox_object*
-avbox_object_ref(struct avbox_object *obj)
+struct avbox_object*
+avbox_object_ref(struct avbox_object * const obj)
 {
-	assert(obj != NULL);
+	ASSERT(obj != NULL);
 	ATOMIC_INC(&obj->refs);
 	return obj;
 }
 
 
-/**
- * Unreference a dispatch object.
- */
-static void
+void
 avbox_object_unref(struct avbox_object *obj)
 {
 	ATOMIC_DEC(&obj->refs);

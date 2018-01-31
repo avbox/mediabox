@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#if 1
+#if 0
 #	include "/opt/vc/include/interface/mmal/mmal.h"
 #	include "/opt/vc/include/interface/mmal/mmal_parameters.h"
 #	include "/opt/vc/include/interface/mmal/util/mmal_connection.h"
@@ -24,7 +24,7 @@
 
 #define ENABLE_ZERO_COPY 1
 
-#define N_EXTRA_BUFFERS	(6)
+#define N_EXTRA_BUFFERS	(16)
 
 struct avbox_mmal_context
 {
@@ -309,7 +309,7 @@ avbox_mmal_output_format_change(struct avbox_player * const inst,
 	}
 #endif
 
-#if 0
+#if 1
 	if ((status = mmal_port_parameter_set_uint32(ctx->output,
 		MMAL_PARAMETER_EXTRA_BUFFERS, N_EXTRA_BUFFERS)) != MMAL_SUCCESS) {
 		LOG_VPRINT_ERROR("Could not set extra buffers param: %s",
@@ -383,12 +383,21 @@ avbox_mmal_decode(void *arg)
 	AVPacket packet_copy = {0};
 	MMAL_STATUS_T status;
 	MMAL_COMPONENT_T *component;
-	MMAL_PARAMETER_BOOLEAN_T error_conceal;
 	MMAL_BUFFER_HEADER_T *buffer;
 
 	DEBUG_SET_THREAD_NAME("mmal-decode");
 
 	ctx.inst = inst;
+
+#if 0
+	/* set the thread priority to realtime */
+	struct sched_param parms;
+	parms.sched_priority = sched_get_priority_max(SCHED_RR);
+	if (pthread_setschedparam(pthread_self(), SCHED_RR, &parms) != 0) {
+		LOG_PRINT_ERROR("Could not send main thread priority");
+	}
+#endif
+
 
 	/* create video decoder component */
 	if ((status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_DECODER,
@@ -440,14 +449,13 @@ avbox_mmal_decode(void *arg)
 					stream->codecpar->extradata, stream->codecpar->extradata_size);
 				ctx.input->format->extradata_size = stream->codecpar->extradata_size;
 			}
-		} else {
-			/* send extra data here */
-			error_conceal.hdr.id = MMAL_PARAMETER_VIDEO_DECODE_ERROR_CONCEALMENT;
-			error_conceal.hdr.size = sizeof(MMAL_PARAMETER_BOOLEAN_T);
-			error_conceal.enable = MMAL_FALSE;
-			if ((status = mmal_port_parameter_set(ctx.input, &error_conceal.hdr)) != MMAL_SUCCESS) {
-				LOG_PRINT_ERROR("Could not disable error concealment");
-			}
+		}
+
+		/* disable error concealment */
+		if ((status = mmal_port_parameter_set_boolean(ctx.input,
+			MMAL_PARAMETER_VIDEO_DECODE_ERROR_CONCEALMENT, MMAL_FALSE)) != MMAL_SUCCESS) {
+			LOG_VPRINT_ERROR("Could not disable error concealment: %s",
+				mmal_status_to_string(status));
 		}
 		break;
 	}
@@ -567,6 +575,7 @@ avbox_mmal_decode(void *arg)
 			if (errno == EAGAIN) {
 				if (inst->video_decoder_flushed ||
 					!(inst->flushing & AVBOX_PLAYER_FLUSH_VIDEO)) {
+					usleep(50L * 1000L);
 					continue;
 				}
 
@@ -599,13 +608,13 @@ avbox_mmal_decode(void *arg)
 		 * buffers so we can keep using it */
 		if (ctx.flushing) {
 			/* wait for pipeline to flush */
-			int packets, frames, transit;
+			int packets, frames, transit, iter_count = 0;
 
 			DEBUG_PRINT(LOG_MODULE, "Flushing video decoder");
 
 			/* tell MMAL to flush the decoder buffers */
 			mmal_port_flush(ctx.input);
-			mmal_port_flush(ctx.output);
+			/* mmal_port_flush(ctx.output); */
 
 			/* wait for the buffers to flush */
 			while (1) {
@@ -615,21 +624,29 @@ avbox_mmal_decode(void *arg)
 					mmal_queue_length(ctx.output_pool->queue);
 				transit = ctx.in_transit;
 
-				if (packets == 0 && frames == 0 && transit == 0) {
+				/* NOTE: We'll always have at least one frame in transit
+				 * since the player keeps it. TODO: We don't need to count
+				 * transit frame here. */
+				if (packets == 0 && transit <= 1) {
 					break;
 				}
-				usleep(1000LL);
+				if (++iter_count > 50) {
+					DEBUG_VPRINT(LOG_MODULE, "packets=%i frames=%i transit=%i num=%i",
+						packets, frames, transit, ctx.output_pool->headers_num);
+				}
+				usleep(10LL * 1000LL);
 			}
 
 			/* recreate the output pool as all the buffers become
 			 * invalid after flush */
+			/*
 			if (ctx.output_pool != NULL) {
 				mmal_pool_destroy(ctx.output_pool);
 				if ((ctx.output_pool = mmal_port_pool_create(ctx.output, ctx.output->buffer_num,
 					ctx.output->buffer_size)) == NULL) {
 					LOG_PRINT_ERROR("Could not create output pool!");
 				}
-			}
+			} */
 
 			/* reload the output buffers */
 			avbox_mmal_output_port_fill(&ctx);
@@ -702,7 +719,7 @@ avbox_mmal_decode(void *arg)
 
 				inst->video_decoder_flushed = 0;
 			} else {
-				DEBUG_VPRINT(LOG_MODULE, "Could not get input buffer from pool (in_transit=%i in_decoder=%i)",
+				LOG_VPRINT_ERROR("Could not get input buffer from pool (in_transit=%i in_decoder=%i)",
 					ctx.in_transit, ctx.in_decoder);
 			}
 		}
@@ -713,6 +730,11 @@ end:
 
 	avbox_checkpoint_disable(&inst->video_decoder_checkpoint);
 
+	/* signal the video thread to exit */
+	if (inst->video_frames_q != NULL) {
+		avbox_queue_close(inst->video_frames_q);
+	}
+
 	/* wait until all frames in transit have been
 	 * flushed */
 	ctx.flushing = 1;
@@ -721,11 +743,6 @@ end:
 	}
 
 	DEBUG_PRINT(LOG_MODULE, "All frames clear!");
-
-	/* signal the video thread to exit */
-	if (inst->video_frames_q != NULL) {
-		avbox_queue_close(inst->video_frames_q);
-	}
 
 	if (component != NULL && component->control->is_enabled) {
 		mmal_port_disable(component->control);

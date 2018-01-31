@@ -47,6 +47,7 @@ LISTABLE_STRUCT(avbox_thread,
 	int running;
 	int busy;
 	int flags;
+	int prio;
 #ifndef NDEBUG
 	int no;
 	int64_t jobs;
@@ -75,15 +76,20 @@ avbox_thread_msghandler(void * const context, struct avbox_message *msg)
 	struct avbox_thread * const thread = context;
 
 	/* if this is a realtime thread set it's priority */
-	#if 0
+#ifdef ENABLE_REALTIME
+	struct sched_param parms;
 	if (thread->flags & AVBOX_THREAD_REALTIME) {
-		struct sched_param parms;
-		parms.sched_priority = sched_get_priority_min(SCHED_FIFO);
-		if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &parms) != 0) {
+		parms.sched_priority = (sched_get_priority_max(SCHED_RR) - 20) + thread->prio;
+		if (pthread_setschedparam(pthread_self(), SCHED_RR, &parms) != 0) {
 			LOG_PRINT_ERROR("Could not set the priority of realtime thread!");
 		}
+	} else {
+		parms.sched_priority = 0;
+		if (pthread_setschedparam(pthread_self(), SCHED_OTHER, &parms) != 0) {
+			LOG_PRINT_ERROR("Could not set the priority of normal thread!");
+		}
 	}
-	#endif
+#endif
 
 	switch (avbox_message_id(msg)) {
 	case AVBOX_MESSAGETYPE_DELEGATE:
@@ -199,7 +205,7 @@ end:
  * Create a new thread.
  */
 struct avbox_thread *
-avbox_thread_new(avbox_message_handler handler, void * const context, int flags)
+avbox_thread_new(avbox_message_handler handler, void * const context, int flags, int prio)
 {
 	struct avbox_thread *thread;
 
@@ -224,6 +230,7 @@ avbox_thread_new(avbox_message_handler handler, void * const context, int flags)
 	thread->context = context;
 	thread->flags = flags;
 	thread->running = 0;
+	thread->prio = prio;
 	if (pthread_create(&thread->thread, NULL, avbox_thread_run, thread) != 0) {
 		free(thread);
 		return NULL;
@@ -367,9 +374,10 @@ static void *
 avbox_workqueue_thread_init(void *arg)
 {
 	struct avbox_thread * const thread = arg;
-#ifndef NDEBUG
 	DEBUG_SET_THREAD_NAME("avbox-worker");
 	DEBUG_VPRINT("thread", "Thread #%i started", thread->no);
+
+#ifndef NDEBUG
 	static int thread_no = 0;
 	thread->no = thread_no++;
 #endif
@@ -389,7 +397,7 @@ avbox_workqueue_init(void)
 	LIST_INIT(&workqueue_threads);
 
 	for (i = 0; i < N_THREADS; i++) {
-		if ((thread = avbox_thread_new(NULL, NULL, 0)) == NULL ||
+		if ((thread = avbox_thread_new(NULL, NULL, 0, 0)) == NULL ||
 			(initfunc = avbox_thread_delegate(thread, avbox_workqueue_thread_init, thread)) == NULL) {
 			if (thread != NULL) {
 				avbox_thread_destroy(thread);

@@ -135,3 +135,20 @@ strtrim(char * const str)
 
 	return str;
 }
+
+
+/**
+ * Return 1 if str1 ends with str2. Zero otherwise.
+ */
+int
+strendswith(const char * const str1, const char * const str2)
+{
+	const size_t len1 = strlen(str1);
+	const size_t len2 = strlen(str2);
+	if (len1 < len2) {
+		return 0;
+	}
+	const int ret = !strcmp(str1 + (len1 - len2), str2) ? 1 : 0;
+	DEBUG_VPRINT(LOG_MODULE, "RETURNING %i", ret);
+	return ret;
+}

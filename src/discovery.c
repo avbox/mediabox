@@ -67,7 +67,7 @@ genid(void)
 		return id;
 	}
 	for(i = 0; i < 12; i++) {
-		j = (int) ((double) rand() / RAND_MAX * (sizeof(charset) - 1));
+		j = (int) ((double) (rand() - 1) / RAND_MAX * (sizeof(charset) - 1));
 		id[i] = charset[j];
 	}
 	id[12] = '\0';

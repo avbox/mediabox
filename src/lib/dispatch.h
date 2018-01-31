@@ -47,6 +47,7 @@
 #define AVBOX_MESSAGETYPE_DISMISSED	(0x0A)
 #define AVBOX_MESSAGETYPE_DESTROY	(0x0C)
 #define AVBOX_MESSAGETYPE_CLEANUP	(0x0D)
+#define AVBOX_MESSAGETYPE_STREAM_READY	(0x0E)
 #define AVBOX_MESSAGETYPE_USER		(0xFF)
 
 #define AVBOX_DISPATCH_OK		(0)
@@ -111,6 +112,20 @@ avbox_object_sendmsg(struct avbox_object **dest,
  */
 struct avbox_object*
 avbox_object_new(avbox_message_handler handler, void *context);
+
+
+/**
+ * Get a reference to an object.
+ */
+struct avbox_object*
+avbox_object_ref(struct avbox_object * const obj);
+
+
+/**
+ * Release a reference to an object
+ */
+void
+avbox_object_unref(struct avbox_object *obj);
 
 
 /**
