@@ -398,14 +398,18 @@ avbox_process_force_kill(int id, void *data)
 
 	DEBUG_VPRINT("process", "Force kill callback for process %id",
 		proc_id);
+	ASSERT(proc_id != -1);
 
 	pthread_mutex_lock(&process_list_lock);
 
 	LIST_FOREACH(struct avbox_process*, proc, &process_list) {
 		if (proc->id == proc_id) {
+			const pid_t proc_pid = proc->pid;
+
 			DEBUG_VPRINT("process", "Force killing process %i (pid=%i)",
 				proc_id, proc->pid);
-			if (kill(proc->pid, SIGKILL) == -1) {
+
+			if (proc_pid != -1 && kill(proc_pid, SIGKILL) == -1) {
 				LOG_PRINT_ERROR("kill() regurned -1");
 			}
 			ret = AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
@@ -974,36 +978,40 @@ avbox_process_stop(int id)
 	DEBUG_VPRINT("process", "Stopping process id %i", id);
 
 	if ((proc = avbox_process_getbyid(id, 0)) != NULL) {
+		const pid_t proc_pid = proc->pid;
 
 		DEBUG_VPRINT("process", "Found process %i (pid=%i name='%s')",
 			id, proc->pid, proc->name);
 
-		proc->stopping = 1;
+		if (proc_pid != -1) {
 
-		if (proc->flags & AVBOX_PROCESS_SIGKILL) {
-			/* send SIGKILL to the process */
-			if (kill(proc->pid, SIGKILL) == -1) {
-				/* TODO: Is this guaranteed to succeed?
-				 * Should we abort() here? */
-				LOG_VPRINT_ERROR("kill(pid, SIGKILL) returned -1 (errno=%i)", errno);
-				return -1;
-			}
-		} else {
-			struct timespec tv;
+			proc->stopping = 1;
 
-			/* send SIGTERM to the process */
-			if (kill(proc->pid, SIGTERM) == -1) {
-				LOG_VPRINT_ERROR("Could not send SIGTERM: %s", strerror(errno));
-				return -1;
-			}
+			if (proc->flags & AVBOX_PROCESS_SIGKILL) {
+				/* send SIGKILL to the process */
+				if (kill(proc_pid, SIGKILL) == -1) {
+					/* TODO: Is this guaranteed to succeed?
+					 * Should we abort() here? */
+					LOG_VPRINT_ERROR("kill(pid, SIGKILL) returned -1 (errno=%i)", errno);
+					return -1;
+				}
+			} else {
+				struct timespec tv;
 
-			/* register a timer to SIGKILL the process if it fails to exit */
-			tv.tv_sec = proc->force_kill_delay;
-			tv.tv_nsec = 0;
-			if ((proc->force_kill_timer = avbox_timer_register(&tv,
-				AVBOX_TIMER_TYPE_AUTORELOAD, NULL, avbox_process_force_kill, &proc->id)) == -1) {
-				LOG_PRINT_ERROR("Could not register force stop timer");
-				return -1;
+				/* send SIGTERM to the process */
+				if (kill(proc_pid, SIGTERM) == -1) {
+					LOG_VPRINT_ERROR("Could not send SIGTERM: %s", strerror(errno));
+					return -1;
+				}
+
+				/* register a timer to SIGKILL the process if it fails to exit */
+				tv.tv_sec = proc->force_kill_delay;
+				tv.tv_nsec = 0;
+				if ((proc->force_kill_timer = avbox_timer_register(&tv,
+					AVBOX_TIMER_TYPE_AUTORELOAD, NULL, avbox_process_force_kill, &proc->id)) == -1) {
+					LOG_PRINT_ERROR("Could not register force stop timer");
+					return -1;
+				}
 			}
 		}
 		return 0;
