@@ -23,6 +23,8 @@
 #include <errno.h>
 #include <pthread.h>
 #include "delegate.h"
+#include "debug.h"
+
 
 /**
  * Delegate call.
@@ -35,9 +37,29 @@ struct avbox_delegate
 	void *arg;
 	void *result;
 	int finished;
-	int dettached;
+	unsigned int flags;
 };
 
+
+/**
+ * Free a delegate. This only needs to be called when you need
+ * to destroy a delegate before it is executed or when the delegate
+ * is created with the AVBOX_DELEGATE_RECYCLE flag.
+ */
+void
+avbox_delegate_destroy(struct avbox_delegate * const delegate)
+{
+	free(delegate);
+}
+
+
+static void
+avbox_delegate_reset(struct avbox_delegate * const delegate)
+{
+	/* initialize call */
+	delegate->result = NULL;
+	delegate->finished = 0;
+}
 
 
 /**
@@ -49,10 +71,11 @@ avbox_delegate_dettach(struct avbox_delegate *delegate)
 	assert(delegate != NULL);
 	pthread_mutex_lock(&delegate->lock);
 	if (delegate->finished) {
-		free(delegate);
+		pthread_mutex_unlock(&delegate->lock);
+		avbox_delegate_destroy(delegate);
 		return;
 	} else {
-		delegate->dettached = 1;
+		delegate->flags |= AVBOX_DELEGATE_DETTACHED;
 	}
 	pthread_mutex_unlock(&delegate->lock);
 }
@@ -78,7 +101,7 @@ avbox_delegate_wait(struct avbox_delegate *delegate, void **result)
 {
 	assert(delegate != NULL);
 	pthread_mutex_lock(&delegate->lock);
-	assert(!delegate->dettached);
+	ASSERT(!(delegate->flags & AVBOX_DELEGATE_DETTACHED));
 	if (!delegate->finished) {
 		pthread_cond_wait(&delegate->cond, &delegate->lock);
 	}
@@ -86,19 +109,12 @@ avbox_delegate_wait(struct avbox_delegate *delegate, void **result)
 	if (result != NULL) {
 		*result = delegate->result;
 	}
-	free(delegate);
+	if (delegate->flags & AVBOX_DELEGATE_RECYCLE) {
+		avbox_delegate_reset(delegate);
+	} else {
+		avbox_delegate_destroy(delegate);
+	}
 	return 0;
-}
-
-
-/**
- * Free a delegate. This only needs to be called when you need
- * to destroy a delegate before it is executed.
- */
-void
-avbox_delegate_destroy(struct avbox_delegate * const delegate)
-{
-	free(delegate);
 }
 
 
@@ -106,7 +122,7 @@ avbox_delegate_destroy(struct avbox_delegate * const delegate)
  * Dispatch a function call to the main thread.
  */
 struct avbox_delegate*
-avbox_delegate_new(avbox_delegate_fn func, void *arg)
+avbox_delegate_new(avbox_delegate_fn func, void * const arg, const unsigned int flags)
 {
 	struct avbox_delegate * del;
 
@@ -125,11 +141,11 @@ avbox_delegate_new(avbox_delegate_fn func, void *arg)
 	}
 
 	/* initialize call */
+	del->flags = flags;
 	del->func = func;
 	del->arg = arg;
 	del->result = NULL;
 	del->finished = 0;
-	del->dettached = 0;
 
 	return del;
 }
@@ -147,13 +163,16 @@ avbox_delegate_execute(struct avbox_delegate * const del)
 	/* update state and notify waiter */
 	pthread_mutex_lock(&del->lock);
 	del->finished = 1;
-	if (del->dettached) {
-		pthread_mutex_unlock(&del->lock);
-		free(del);
+	if (del->flags & AVBOX_DELEGATE_DETTACHED) {
+		if ((del->flags & AVBOX_DELEGATE_RECYCLE)) {
+			avbox_delegate_reset(del);
+			pthread_mutex_unlock(&del->lock);
+		} else {
+			pthread_mutex_unlock(&del->lock);
+			avbox_delegate_destroy(del);
+		}
 	} else {
 		pthread_cond_signal(&del->cond);
 		pthread_mutex_unlock(&del->lock);
 	}
 }
-
-

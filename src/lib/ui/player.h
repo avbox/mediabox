@@ -71,6 +71,7 @@ struct avbox_player_stream
 	void *self;
 	void *avio;
 	int manages_position;
+	int must_flush_before_play;
 
 	void (*play)(void *self, const int skip_to_menu);
 	void (*seek)(void *self, int flags, int64_t pos);

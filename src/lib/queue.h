@@ -109,6 +109,14 @@ avbox_queue_isclosed(struct avbox_queue * const inst);
 
 
 /**
+ * Sets the queue name that is displayed in log warnings
+ * and debug messages.
+ */
+int
+avbox_queue_setname(struct avbox_queue * const inst, const char * const name);
+
+
+/**
  * Creates a new queue object.
  */
 struct avbox_queue *

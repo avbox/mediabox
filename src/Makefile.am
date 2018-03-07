@@ -1,6 +1,7 @@
 AUTOMAKE_OPTIONS = subdir-objects
 
 AM_SHARED_FLAGS = \
+	-DDEBUG_MEMORY_POOLS \
 	-DDATADIR="$(datadir)" \
 	-DLOCALSTATEDIR="$(localstatedir)" \
 	@CFLAGS@ \

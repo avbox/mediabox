@@ -6,6 +6,9 @@
 
 #define AVBOX_AUDIOSTREAM_UNDERRUN		(1)
 #define AVBOX_AUDIOSTREAM_CRITICAL_ERROR	(2)
+#define AVBOX_AUDIOSTREAM_PACKET_RELEASED	(3)
+
+
 /**
  * Opaque stream structure
  */
@@ -23,7 +26,7 @@ avbox_audiostream_blocking(struct avbox_audiostream * const stream);
  * Stream dried callback.
  */
 typedef void (*avbox_audiostream_callback)(
-	struct avbox_audiostream * const inst, int msg, void * const context);
+	struct avbox_audiostream * const inst, int msg, void * const data, void * const context);
 
 
 /**
@@ -70,7 +73,7 @@ avbox_audiostream_resume(struct avbox_audiostream * const inst);
  */
 int
 avbox_audiostream_write(struct avbox_audiostream * const stream,
-	const uint8_t * const data, const size_t n_frames);
+	uint8_t * const data, const size_t n_frames, void * const callback_handle);
 
 
 /**
@@ -85,6 +88,13 @@ avbox_audiostream_ispaused(const struct avbox_audiostream * const stream);
  */
 unsigned int
 avbox_audiostream_count(struct avbox_audiostream * const stream);
+
+
+/**
+ * Get the number of frames buffered.
+ */
+unsigned int
+avbox_audiostream_size(struct avbox_audiostream * const stream);
 
 
 /**

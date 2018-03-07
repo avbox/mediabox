@@ -388,7 +388,7 @@ mbox_browser_messagehandler(void *context, struct avbox_message *msg)
 				LOG_VPRINT_ERROR("Could not re-send SELECTED message: %s",
 					strerror(errno));
 			}
-			free(timer_data);
+			avbox_timers_releasepayload(timer_data);
 			inst->select_timer_id = -1;
 
 		} else if (timer_data->id == inst->dismiss_timer_id) {
@@ -400,12 +400,13 @@ mbox_browser_messagehandler(void *context, struct avbox_message *msg)
 				LOG_VPRINT_ERROR("Could not re-send SELECTED message: %s",
 					strerror(errno));
 			}
-			free(timer_data);
+			avbox_timers_releasepayload(timer_data);
 			inst->dismiss_timer_id = -1;
 
 		} else {
 			DEBUG_VPRINT(LOG_MODULE, "Invalid timer: %i",
 				timer_data->id);
+			avbox_timers_releasepayload(timer_data);
 		}
 
 		return AVBOX_DISPATCH_OK;

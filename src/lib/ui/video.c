@@ -823,7 +823,7 @@ avbox_window_delegate(struct avbox_window * const window,
 	}
 
 	/* create delegate */
-	if ((del = avbox_delegate_new(func, arg)) == NULL) {
+	if ((del = avbox_delegate_new(func, arg, 0)) == NULL) {
 		assert(errno == ENOMEM);
 		return NULL;
 	}

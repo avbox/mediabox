@@ -383,7 +383,7 @@ mbox_downloads_messagehandler(void *context, struct avbox_message *msg)
 		} else {
 			LOG_VPRINT_ERROR("Invalid timer: %i", timer_data->id);
 		}
-		free(timer_data);
+		avbox_timers_releasepayload(timer_data);
 		break;
 	}
 	case AVBOX_MESSAGETYPE_DESTROY:

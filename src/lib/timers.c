@@ -53,16 +53,81 @@ LISTABLE_STRUCT(avbox_timer_state,
 );
 
 
-LIST_DECLARE_STATIC(timers);
+static LIST timers;
 static int quit = 0;
-static pthread_mutex_t timers_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t timers_lock;
 static pthread_cond_t timers_signal = PTHREAD_COND_INITIALIZER;
 static pthread_t timers_thread;
 static int nextid = 1;
 
+static LIST timer_pool;
+static LIST timer_data_pool;
+static pthread_mutex_t timer_pool_lock;
+static pthread_mutex_t timer_data_pool_lock;
+
+
+static struct avbox_timer_state*
+acquire_timer()
+{
+	struct avbox_timer_state *tmr;
+	pthread_mutex_lock(&timer_pool_lock);
+	tmr = LIST_TAIL(struct avbox_timer_state*, &timer_pool);
+	if (UNLIKELY(tmr == NULL)) {
+		if ((tmr = malloc(sizeof(struct avbox_timer_state))) == NULL) {
+			ASSERT(errno == ENOMEM);
+			pthread_mutex_unlock(&timer_pool_lock);
+			return NULL;
+		}
+		LOG_PRINT_INFO("Allocated timer state!");
+	} else {
+		LIST_REMOVE(tmr);
+	}
+	pthread_mutex_unlock(&timer_pool_lock);
+	return tmr;
+}
+
+
+static void
+release_timer(struct avbox_timer_state * const tmr)
+{
+	pthread_mutex_lock(&timer_pool_lock);
+	LIST_ADD(&timer_pool, tmr);
+	pthread_mutex_unlock(&timer_pool_lock);
+}
+
+
+static struct avbox_timer_data*
+acquire_payload()
+{
+	struct avbox_timer_data *td;
+	pthread_mutex_lock(&timer_data_pool_lock);
+	td = LIST_TAIL(struct avbox_timer_data*, &timer_data_pool);
+	if (UNLIKELY(td == NULL)) {
+		if ((td = malloc(sizeof(struct avbox_timer_data))) == NULL) {
+			ASSERT(errno == ENOMEM);
+			pthread_mutex_unlock(&timer_data_pool_lock);
+			return NULL;
+		}
+		LOG_PRINT_INFO("Allocated AVPacket!");
+	} else {
+		LIST_REMOVE(td);
+	}
+	pthread_mutex_unlock(&timer_data_pool_lock);
+	return td;
+}
+
+
+EXPORT void
+avbox_timers_releasepayload(struct avbox_timer_data * const td)
+{
+	pthread_mutex_lock(&timer_data_pool_lock);
+	LIST_ADD(&timer_data_pool, td);
+	pthread_mutex_unlock(&timer_data_pool_lock);
+}
+
 
 /**
- * mbt_timers_thread() -- Waits until the next timer should elapsed,
+ * Waits until the next timer should elapsed,
  * processes it, and goes back to sleep
  */
 static void *
@@ -75,7 +140,19 @@ avbox_timers_thread(void *arg)
 	(void) arg;
 
 	DEBUG_PRINT("timers", "Timers system running");
-	MB_DEBUG_SET_THREAD_NAME("timers");
+	DEBUG_SET_THREAD_NAME("avbox-timers");
+
+#ifdef ENABLE_REALTIME
+	struct sched_param parms;
+
+	/* this needs to be above any CPU bound threads (ie. libtorrent)
+	 * but bellow everything else as we depend on timers to get out
+	 * from underrun so we can't allow them to be starved */
+	parms.sched_priority = sched_get_priority_min(SCHED_FIFO) + 10;
+	if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &parms) != 0) {
+		LOG_PRINT_ERROR("Could not set main thread priority");
+	}
+#endif
 
 	clock_gettime(CLOCK_MONOTONIC, &last_sleep);
 
@@ -103,7 +180,7 @@ avbox_timers_thread(void *arg)
 				if (tmr->flags & AVBOX_TIMER_MESSAGE) {
 					if (tmr->message_object != NULL) {
 						struct avbox_timer_data *payload;
-						if ((payload = malloc(sizeof(struct avbox_timer_data))) == NULL) {
+						if ((payload = acquire_payload()) == NULL) {
 							LOG_PRINT_ERROR("Could not send TIMER message: Out of memory");
 						} else {
 							memcpy(payload, &tmr->public, sizeof(struct avbox_timer_data));
@@ -111,7 +188,7 @@ avbox_timers_thread(void *arg)
 								AVBOX_MESSAGETYPE_TIMER, AVBOX_DISPATCH_UNICAST, payload) == NULL) {
 								LOG_VPRINT_ERROR("Could not send notification message: %s",
 									strerror(errno));
-								free(payload);
+								avbox_timers_releasepayload(payload);
 							}
 						}
 					}
@@ -125,12 +202,12 @@ avbox_timers_thread(void *arg)
 						}
 					} else {
 						LIST_REMOVE(tmr);
-						free(tmr);
+						release_timer(tmr);
 					}
 				} else {
 					/* remove the timer */
 					LIST_REMOVE(tmr);
-					free(tmr);
+					release_timer(tmr);
 				}
 			} else {
 				/* decrement the timer */
@@ -177,7 +254,7 @@ avbox_timer_cancel(int timer_id)
 	LIST_FOREACH_SAFE(struct avbox_timer_state*, tmr, &timers, {
 		if (tmr->public.id == timer_id) {
 			LIST_REMOVE(tmr);
-			free(tmr);
+			release_timer(tmr);
 			ret = 0;
 			break;
 		}
@@ -202,8 +279,8 @@ avbox_timer_register(struct timespec *interval,
 	/* DEBUG_PRINT("timers", "Registering timer"); */
 
 	/* allocate and initialize timer entry */
-	if ((timer = malloc(sizeof(struct avbox_timer_state))) == NULL) {
-		fprintf(stderr, "timers: Could not allocate timer. Out of memory\n");
+	if ((timer = acquire_timer()) == NULL) {
+		LOG_PRINT_ERROR("Could not acquire timer. Out of memory!");
 		return -1;
 	}
 	memset(timer, 0, sizeof(struct avbox_timer_state));
@@ -236,9 +313,22 @@ avbox_timer_register(struct timespec *interval,
 INTERNAL int
 avbox_timers_init(void)
 {
+	pthread_mutexattr_t prio_inherit;
+
 	DEBUG_PRINT("timers", "Initializing timers system");
 
 	LIST_INIT(&timers);
+	LIST_INIT(&timer_pool);
+	LIST_INIT(&timer_data_pool);
+
+	pthread_mutexattr_init(&prio_inherit);
+	pthread_mutexattr_setprotocol(&prio_inherit, PTHREAD_PRIO_INHERIT);
+	if (pthread_mutex_init(&timers_lock, &prio_inherit) != 0 ||
+		pthread_mutex_init(&timer_pool_lock, &prio_inherit) != 0 ||
+		pthread_mutex_init(&timer_data_pool_lock, &prio_inherit) != 0) {
+		ABORT("Could not initialize mutexes!");
+	}
+	pthread_mutexattr_destroy(&prio_inherit);
 
 	if (pthread_create(&timers_thread, NULL, avbox_timers_thread, NULL) != 0) {
 		fprintf(stderr, "timers: Could not start thread\n");
@@ -265,6 +355,6 @@ avbox_timers_shutdown(void)
 
 	LIST_FOREACH_SAFE(struct avbox_timer_state*, tmr, &timers, {
 		LIST_REMOVE(tmr);
-		free(tmr);
+		release_timer(tmr);
 	});
 }

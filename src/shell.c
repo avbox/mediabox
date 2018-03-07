@@ -849,7 +849,7 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 		}
 
 		/* free payload */
-		free(timer_data);
+		avbox_timers_releasepayload(timer_data);
 
 		break;
 	} 

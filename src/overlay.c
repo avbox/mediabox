@@ -540,7 +540,7 @@ mbox_overlay_handler(void *context, struct avbox_message *msg)
 			DEBUG_VPRINT("overlay", "Message for unknown timer %i received!",
 				data->id);
 		}
-		free(data);
+		avbox_timers_releasepayload(data);
 		break;
 	}
 	case AVBOX_MESSAGETYPE_DESTROY:

@@ -25,8 +25,15 @@
 #include "../config.h"
 #endif
 
+#include <unistd.h>
+#include <sys/syscall.h>
+
+
 /* Macros for optimizing likely branches */
-#ifdef ENABLE_BRANCH_OPTIMIZATION
+/* NOTE: Be very careful enabling this. I think there are
+ * broken if statements (not parenthesized correctly) and this
+ * will break things. */
+#if 1 || defined(ENABLE_BRANCH_OPTIMIZATION)
 #define LIKELY(x)               (__builtin_expect(!!(x), 1))
 #define UNLIKELY(x)             (__builtin_expect(!!(x), 0))
 #else
@@ -34,9 +41,12 @@
 #define UNLIKELY(x)		(x)
 #endif
 
+#define avbox_gettid()		syscall(__NR_gettid)
+
 
 #define ATOMIC_INC(addr) (__sync_fetch_and_add(addr, 1))
 #define ATOMIC_DEC(addr) (__sync_fetch_and_sub(addr, 1))
+#define MEMORY_BARRIER() __sync_synchronize()
 
 /*
  * Access modifiers.

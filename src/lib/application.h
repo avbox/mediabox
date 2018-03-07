@@ -80,13 +80,18 @@ avbox_application_init(int argc, char **argv, const char *logfile);
 int
 avbox_application_run(void);
 
+/**
+ * Gets the application's main thread queue.
+ */
+struct avbox_queue*
+avbox_application_queue();
+
 
 /**
- * Dispatch the next message in the thread's
- * queue.
+ * Get the main thread's object.
  */
-int
-avbox_application_doevents();
+struct avbox_object*
+avbox_application_object();
 
 
 /**

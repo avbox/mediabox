@@ -38,6 +38,8 @@
 #include "delegate.h"
 #include "time_util.h"
 #include "thread.h"
+#include "compiler.h"
+#include "queue.h"
 
 
 #define N_THREADS (3)
@@ -142,9 +144,10 @@ avbox_thread_run(void *arg)
 	int quit = 0;
 	struct avbox_thread * const thread = (struct avbox_thread*) arg;
 	struct avbox_message * msg;
+	struct avbox_queue *queue;
 
 	/* initialize message dispatcher */
-	if (avbox_dispatch_init() == -1) {
+	if ((queue = avbox_dispatch_init()) == NULL) {
 		LOG_VPRINT_ERROR("Could not initialize dispatch: %s",
 			strerror(errno));
 		goto end;
@@ -171,7 +174,7 @@ avbox_thread_run(void *arg)
 
 	/* run the message loop */
 	while (!quit) {
-		if ((msg = avbox_dispatch_getmsg()) == NULL) {
+		if ((msg = avbox_queue_get(queue)) == NULL) {
 			switch (errno) {
 			case EAGAIN: continue;
 			case ESHUTDOWN:
@@ -260,7 +263,7 @@ avbox_thread_delegate(struct avbox_thread * const thread,
 {
 	struct avbox_delegate *del = NULL;
 
-	if ((del = avbox_delegate_new(func, arg)) == NULL) {
+	if ((del = avbox_delegate_new(func, arg, 0)) == NULL) {
 		assert(errno == ENOMEM);
 		goto end;
 	}

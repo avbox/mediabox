@@ -32,7 +32,7 @@ avbox_torrent_seek(struct avbox_torrent * const inst,
 
 
 EXPORT int64_t
-avbox_torrent_tell(struct avbox_torrent * const inst);
+avbox_torrent_tell(const struct avbox_torrent * const inst);
 
 
 EXPORT int64_t

@@ -36,6 +36,9 @@ rm -rvf output/target/usr/bin/js-config
 rm -rvf output/target/usr/bin/nspr-config
 rm -rvf output/target/etc/hostname	# we use /boot/hostname
 rm -rvf output/target/etc/init.d/S50dropbear # we use inittab
+rm -rvf output/target/usr/bin/containers_*
+rm -rvf output/target/usr/bin/raspi*
+rm -rvf output/target/usr/bin/hello_*
 
 
 # fix libmozjs symlinks. TODO: This needs to be done

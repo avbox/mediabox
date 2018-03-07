@@ -61,14 +61,14 @@ struct avbox_message;
 /**
  * Message handler function.
  */
-typedef int (*avbox_message_handler)(void *context, struct avbox_message *msg);
+typedef int (*avbox_message_handler)(void * const context, struct avbox_message * const msg);
 
 
 /**
  * Get the type of a message
  */
 int
-avbox_message_id(struct avbox_message * const msg);
+avbox_message_id(const struct avbox_message * const msg);
 
 
 /**
@@ -82,36 +82,22 @@ avbox_dispatch_close(void);
  * Get the message payload.
  */
 void *
-avbox_message_payload(struct avbox_message * const msg);
-
-
-/**
- * Get the next message on the thread's queue.
- */
-struct avbox_message*
-avbox_dispatch_getmsg(void);
-
-
-/**
- * Peek the next message in the thread's queue.
- */
-struct avbox_message *
-avbox_dispatch_peekmsg(void);
+avbox_message_payload(const struct avbox_message * const msg);
 
 
 /**
  * Sends a message.
  */
 struct avbox_message*
-avbox_object_sendmsg(struct avbox_object **dest,
-	int type, int flags, void * const payload);
+avbox_object_sendmsg(struct avbox_object * const * const dest,
+	const int type, const int flags, void * const payload);
 
 
 /**
  * Create a dispatch object.
  */
 struct avbox_object*
-avbox_object_new(avbox_message_handler handler, void *context);
+avbox_object_new(avbox_message_handler handler, void * const context);
 
 
 /**
@@ -125,20 +111,20 @@ avbox_object_ref(struct avbox_object * const obj);
  * Release a reference to an object
  */
 void
-avbox_object_unref(struct avbox_object *obj);
+avbox_object_unref(struct avbox_object * const obj);
 
 
 /**
  * Destroy dispatch object.
  */
 void
-avbox_object_destroy(struct avbox_object *obj);
+avbox_object_destroy(struct avbox_object * const obj);
 
 
 /**
  * Initialize dispatch subsystem.
  */
-int
+struct avbox_queue*
 avbox_dispatch_init();
 
 
@@ -146,7 +132,7 @@ avbox_dispatch_init();
  * Dispatch a message.
  */
 void
-avbox_message_dispatch(struct avbox_message *msg);
+avbox_message_dispatch(struct avbox_message * const msg);
 
 
 /**

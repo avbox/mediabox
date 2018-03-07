@@ -52,7 +52,6 @@ avio_read_packet(void *opaque, uint8_t *buf, int bufsz)
 	while (!inst->closed && bytes_read < bufsz) {
 		while ((ret = avbox_torrent_read(inst->stream, buf + bytes_read, bufsz - bytes_read)) == -1) {
 			if (errno == EAGAIN && !inst->closed) {
-				avbox_player_sendctl(inst->player, AVBOX_PLAYERCTL_BUFFER_UPDATE, NULL);
 				continue;
 			}
 			ret = 0;
@@ -306,6 +305,7 @@ avbox_torrentin_open(const char * const path, struct avbox_player * const player
 	stream->self = inst;
 	stream->avio = inst->avio_ctx;
 	stream->manages_position = 0;
+	stream->must_flush_before_play = 0;
 	stream->buffer_state = (void*) buffer_state;
 	stream->play = (void*) &play;
 	stream->close = (void*) &close_stream;

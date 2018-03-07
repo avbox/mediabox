@@ -708,7 +708,7 @@ mbox_library_local_open_database(sqlite3 **db, const int flags)
 	}
 
 	/* open db connection */
-	if (sqlite3_open_v2(filename, db, flags | SQLITE_OPEN_FULLMUTEX, NULL) != SQLITE_OK) {
+	if (sqlite3_open_v2(filename, db, flags, NULL) != SQLITE_OK) {
 		LOG_VPRINT_ERROR("Could not open database '%s': %s",
 			filename, sqlite3_errmsg(*db));
 		errno = EIO;

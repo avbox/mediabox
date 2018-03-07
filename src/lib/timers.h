@@ -23,6 +23,7 @@
 
 #include <time.h>
 #include "dispatch.h"
+#include "linkedlist.h"
 
 
 /**
@@ -36,11 +37,11 @@ enum avbox_timer_flags
 };
 
 
-struct avbox_timer_data
-{
+LISTABLE_STRUCT(avbox_timer_data,
 	int id;
 	void *data;
-};
+);
+
 
 /**
  * Timer callback result
@@ -93,5 +94,9 @@ avbox_timers_init(void);
  */
 void
 avbox_timers_shutdown(void);
+
+
+void
+avbox_timers_releasepayload(struct avbox_timer_data * const td);
 
 #endif

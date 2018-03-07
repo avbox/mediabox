@@ -16,11 +16,21 @@
 #define AVBOX_PLAYER_PACKET_TYPE_VIDEO		(0x2)
 
 
+LISTABLE_STRUCT(avbox_av_frame,
+	AVFrame *avframe;
+);
+
+
+LISTABLE_STRUCT(avbox_av_packet,
+	AVPacket *avpacket;
+);
+
+
 struct avbox_player_packet
 {
 	int type;
 	union {
-		AVFrame *video_frame;
+		struct avbox_av_frame *video_frame;
 		int64_t clock_value;
 	};
 };
@@ -81,17 +91,65 @@ struct avbox_player
 	int underrun;
 	int stopping;
 	int paused;
+	int pools_primed;
 
 	avbox_player_time_fn getmastertime;
 	AVFormatContext *fmt_ctx;
-	AVFrame *last_video_frame;
+	struct avbox_av_frame *last_video_frame;
 	pthread_mutex_t state_lock;
 	LIST subscribers;
+
+	LIST frame_pool;
+	LIST av_packet_pool;
+	LIST packet_pool;
+	LIST ctlmsg_pool;
+	pthread_mutex_t frame_pool_lock;
+	pthread_mutex_t packet_pool_lock;
+	pthread_mutex_t av_packet_pool_lock;
+	pthread_mutex_t ctlmsg_pool_lock;
+
+#ifdef DEBUG_MEMORY_POOLS
+	unsigned int frame_pool_allocs;
+	unsigned int packet_pool_allocs;
+	unsigned int av_packet_pool_allocs;
+	unsigned int ctlmsg_pool_allocs;
+#endif
 
 	/* playlist stuff */
 	/* TODO: this belongs in the application code */
 	LIST playlist;
 	struct avbox_playlist_item *playlist_item;
 };
+
+
+int
+avbox_player_get_video_decode_cache_size(struct avbox_player * const inst);
+
+
+INTERNAL void
+release_av_packet(struct avbox_player * const inst, struct avbox_av_packet * const packet);
+
+
+/**
+ * Allocate an avframe from the pool.
+ */
+INTERNAL struct avbox_av_frame*
+acquire_av_frame(struct avbox_player * const inst);
+
+
+/**
+ * Return an AVFrame to the pool
+ */
+INTERNAL void
+release_av_frame(struct avbox_player * const inst, struct avbox_av_frame * const frame);
+
+
+INTERNAL struct avbox_player_packet*
+acquire_packet(struct avbox_player * const inst);
+
+
+INTERNAL void
+release_packet(struct avbox_player * const inst, struct avbox_player_packet * const packet);
+
 
 #endif

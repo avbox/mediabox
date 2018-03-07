@@ -12,6 +12,7 @@
 #include <libtorrent/create_torrent.hpp>
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/file_storage.hpp>
+#include <libtorrent/extensions.hpp>
 
 
 #define LOG_MODULE "torrent_stream"
@@ -31,85 +32,186 @@ extern "C" {
 #define STRINGIZE2(x)   #x
 #define STRINGIZE(x)    STRINGIZE2(x)
 
+#define READAHEAD_TAIL	(1024 * 1024 * 5)	/* bytes to read from end of file during warmup */
+#define READAHEAD_MIN	(1024 * 1024 * 15)	/* bytes to try to keep on readahead */
+
+#define AVBOX_TORRENTMSG_METADATA_RECEIVED	(AVBOX_MESSAGETYPE_USER)
+
 
 namespace lt = libtorrent;
 
-struct cache_entry
+
+struct alerts_observer_plugin : lt::plugin
 {
-	int size;
-	int index;	/* only needed for debugging */
-	boost::shared_array<char> buffer;
+	alerts_observer_plugin() {}
+	virtual boost::uint32_t implemented_features() { return lt::plugin::reliable_alerts_feature; }
+	virtual void on_alert(lt::alert const* a);
 };
 
 
-LISTABLE_STRUCT(avbox_torrent,
-	int have_metadata;
-	int n_pieces;
-	int block_size;
-	int closed;
-	int blocking;
-	int download_ahead_min;
-	int underrun;
-	int warm;
-	int warm_pieces;
-	int warmup_pieces;
-	unsigned int flags;
+struct piece_header
+{
+	boost::shared_array<char> buffer;
+	int size;
+	int index;
+};
 
-	int64_t offset;		/* the offset of the file that we're streaming */
+
+struct piece_status
+{
+	int blocks_finished:15;
+	int check_passed:1;
+	int ready:1;
+};
+
+
+typedef std::queue<boost::shared_ptr<struct piece_header>> piece_queue_t;
+
+
+LISTABLE_STRUCT(avbox_torrent,
+	int64_t file_offset;	/* the offset of the file that we're streaming */
 	int64_t filesize;	/* the size of the file we're streaming */
 	int64_t pos;		/* the stream position */
-	int64_t torrent_pos;	/* the position after the last sequential byte downloaded */
 	int64_t ra_pos;		/* the current readahead position */
+	int64_t torrent_size;	/* the size all torrent files in bytes */
+	int n_pieces;		/* the number of pieces in the torrent */
+	int piece_size;		/* the size of each piece */
+	int last_piece_size;	/* the size of the last piece. (To avoid 64bit division) */
+	int next_piece;		/* the next piece that the readahead thread is waiting for */
+	int blocks_per_piece;	/* the number of blocks per piece */
+	int block_size;		/* the block size */
+	int have_metadata;	/* all the fields above are valid if set to 1 */
 
-	int ra_seeking;
-	int ra_halted;
-	int ra_current_piece;
-	int ra_current_piece_size;
-	boost::shared_array<char> ra_current_piece_buffer;
-	boost::shared_array<char> ra_temp_buffer;
-	int ra_temp_buffer_size;
-	int ra_temp_buffer_index;
-	pthread_cond_t ra_piece_read_cond;
-	pthread_cond_t ra_cond;
-	std::queue<struct cache_entry*> ra_pieces;
-	struct avbox_thread *ra_thread;	/* the readahead thread */
-	struct avbox_delegate *ra_worker;	/* the readahead worker */
+	int closed;				/* object closed and being destroyed */
+	int user_waiting;			/* this is non-zero while the user thread is blocked */
+	int readahead_min;			/* the number of bytes to keep on readahead. For now this is static */
+	int underrun;				/* underrun flag. */
+	int warmed;				/* this flag is set to true after the stream has warmed up */
+	int n_avail_pieces;			/* the number of pieces downloaded */
+	int bitrate;				/* bitrate hint */
+	unsigned int flags;			/* flags */
 
-	struct avbox_object *object;
-	struct avbox_object *notify_object;
-	lt::torrent_handle handle;
-	std::string name;
-	std::string info_hash;
-	std::string files_path;
-	std::string move_to;
-	pthread_mutex_t lock;
-	pthread_cond_t cond;
+	pthread_cond_t readahead_cond;		/* used for waking the readahead thread */
+	pthread_cond_t user_cond;		/* used for waking the user thread */
+	std::vector<piece_status> avail_pieces;	/* list of downloaded pieces */
+	piece_queue_t readahead_pieces;		/* the readahead queue */
+	struct avbox_thread *readahead_thread;	/* the readahead thread */
+	struct avbox_delegate *readahead_fn;	/* the readahead worker */
+	struct avbox_object *object;		/* our own object */
+	struct avbox_object *notify_object;	/* object to send notifications to */
+	lt::torrent_handle handle;		/* torrent handle */
+	std::string name;			/* torrent name */
+	std::string info_hash;			/* info hash */
+	std::string filename;			/* the filename that we're streaming */
+	std::string files_path;			/* the temporary storage path */
+	std::string move_to;			/* the path where the files will be moved to */
+	pthread_mutex_t lock;			/* protects this structure */
 );
 
 
 static int quit = 0;
 static lt::session *session = nullptr;
-static struct avbox_thread *thread;
 static LIST torrents;
-static pthread_mutex_t session_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t session_lock;
 
 static const std::string storage_path(STRINGIZE(LOCALSTATEDIR) "/lib/mediabox/store/downloads");
 static const std::string torrents_path(std::string(STRINGIZE(LOCALSTATEDIR)) + "/lib/mediabox/torrents/");
 
 
 static int
-offset_to_piece_index(struct avbox_torrent * const inst, int64_t offset)
+offset_to_piece_index(const struct avbox_torrent * const inst, int64_t offset)
 {
-	return (offset + inst->offset) / inst->block_size;
+	ASSERT(inst->have_metadata);
+	/* ASSERT(offset < inst->filesize); */
+	return (offset + inst->file_offset) / inst->piece_size;
+}
+
+
+static int
+piece_size(const struct avbox_torrent * const inst, const int index)
+{
+	ASSERT(inst->have_metadata);
+	ASSERT(index >= 0 && index < inst->n_pieces);
+	if (index < inst->n_pieces - 1) {
+		return inst->piece_size;
+	} else {
+		return inst->last_piece_size;
+	}
+}
+
+
+static int
+blocks_in_piece(const struct avbox_torrent * const inst, const int index)
+{
+	ASSERT(inst->have_metadata);
+	ASSERT(index >= 0 && index < inst->n_pieces);
+
+	if (index < inst->n_pieces - 1) {
+		return inst->blocks_per_piece;
+	} else {
+		return (piece_size(inst, index) + inst->block_size - 1) / inst->block_size;
+	}
+}
+
+
+static struct piece_status&
+get_piece_status(struct avbox_torrent * const inst, const int index)
+{
+	if (inst->avail_pieces.size() <= (unsigned int) index) {
+		inst->avail_pieces.resize(index + 1, { 0, 0 });
+	}
+	return inst->avail_pieces[index];
+}
+
+
+static int
+have_piece(const struct avbox_torrent * const inst, const int index)
+{
+	ASSERT(inst->have_metadata);
+	ASSERT(index >= 0 && index < inst->n_pieces);
+
+	if (inst->avail_pieces.size() <= (unsigned int) index) {
+		return 0;
+	}
+
+	return inst->avail_pieces[index].ready;
+}
+
+
+static void
+cleanup_temp_directory()
+{
+	DEBUG_PRINT(LOG_MODULE, "Cleaning up temp directory");
+}
+
+
+/**
+ * Gets the number of bytes that are already available
+ * on disk starting from the current stream position.
+ */
+static int64_t
+get_torrent_pos(const struct avbox_torrent * const inst)
+{
+	ASSERT(inst->have_metadata);
+	ASSERT(inst->flags & AVBOX_TORRENTFLAGS_STREAM);
+
+	int64_t pos = inst->pos;
+	int piece_index = offset_to_piece_index(inst, inst->pos);
+	while (piece_index < inst->n_pieces && have_piece(inst, piece_index)) {
+		pos += piece_size(inst, piece_index++);
+	}
+	return pos;
 }
 
 
 static void
 torrent_finished(struct avbox_torrent * const inst)
 {
+	ASSERT(inst->have_metadata);
+
 	bool finished = true;
 	for (int i = 0; i < inst->n_pieces; i++) {
-		if (!inst->handle.have_piece(i)) {
+		if (!have_piece(inst, i)) {
 			DEBUG_VPRINT(LOG_MODULE, "Piece %i missing. Not done!",
 				i);
 			finished = false;
@@ -123,158 +225,145 @@ torrent_finished(struct avbox_torrent * const inst)
 				avbox_torrent_close(inst);
 			}
 		} else {
+			ASSERT(inst->handle.is_valid());
 			inst->handle.move_storage(inst->move_to,
 				lt::always_replace_files);
 			DEBUG_VPRINT(LOG_MODULE, "Storage move requested for %s",
 				inst->info_hash.c_str());
 		}
+	} else {
+		DEBUG_PRINT(LOG_MODULE, "Not really done");
 	}
 }
 
 
 /**
- * Tell libtorrent to prioritize chunks starting at pos.
- */
-static void
-adjust_priorities(struct avbox_torrent * const inst)
+ * When called with avail and total set to nullptr this
+ * function simply checks if we're warmed up. When the arguments
+ * are not nullptr it counts the total pieces required for
+ * warmup and the number of available pieces */
+static inline int
+__warmed(struct avbox_torrent * const inst, int64_t * const avail, int64_t * const total)
 {
-	/* only prioritize torrents with the AVBOX_TORRENTFLAGS_STREAM.
-	 * All other torrents keep their default priority (1) so torrents
-	 * with this flag are prioritized above all others. Therefore it should
-	 * be OK to download torrents while playing a stream. */
-	if (!(inst->flags & AVBOX_TORRENTFLAGS_STREAM)) {
-		return;
+	if (inst->warmed) {
+		return 1;
 	}
 
-	/* set the priority of the next N_PIECES pieces to 7 */
-	if (inst->warm) {
-		int i;
-		int next_piece = offset_to_piece_index(inst, inst->torrent_pos);
-		const int N_PIECES = (inst->download_ahead_min / inst->block_size) + 1;
-		const int next_piece_copy = next_piece;
-		for (i = 0; i < N_PIECES; next_piece++) {
-			if (next_piece >= inst->n_pieces) {
-				break;
-			}
-			if (!inst->handle.have_piece(next_piece)) {
-				inst->handle.piece_priority(next_piece, 7);
-				inst->handle.set_piece_deadline(next_piece, 250 + (i * 10), 0);
-				i++;
-			}
-		}
+	if (!inst->have_metadata) {
+		return 0;
+	}
 
-		/* If we're done downloading the file that we want set the
-		 * priority of the others to normal */
-		if (i == 0) {
-			bool finished = true;
-			DEBUG_VPRINT(LOG_MODULE, "End of file reached (next_piece=%i next_piece_copy=%i n_pieces=%i)",
-				next_piece, next_piece_copy, inst->n_pieces);
-			for (i = 0; i < next_piece_copy; i++) {
-				if (!inst->handle.have_piece(i)) {
-					inst->handle.piece_priority(i, 1);
-					DEBUG_VPRINT(LOG_MODULE, "Setting priority of piece %i", i);
-					finished = false;
-				}
-			}
-			if (finished) {
-				torrent_finished(inst);
-			}
-		}
+	int piece_index, first_piece;
+	const int stream_n_pieces = offset_to_piece_index(inst, inst->filesize - 1) + 1;
 
-		#if 0
-		if (inst->flags & AVBOX_TORRENTFLAGS_STREAM) {
-			if (inst->bitrate > 0) {
-				inst->handle.set_upload_rate(inst->bitrate * 2);
+	/* reset counters */
+	if (avail != nullptr) *avail = 0;
+	if (total != nullptr) *total = 0;
+
+	/* check that we have all the pieces at the end */
+	first_piece = MAX(0, stream_n_pieces -
+		((READAHEAD_TAIL + inst->piece_size - 1) / inst->piece_size) - 1);
+	for (piece_index = first_piece; piece_index < stream_n_pieces; piece_index++) {
+		if (!have_piece(inst, piece_index)) {
+			if (total == nullptr) {
+				return 0;
 			} else {
-
+				(*total) += piece_size(inst, piece_index);
 			}
 		} else {
-			inst->handle.set_download_limit(1024 * 5);
-		}
-		#endif
-	} else {
-		int tm = 0, warm_pieces = 0;
-		int next_piece = offset_to_piece_index(inst, 0);
-		const int N_PIECES = ((inst->download_ahead_min * 2) / inst->block_size) + 1;
-		const int TAIL_PIECES = (1024 * 1024 * 5) / inst->block_size;
-
-		/* prioritize pieces at the current position */
-		for (int i = 0; i < N_PIECES; i++, next_piece++) {
-			if (next_piece >= inst->n_pieces) {
-				break;
-			}
-			if (!inst->handle.have_piece(next_piece)) {
-				inst->handle.piece_priority(next_piece, 7);
-				inst->handle.set_piece_deadline(next_piece, 250 + (tm * 10), 0);
-				tm++;
-			} else {
-				warm_pieces++;
-			}
-		}
-
-		/* prioritize pieces at the end */
-		next_piece = offset_to_piece_index(inst, inst->filesize - 1);
-		for (int i = 0; i < TAIL_PIECES; i++, next_piece--) {
-			if (!inst->handle.have_piece(next_piece)) {
-				inst->handle.piece_priority(next_piece, 7);
-				inst->handle.set_piece_deadline(next_piece, 250 + (tm * 10), 0);
-				tm++;
-			} else {
-				warm_pieces++;
-			}
-		}
-
-		inst->warmup_pieces = N_PIECES + TAIL_PIECES;
-		inst->warm_pieces = warm_pieces;
-
-		if (tm == 0) {
-			pthread_cond_broadcast(&inst->ra_cond);
-			DEBUG_PRINT(LOG_MODULE, "Warmup complete");
-			inst->warm = 1;
-			adjust_priorities(inst);
+			if (avail != nullptr) (*avail) += piece_size(inst, piece_index);
+			if (total != nullptr) (*total) += piece_size(inst, piece_index);
 		}
 	}
+
+	/* now check that we have readahead_min * 2 bytes from our
+	 * current position */
+	if (get_torrent_pos(inst) - inst->pos < inst->readahead_min * 2) {
+		if (avail != nullptr && total != nullptr) {
+			const int last_piece = offset_to_piece_index(inst,
+				inst->pos + (inst->readahead_min * 2) - 1);
+			for (piece_index = offset_to_piece_index(inst, inst->pos);
+				piece_index < last_piece; piece_index++) {
+				if (have_piece(inst, piece_index)) {
+					(*avail) += piece_size(inst, piece_index);
+				}
+				(*total) += piece_size(inst, piece_index);
+			}
+		}
+		return 0;
+	} else {
+		if (*avail < *total) {
+			return 0;
+		}
+	}
+
+	DEBUG_PRINT(LOG_MODULE, "Warmup complete");
+
+	return inst->warmed = 1;
 }
 
 
 static int
-update_torrent_pos(struct avbox_torrent * const inst)
+warmed(struct avbox_torrent * const inst)
 {
-	int ret = 0;
+	/* this should optimize all the counting out
+	 * of __warmed() */
+	return __warmed(inst, nullptr, nullptr);
+}
 
-	if (inst->handle.is_valid()) {
 
-		int next_piece = offset_to_piece_index(inst, inst->torrent_pos);
-		lt::torrent_handle &h = inst->handle;
+static void
+adjust_priorities(struct avbox_torrent * const inst)
+{
+	ASSERT(inst->have_metadata);
+	ASSERT(inst->handle.is_valid());
 
-		boost::shared_ptr<lt::torrent_info const> ti =
-			inst->handle.torrent_file();
+	const double bytes_per_sec = (double)inst->bitrate / 8;
+	const int piece_duration = (int)(1000.0 / (bytes_per_sec / (double)inst->piece_size));
+	const int stream_n_pieces = offset_to_piece_index(inst, inst->filesize - 1) + 1;
+	int deadline = piece_duration, piece_index, first_piece;
 
-		if (next_piece >= inst->n_pieces) {
-			return 0;
+	DEBUG_VPRINT(LOG_MODULE, "Adjusting piece priorities (piece_duration=%i)",
+		piece_duration);
+
+	/* prioritize pieces at the end */
+	first_piece = MAX(0, stream_n_pieces -
+		((READAHEAD_TAIL + inst->piece_size - 1) / inst->piece_size) - 1);
+	DEBUG_VPRINT(LOG_MODULE, "Prioritizing pieces %d to %d",
+		first_piece, stream_n_pieces - 1);
+	for (piece_index = first_piece;
+		piece_index >= 0 && piece_index < stream_n_pieces; piece_index++) {
+		if (!have_piece(inst, piece_index)) {
+			inst->handle.set_piece_deadline(piece_index, deadline, 0);
+			deadline += piece_duration;
 		}
+	}
 
-		/* check how many successive pieces are available
-		 * and update the position accordingly */
-		while (h.have_piece(next_piece)) {
-			if (next_piece == (inst->offset / inst->block_size)) {
-				DEBUG_VPRINT(LOG_MODULE, "Handling first piece (%i)",
-					next_piece);
-				/* this is wrong and only works if the offset of the
-				 * file that we want is within the first piece */
-				inst->torrent_pos += ti->piece_size(next_piece) - inst->offset;
-			} else {
-				inst->torrent_pos += ti->piece_size(next_piece);
-			}
-			next_piece++;
-			ret = 1;
-			if (next_piece >= inst->n_pieces) {
-				break;
+	/* next prioritize pieces starting at the current stream position */
+	if (inst->pos < inst->filesize) {
+		const int last_piece = first_piece;
+		DEBUG_VPRINT(LOG_MODULE, "Prioritizing pieces %d to %d",
+			offset_to_piece_index(inst, inst->pos), last_piece - 1);
+		for (piece_index = first_piece = offset_to_piece_index(inst, inst->pos);
+			piece_index < last_piece; piece_index++) {
+			if (!have_piece(inst, piece_index)) {
+				inst->handle.set_piece_deadline(piece_index, deadline, 0);
+				deadline += piece_duration;
 			}
 		}
 	}
 
-	return ret;
+	/* finally prioritize any remaining pieces */
+	if (first_piece > 0) {
+		DEBUG_VPRINT(LOG_MODULE, "Prioritizing pieces 0 to %d",
+			first_piece - 1);
+		for (piece_index = 0; piece_index < first_piece; piece_index++) {
+			if (!have_piece(inst, piece_index)) {
+				inst->handle.set_piece_deadline(piece_index, deadline, 0);
+				deadline += piece_duration;
+			}
+		}
+	}
 }
 
 
@@ -284,7 +373,7 @@ find_stream(const lt::torrent_handle& torrent)
 	struct avbox_torrent *stream, *ret = nullptr;
 	pthread_mutex_lock(&session_lock);
 	LIST_FOREACH(struct avbox_torrent*, stream, &torrents) {
-		if (stream->handle.is_valid() && stream->handle == torrent) {
+		if (stream->handle == torrent) {
 			ret = stream;
 			break;
 		}
@@ -311,11 +400,39 @@ find_stream_by_info_hash(const lt::sha1_hash& hash)
 
 
 static void
+check_and_signal_piece_ready(struct avbox_torrent * inst, const int index)
+{
+	struct piece_status& piece = get_piece_status(inst, index);
+	if (!inst->have_metadata || !piece.check_passed ||
+		piece.blocks_finished < blocks_in_piece(inst, index)) {
+		return;
+	}
+
+	ASSERT(!piece.ready);
+	piece.ready = 1;
+	inst->n_avail_pieces++;
+	ASSERT(inst->n_avail_pieces <= inst->n_pieces);
+
+	/* DEBUG_VPRINT(LOG_MODULE "-progress", "Piece %i ready", index); */
+
+	/* signal readahead thread if it's waiting for this piece */
+	if (!inst->have_metadata || !inst->warmed || inst->next_piece == index) {
+		pthread_cond_signal(&inst->readahead_cond);
+	}
+}
+
+
+static void
 metadata_received(struct avbox_torrent * const inst)
 {
+	ASSERT(!inst->have_metadata);
+	ASSERT(inst->torrent_size == 0);
+	ASSERT(inst->handle.is_valid());
+
 	FILE *f;
 	std::string torrent_file;
 	boost::shared_ptr<lt::torrent_info const> ti = inst->handle.torrent_file();
+
 
 	/* save the torrent file */
 	lt::create_torrent ct(*ti);
@@ -342,26 +459,55 @@ metadata_received(struct avbox_torrent * const inst)
 	for (int i = 0; i < fs.num_files(); i++) {
 		DEBUG_VPRINT(LOG_MODULE, "File %i: %s %" PRIi64 " %" PRIi64,
 			i, fs.file_name(i).c_str(), fs.file_offset(i), fs.file_size(i));
+		inst->torrent_size += fs.file_size(i);
 		if (index == -1 || fs.file_size(i) > fs.file_size(index)) {
 			index = i;
 		}
 	}
 
 	/* update file info */
-	pthread_mutex_lock(&inst->lock);
 	inst->files_path = storage_path + "/" + ti->name();
+	inst->filename = fs.file_name(index);
 	inst->n_pieces = ti->num_pieces();
-	inst->block_size = ti->piece_length();
-	inst->offset = fs.file_offset(index);
+	inst->piece_size = ti->piece_length();
+	inst->last_piece_size = ti->piece_size(inst->n_pieces - 1);
+	inst->file_offset = fs.file_offset(index);
 	inst->filesize = fs.file_size(index);
-	inst->download_ahead_min = 1024 * 1024 * 15;
-	inst->warmup_pieces = 0;
+	inst->readahead_min = READAHEAD_MIN;
+	inst->block_size = inst->handle.status().block_size;
+	inst->blocks_per_piece = (inst->piece_size + inst->block_size - 1) / inst->block_size;
 	inst->name = ti->name();
-	inst->have_metadata = 1;
-	adjust_priorities(inst);
-	pthread_cond_broadcast(&inst->ra_cond);
 
+	/* this doesn't hold for all torrents. I think because
+	 * of padding? */
+	/* ASSERT(inst->torrent_size == (inst->n_pieces * inst->piece_size) -
+		(inst->piece_size - inst->last_piece_size)); */
+
+	pthread_mutex_lock(&inst->lock);
+
+	const unsigned int n_rec_pieces = inst->avail_pieces.size();
+
+	/* grow the list if necessary */
+	if (n_rec_pieces < (unsigned int) inst->n_pieces) {
+		inst->avail_pieces.resize(inst->n_pieces, { 0, 0 });
+	}
+	inst->have_metadata = 1;
+
+	/* we can "receive" blocks before we've completed
+	 * processing the metadata, but we cannot check if the
+	 * piece is ready because blocks_in_piece() is only
+	 * available after the metadata has been received. So
+	 * now we need to check all the pieces for which we may
+	 * have received blocks. */
+	for (unsigned i = 0; i < n_rec_pieces; i++) {
+		check_and_signal_piece_ready(inst, i);
+	}
+
+	adjust_priorities(inst);
+
+	pthread_cond_signal(&inst->readahead_cond);
 	pthread_mutex_unlock(&inst->lock);
+
 
 	/* send notification of metadata received */
 	if (inst->notify_object != nullptr) {
@@ -373,248 +519,319 @@ metadata_received(struct avbox_torrent * const inst)
 	}
 
 	DEBUG_VPRINT(LOG_MODULE, "Metadata received: (name=%s, piece_size=%i, n_pieces=%i, file=%s, path=%s)",
-		inst->name.c_str(), inst->block_size, inst->n_pieces,
+		inst->name.c_str(), inst->piece_size, inst->n_pieces,
 		fs.file_path(index).c_str(),
 		inst->files_path.c_str()); 
 }
 
 
-static void *
-session_monitor(void *data)
+void
+alerts_observer_plugin::on_alert(lt::alert const * a)
 {
-	DEBUG_SET_THREAD_NAME("torrent_session");
-	DEBUG_PRINT(LOG_MODULE, "Starting torrent monitor");
-
-	(void) data;
-
-	while (!quit) {
-
-		std::vector<lt::alert*> alerts;
-
-		/* wait for an alert */
-		if (session->wait_for_alert(std::chrono::seconds(1)) == nullptr) {
-			continue;
-		}
-
-		session->pop_alerts(&alerts);
-
-		for (lt::alert const * a : alerts) {
-
-			/* torrent added */
-			if (auto alert = lt::alert_cast<lt::add_torrent_alert>(a)) {
-				lt::torrent_handle h = alert->handle;
-				if (h.is_valid()) {
-					DEBUG_PRINT(LOG_MODULE, "Torrent added");
-				}
-			}
-
-			/* received torrent metadata (ie magnet link resolved) */
-			else if (auto alert = lt::alert_cast<lt::metadata_received_alert>(a)) {
-				struct avbox_torrent *inst = find_stream(alert->handle);
-				if (inst != nullptr) {
-					/* NOTE: metadata_received() takes the lock */
-					metadata_received(inst);
-				} else {
-					DEBUG_PRINT(LOG_MODULE, "Could not find stream (metadata_received_alert)!");
-				}
-			}
-
-			/* a piece has finished downloading */
-			else if (auto alert = lt::alert_cast<lt::piece_finished_alert>(a)) {
-				struct avbox_torrent * const inst = find_stream(alert->handle);
-				if (inst != nullptr) {
-					/* DEBUG_VPRINT(LOG_MODULE, "Piece received %i",
-						alert->piece_index); */
-					pthread_mutex_lock(&inst->lock);
-					adjust_priorities(inst);
-					update_torrent_pos(inst);
-					pthread_cond_broadcast(&inst->ra_cond);
-					pthread_mutex_unlock(&inst->lock);
-				} else {
-					DEBUG_PRINT(LOG_MODULE, "Could not find stream (piece_finished_alert)!");
-				}
-			}
-
-			/* piece read complete */
-			else if (auto alert = lt::alert_cast<lt::read_piece_alert>(a)) {
-				struct avbox_torrent * const inst = find_stream(alert->handle);
-				if (inst != nullptr) {
-					inst->ra_temp_buffer = alert->buffer;
-					inst->ra_temp_buffer_size = alert->size;
-					inst->ra_temp_buffer_index = alert->piece;
-
-					/* copy the piece to the current buffer and
-					 * signal waiting thread */
-					pthread_mutex_lock(&inst->lock);
-					pthread_cond_signal(&inst->ra_piece_read_cond);
-					pthread_mutex_unlock(&inst->lock);
-				} else {
-					DEBUG_PRINT(LOG_MODULE, "Could not find stream (read_piece_alert)!");
-				}
-			}
-
-			/* file error */
-			else if (auto alert = lt::alert_cast<lt::file_error_alert>(a)) {
-				LOG_VPRINT_ERROR("File error (%s): %s",
-					alert->filename(), alert->what());
-			}
-
-			/* torrent error */
-			else if (auto alert = lt::alert_cast<lt::torrent_error_alert>(a)) {
-				LOG_VPRINT_ERROR("Torrent error (%s): %s",
-					alert->torrent_name(), alert->what());
-			}
-
-			/* torrent finished */
-			else if (auto alert = lt::alert_cast<lt::torrent_finished_alert>(a)) {
-				struct avbox_torrent * const inst = find_stream(alert->handle);
-
-				DEBUG_VPRINT(LOG_MODULE, "Torrent finished: %s",
-					alert->message().c_str());
-
-				/* All the requested pieces are finished downloading. We may receive
-				 * this several times befere we're finished with the torrent due to
-				 * prioritization race conditions */
-				if (inst != nullptr) {
-					torrent_finished(inst);
-				} else {
-					DEBUG_PRINT(LOG_MODULE, "Could not find stream (torrent_finished_alert)!");
-				}
-			}
-
-			/* torrent files moved */
-			else if (auto alert = lt::alert_cast<lt::storage_moved_alert>(a)) {
-				struct avbox_torrent * const inst = find_stream(alert->handle);
-				if (inst != nullptr) {
-					DEBUG_VPRINT(LOG_MODULE, "Storage moved: %s",
-						inst->info_hash.c_str());
-					if (inst->flags & AVBOX_TORRENTFLAGS_AUTOCLOSE) {
-						DEBUG_PRINT(LOG_MODULE, "Moving storage automatically");
-						avbox_torrent_close(inst);
-					}
-				} else {
-					DEBUG_PRINT(LOG_MODULE, "Could not find stream (storage_moved_alert)!");
-				}
-			}
-
-			/* could not move files */
-			else if (auto alert = lt::alert_cast<lt::storage_moved_failed_alert>(a)) {
-				struct avbox_torrent * const inst = find_stream(alert->handle);
-				if (inst != nullptr) {
-					LOG_VPRINT_ERROR("Could not move torrent files (%s): %s",
-						inst->info_hash.c_str(), alert->error.message().c_str());
-					if (inst->flags & AVBOX_TORRENTFLAGS_AUTOCLOSE) {
-						DEBUG_PRINT(LOG_MODULE, "Moving storage automatically");
-						avbox_torrent_close(inst);
-					}
-				} else {
-					DEBUG_PRINT(LOG_MODULE, "Could not find stream (storage_moved_failed_alert)!");
-				}
-			}
-
-			/* torrent removed */
-			else if (auto alert = lt::alert_cast<lt::torrent_removed_alert>(a)) {
-				struct avbox_torrent *inst =
-					find_stream_by_info_hash(alert->info_hash);
-
-				DEBUG_VPRINT(LOG_MODULE, "Torrent removed: %s",
-					lt::to_hex(alert->info_hash.to_string()).c_str());
-
-				if (inst != nullptr) {
-					avbox_object_destroy(inst->object);
-				} else {
-					DEBUG_VPRINT(LOG_MODULE, "Could not get instance by info_hash: %s",
-						lt::to_hex(alert->info_hash.to_string()).c_str());
-				}
-			}
+	/* a block has been written to disk */
+	if (auto alert = lt::alert_cast<lt::block_finished_alert>(a)) {
+		struct avbox_torrent *inst = find_stream(alert->handle);
+		if (inst != nullptr) {
+			pthread_mutex_lock(&inst->lock);
+			struct piece_status& piece = get_piece_status(inst, alert->piece_index);
+			piece.blocks_finished++;
+			ASSERT(!inst->have_metadata || piece.blocks_finished <= blocks_in_piece(inst, alert->piece_index));
+			check_and_signal_piece_ready(inst, alert->piece_index);
+			pthread_mutex_unlock(&inst->lock);
+		} else {
+			DEBUG_PRINT(LOG_MODULE, "Could not find stream (block_finished_alert)!");
 		}
 	}
 
-	DEBUG_PRINT(LOG_MODULE, "Torrent monitor exitting");
+	/* a piece has failed the hash check */
+	else if (auto alert = lt::alert_cast<lt::hash_failed_alert>(a)) {
+		struct avbox_torrent *inst = find_stream(alert->handle);
+		if (inst != nullptr) {
+			pthread_mutex_lock(&inst->lock);
+			struct piece_status& piece = get_piece_status(inst, alert->piece_index);
+			ASSERT(!piece.check_passed && piece.blocks_finished == blocks_in_piece(inst, alert->piece_index));
+			piece.blocks_finished = 0;
+			DEBUG_VPRINT(LOG_MODULE, "Piece %i failed the hash check!", alert->piece_index);
+			pthread_mutex_unlock(&inst->lock);
+		} else {
+			DEBUG_PRINT(LOG_MODULE, "Could not find stream (hash_failed_alert)!");
+		}
+	}
 
-	return nullptr;
+	/* a piece has passed the hash check */
+	else if (auto alert = lt::alert_cast<lt::piece_finished_alert>(a)) {
+		struct avbox_torrent *inst = find_stream(alert->handle);
+		if (inst != nullptr) {
+			pthread_mutex_lock(&inst->lock);
+			struct piece_status& piece = get_piece_status(inst, alert->piece_index);
+			piece.check_passed = 1;
+			check_and_signal_piece_ready(inst, alert->piece_index);
+			pthread_mutex_unlock(&inst->lock);
+		} else {
+			DEBUG_PRINT(LOG_MODULE, "Could not find stream (piece_finished_alert)!");
+		}
+	}
+
+	/* torrent added */
+	else if (auto alert = lt::alert_cast<lt::add_torrent_alert>(a)) {
+		lt::torrent_handle h = alert->handle;
+		if (h.is_valid()) {
+			DEBUG_PRINT(LOG_MODULE, "Torrent added");
+		}
+	}
+
+	/* received torrent metadata (ie magnet link resolved) */
+	else if (auto alert = lt::alert_cast<lt::metadata_received_alert>(a)) {
+		struct avbox_torrent *inst = find_stream(alert->handle);
+		if (inst != nullptr) {
+			if (avbox_object_sendmsg(&inst->object,
+				AVBOX_TORRENTMSG_METADATA_RECEIVED, AVBOX_DISPATCH_UNICAST, inst) == nullptr) {
+				LOG_VPRINT_ERROR("Could not send METADATA_RECEIVED message: %s",
+					strerror(errno));
+			}
+		} else {
+			DEBUG_PRINT(LOG_MODULE, "Could not find stream (metadata_received_alert)!");
+		}
+	}
+
+	/* file error */
+	else if (auto alert = lt::alert_cast<lt::file_error_alert>(a)) {
+		LOG_VPRINT_ERROR("File error (%s): %s",
+			alert->filename(), alert->error.message().c_str());
+	}
+
+	/* torrent error */
+	else if (auto alert = lt::alert_cast<lt::torrent_error_alert>(a)) {
+		LOG_VPRINT_ERROR("Torrent error (%s): %s",
+			alert->torrent_name(), alert->what());
+	}
+
+	/* torrent finished */
+	else if (auto alert = lt::alert_cast<lt::torrent_finished_alert>(a)) {
+		struct avbox_torrent * const inst = find_stream(alert->handle);
+		DEBUG_VPRINT(LOG_MODULE, "Torrent finished: %s",
+			alert->message().c_str());
+		if (inst != nullptr) {
+			torrent_finished(inst);
+		} else {
+			DEBUG_PRINT(LOG_MODULE, "Could not find stream (torrent_finished_alert)!");
+		}
+	}
+
+	/* torrent files moved */
+	else if (auto alert = lt::alert_cast<lt::storage_moved_alert>(a)) {
+		struct avbox_torrent * const inst = find_stream(alert->handle);
+		if (inst != nullptr) {
+			DEBUG_VPRINT(LOG_MODULE, "Storage moved: %s",
+				inst->info_hash.c_str());
+			if (inst->flags & AVBOX_TORRENTFLAGS_AUTOCLOSE) {
+				DEBUG_PRINT(LOG_MODULE, "Moving storage automatically");
+				avbox_torrent_close(inst);
+			}
+		} else {
+			DEBUG_PRINT(LOG_MODULE, "Could not find stream (storage_moved_alert)!");
+		}
+	}
+
+	/* could not move files */
+	else if (auto alert = lt::alert_cast<lt::storage_moved_failed_alert>(a)) {
+		struct avbox_torrent * const inst = find_stream(alert->handle);
+		if (inst != nullptr) {
+			LOG_VPRINT_ERROR("Could not move torrent files (%s): %s",
+				inst->info_hash.c_str(), alert->error.message().c_str());
+			if (inst->flags & AVBOX_TORRENTFLAGS_AUTOCLOSE) {
+				DEBUG_PRINT(LOG_MODULE, "Moving storage automatically");
+				avbox_torrent_close(inst);
+			}
+		} else {
+			DEBUG_PRINT(LOG_MODULE, "Could not find stream (storage_moved_failed_alert)!");
+		}
+	}
+
+	/* torrent removed */
+	else if (auto alert = lt::alert_cast<lt::torrent_removed_alert>(a)) {
+		struct avbox_torrent *inst =
+			find_stream_by_info_hash(alert->info_hash);
+
+		DEBUG_VPRINT(LOG_MODULE, "Torrent removed: %s",
+			lt::to_hex(alert->info_hash.to_string()).c_str());
+
+		if (inst != nullptr) {
+			avbox_object_destroy(inst->object);
+		} else {
+			DEBUG_VPRINT(LOG_MODULE, "Could not get instance by info_hash: %s",
+				lt::to_hex(alert->info_hash.to_string()).c_str());
+		}
+	}
 }
 
 
 static void*
-readahead_thread(void *arg)
+readahead(void *arg)
 {
+	int fd = -1;
 	struct avbox_torrent * const inst = (struct avbox_torrent*) arg;
 
-	DEBUG_SET_THREAD_NAME("bt-readahead");
+	DEBUG_SET_THREAD_NAME("readahead");
 	DEBUG_PRINT(LOG_MODULE, "Starting readahead worker");
 
-	while (!inst->closed) {
-
-		const int next_piece = offset_to_piece_index(inst, inst->ra_pos);
+	while (1) {
 
 		pthread_mutex_lock(&inst->lock);
 
-		/* if there are already 10mb in readahead buffer wait
+		/* exit if requested */
+		if (inst->closed) {
+			pthread_mutex_unlock(&inst->lock);
+			break;
+		}
+
+		/* if there are already readahead_min bytes then wait
 		 * until the user reads some */
-		if ((inst->ra_pos - inst->pos) > inst->download_ahead_min ||
-			(inst->have_metadata && inst->ra_pos >= inst->filesize)) {
-			/* wait until user reads */
-			pthread_cond_wait(&inst->ra_cond, &inst->lock);
-			pthread_cond_signal(&inst->ra_cond);
+		if (inst->have_metadata && (inst->ra_pos - inst->pos) > inst->readahead_min) {
+			if (inst->user_waiting) {
+				/* if the user thread is waiting then we must be either
+				 * in underrun or not warmed up yet. So wake it up only
+				 * after we've warmed up. Note that this code may run
+				 * more than once after warmup if we wake up too early
+				 * from pthread_cond_wait() or if the user thread doesn't
+				 * wake up in time after we signal. So the assertion that
+				 * '!inst->warmed || inst->underrun' may not always hold. */
+				if (warmed(inst)) {
+					pthread_cond_signal(&inst->user_cond);
+				}
+			}
+			pthread_cond_wait(&inst->readahead_cond, &inst->lock);
 			pthread_mutex_unlock(&inst->lock);
 			continue;
 		}
 
-		if (inst->have_metadata && inst->handle.have_piece(next_piece)) {
-			/* request the piece and wait for it to be ready */
-			boost::shared_ptr<lt::torrent_info const> ti =
-				inst->handle.torrent_file();
-			const int sz = ti->piece_size(next_piece);
-			const int64_t old_pos = inst->ra_pos;
+		if (inst->have_metadata && inst->ra_pos < inst->filesize &&
+			have_piece(inst, (inst->next_piece = offset_to_piece_index(inst, inst->ra_pos)))) {
 
-			/* Request a piece read and wait for it to complete */
-			inst->handle.read_piece(next_piece);
-			pthread_cond_wait(&inst->ra_piece_read_cond, &inst->lock);
+			const int64_t old_ra_pos = inst->ra_pos;
+			const int real_sz = piece_size(inst, inst->next_piece);
+			int sz = real_sz, buffer_offset = 0;
+			ssize_t bytes_read;
 
-			/* make sure that we weren't interrupted by seek()
-			 * while we where waiting */
-			if (inst->ra_pos == old_pos) {
-				struct cache_entry * const entry = new struct cache_entry();
-				entry->buffer = inst->ra_temp_buffer;
-				entry->size = inst->ra_temp_buffer_size;
-				entry->index = next_piece;
-				inst->ra_pieces.push(entry);
+			ASSERT(inst->ra_pos + inst->file_offset >= ((int64_t) inst->next_piece) * inst->piece_size);
 
-				/* DEBUG_VPRINT(LOG_MODULE, "Adding piece %i to queue (requested %i)",
-					inst->ra_temp_buffer_index, next_piece); */
-
-				if (inst->ra_temp_buffer_index != next_piece) {
-					DEBUG_VPRINT(LOG_MODULE, "Expected piece %i but got %i",
-						next_piece, inst->ra_temp_buffer_index);
-				}
-
-				ASSERT(inst->ra_temp_buffer_index == next_piece);
-
-				/* if this is the first read ahead piece only increace
-				 * the readahead position by the amount that counts */
-				if ((inst->ra_pos - inst->pos) == 0) {
-					const int offset = (inst->ra_pos + inst->offset) - (next_piece * inst->block_size);
-					inst->ra_pos += sz - offset;
-				} else {
-					inst->ra_pos += sz;
-				}
-			} else {
-				/* DEBUG_VPRINT(LOG_MODULE, "Piece %i dropped (requested %i)",
-					inst->ra_temp_buffer_index, next_piece); */
+			/* we're not reading the whole piece because we're only interested
+			 * in the bytes starting at the current ra_pos and they may even be
+			 * on another file in the case that (ra_pos == 0). This elimitanes
+			 * the possibility of still using the piece if we seek within the
+			 * same piece while reading, but that's very unlikely so for the sake
+			 * of simplicity only read what we need */
+			if (inst->ra_pos + inst->file_offset > (((int64_t) inst->next_piece) * inst->piece_size)) {
+				const int64_t diff = inst->ra_pos + inst->file_offset - (((int64_t) inst->next_piece) * inst->piece_size);
+				buffer_offset += diff;
+				sz -= diff;
 			}
 
-			inst->ra_temp_buffer = nullptr;
-			pthread_cond_signal(&inst->ra_cond);
+			/* don't perform IO while owning the mutex */
+			pthread_mutex_unlock(&inst->lock);
+
+			/* open the file if necessary */
+			if (fd == -1) {
+				struct stat st;
+				std::string filename = inst->files_path + "/" + inst->filename;
+
+				/* if the file does not exist yet keep waiting */
+				if (stat(filename.c_str(), &st) == -1) {
+					LOG_VPRINT_ERROR("Could not stat file '%s': %s",
+						filename.c_str(), strerror(errno));
+					usleep(10LL * 1000LL); /* throttle RT */
+					continue;
+				}
+
+				/* open the file */
+				DEBUG_VPRINT(LOG_MODULE, "Opening file: %s",
+					filename.c_str());
+				if ((fd = open(filename.c_str(), O_CLOEXEC)) == -1) {
+					LOG_VPRINT_ERROR("Could not open file '%s': %s",
+						filename.c_str(), strerror(errno));
+					usleep(10LL * 1000LL); /* throttle RT */
+					continue;
+				}
+			}
+
+			/* allocate a buffer for the piece */
+			boost::shared_array<char> buffer(new char[inst->piece_size]);
+			ASSERT(buffer != nullptr);
+
+			/* read the piece */
+			if ((bytes_read = pread(fd, &buffer[buffer_offset], sz, inst->ra_pos)) < sz) {
+				if (bytes_read == -1) {
+					LOG_VPRINT_INFO("Could not read piece from file (piece_index=%i offset=%" PRIi64 "): %s",
+						inst->next_piece, inst->ra_pos, strerror(errno));
+					usleep(10LL * 1000LL);	/* throttle RT */
+					continue;
+				} else if (inst->next_piece == offset_to_piece_index(inst, inst->filesize - 1) &&
+					bytes_read >= (inst->filesize - inst->ra_pos)) {
+
+					/* This is our last piece and we have read AT LEAST until what
+					 * we think the end-of-file should be. However we may have read
+					 * beyond that because the actual file may be bigger (an optimization
+					 * done by libtorrent). So adjust the result in case of over-read
+					 * to ensure that we don't set ra_pos beyond the end-of-file when
+					 * incrementing bellow. */
+					bytes_read = inst->filesize - inst->ra_pos;
+
+				} else {
+					DEBUG_VPRINT(LOG_MODULE, "pread() returned %d while expecting %d."
+						"(ra_pos=%" PRIi64 " filesize=%" PRIi64 " to_eof=%" PRIi64 ") Will keep trying.",
+						(int) bytes_read, (int) sz, inst->ra_pos, inst->filesize, inst->filesize - inst->ra_pos);
+					usleep(10LL * 1000LL);	/* throttle RT */
+					continue;
+				}
+			}
+
+			/* TODO: Is there an external API to suggest a piece? */
+
+			pthread_mutex_lock(&inst->lock);
+
+			/* if a seek() happened while we were reading then
+			 * we can no longer use this piece */
+			if (inst->ra_pos != old_ra_pos) {
+				DEBUG_VPRINT(LOG_MODULE, "Dropping read piece %i after seek",
+					inst->next_piece);
+				ASSERT(inst->readahead_pieces.size() == 0);
+				pthread_mutex_unlock(&inst->lock);
+				continue;
+			}
+
+			/* save the piece in the queue */
+			boost::shared_ptr<struct piece_header> const piece(new struct piece_header());
+			ASSERT(piece != nullptr);
+			piece->buffer = buffer;
+			piece->size = real_sz;
+			piece->index = inst->next_piece;
+			inst->readahead_pieces.push(piece);
+			inst->ra_pos += bytes_read;
+
+			ASSERT(inst->ra_pos <= inst->filesize);
+
+			/* if the user thread is waiting for a piece then
+			 * wake it up */
+			if (inst->user_waiting && inst->warmed) {
+				pthread_cond_signal(&inst->user_cond);
+			}
+
 			pthread_mutex_unlock(&inst->lock);
 			continue;
+
 		} else {
-			/* wait until the next piece is downloaded */
-			pthread_cond_wait(&inst->ra_cond, &inst->lock);
-			pthread_cond_signal(&inst->ra_cond);
+			/* NOTE: If you find yourself here (in the debugger) but you don't
+			 * think you should be it's probably that optimizations are enabled
+			 * and you're actually above waiting of the user thread */
+			ASSERT(!inst->have_metadata || inst->ra_pos >= inst->filesize || !have_piece(inst, inst->next_piece));
+			pthread_cond_wait(&inst->readahead_cond, &inst->lock);
 			pthread_mutex_unlock(&inst->lock);
 			continue;
 		}
+	}
+
+	if (fd != -1) {
+		close(fd);
 	}
 
 	DEBUG_VPRINT(LOG_MODULE, "Readahead thread for %s exiting",
@@ -630,14 +847,19 @@ control(void * const context, struct avbox_message * const msg)
 	struct avbox_torrent * const inst =
 		(struct avbox_torrent*) context;
 	switch (avbox_message_id(msg)) {
+	case AVBOX_TORRENTMSG_METADATA_RECEIVED:
+	{
+		if (find_stream(inst->handle) != nullptr) {
+			metadata_received(inst);
+		}
+		return AVBOX_DISPATCH_OK;
+	}
 	case AVBOX_MESSAGETYPE_DESTROY:
 	{
-
 		DEBUG_PRINT(LOG_MODULE, "Deleting torrent");
 		pthread_mutex_lock(&session_lock);
 		LIST_REMOVE(inst);
 		pthread_mutex_unlock(&session_lock);
-
 		return AVBOX_DISPATCH_OK;
 	}
 	case AVBOX_MESSAGETYPE_CLEANUP:
@@ -666,10 +888,10 @@ avbox_torrent_close(struct avbox_torrent * const inst)
 	inst->closed = 1;
 
 	/* Wait for any threads blocked on avbox_torrent_read() to return */
-	while (inst->blocking) {
-		pthread_cond_broadcast(&inst->ra_cond);
+	while (inst->user_waiting) {
+		pthread_cond_signal(&inst->user_cond);
 		pthread_mutex_unlock(&inst->lock);
-		usleep(50LL * 1000LL);
+		usleep(10LL * 1000LL);
 		pthread_mutex_lock(&inst->lock);
 	}
 
@@ -678,19 +900,15 @@ avbox_torrent_close(struct avbox_torrent * const inst)
 	/* if this is a stream then wait for the readahead worker */
 	if (inst->flags & AVBOX_TORRENTFLAGS_STREAM) {
 		DEBUG_PRINT(LOG_MODULE, "Waiting for readahead thread to quit...");
-		ASSERT(inst->ra_worker != nullptr);
-		pthread_cond_broadcast(&inst->ra_cond);
-		pthread_cond_signal(&inst->ra_piece_read_cond);
-		avbox_delegate_wait(inst->ra_worker, nullptr);
-		inst->ra_worker = nullptr;
-		avbox_thread_destroy(inst->ra_thread);
+		ASSERT(inst->readahead_fn != nullptr);
+		pthread_cond_signal(&inst->readahead_cond);
+		avbox_delegate_wait(inst->readahead_fn, nullptr);
+		inst->readahead_fn = nullptr;
+		avbox_thread_destroy(inst->readahead_thread);
 
 		/* delete all cached pieces */
-		while (!inst->ra_pieces.empty()) {
-			struct cache_entry * const entry =
-				inst->ra_pieces.front();
-			inst->ra_pieces.pop();
-			delete entry;
+		while (!inst->readahead_pieces.empty()) {
+			inst->readahead_pieces.pop();
 		}
 	}
 
@@ -700,7 +918,6 @@ avbox_torrent_close(struct avbox_torrent * const inst)
 	} else {
 		session->remove_torrent(inst->handle);
 	}
-
 
 	DEBUG_PRINT(LOG_MODULE, "Stream closed");
 }
@@ -715,14 +932,13 @@ avbox_torrent_read(struct avbox_torrent * const inst,
 {
 	ASSERT(inst != NULL);
 	ASSERT(buf != NULL);
-	ASSERT(inst->ra_thread != nullptr);
+	ASSERT(inst->flags & AVBOX_TORRENTFLAGS_STREAM);
+	ASSERT(inst->readahead_thread != nullptr);
 
 	pthread_mutex_lock(&inst->lock);
-	inst->blocking++;
 
 	/* if the stream is closed return error */
 	if (inst->closed) {
-		inst->blocking--;
 		pthread_mutex_unlock(&inst->lock);
 		errno = ESHUTDOWN;
 		return -1;
@@ -733,74 +949,74 @@ avbox_torrent_read(struct avbox_torrent * const inst,
 	if (inst->have_metadata && inst->pos >= inst->filesize) {
 		DEBUG_VPRINT(LOG_MODULE, "EOF reached (pos=%" PRIi64 " filesize=%" PRIi64 ")",
 			inst->pos, inst->filesize);
-		inst->blocking--;
 		pthread_mutex_unlock(&inst->lock);
 		return 0;
 	}
 
-
-	int64_t ra_min = MIN(inst->filesize - inst->pos, inst->download_ahead_min);
+	int64_t ra_min = MIN(inst->filesize - inst->pos, inst->readahead_min);
 	int64_t ra_avail = inst->ra_pos - inst->pos;
 
 	/* if we don't have enough bytes in ra wait */
-	if (!inst->have_metadata || !inst->warm || (inst->underrun && (ra_avail < ra_min)) || (ra_avail == 0)) {
-		if (inst->warm && (ra_avail == 0)) {
+	if (!inst->warmed || (inst->underrun && (ra_avail < ra_min)) || (ra_avail == 0)) {
+		if (inst->warmed && (ra_avail == 0)) {
 			inst->underrun = 1;
 		}
-		pthread_cond_wait(&inst->ra_cond, &inst->lock);
 
-		ra_min = MIN(inst->filesize - inst->pos, inst->download_ahead_min);
+		inst->user_waiting++;
+		pthread_cond_wait(&inst->user_cond, &inst->lock);
+		inst->user_waiting--;
+		ra_min = MIN(inst->filesize - inst->pos, inst->readahead_min);
 		ra_avail = inst->ra_pos - inst->pos;
 
-		if (!inst->have_metadata || !inst->warm || (inst->underrun && (ra_avail < ra_min)) || (ra_avail == 0)) {
-			inst->blocking--;
+		if (!inst->warmed || (inst->underrun && (ra_avail < ra_min)) || (ra_avail == 0)) {
 			pthread_mutex_unlock(&inst->lock);
 			errno = EAGAIN;
 			return -1;
 		}
+
+		inst->underrun = 0;
 	}
 
-	/* if we're trying to read beyond the EOF return
-	 * 0 */
+	/* if we're trying to read beyond the EOF return 0 */
 	if (inst->pos >= inst->filesize) {
 		DEBUG_VPRINT(LOG_MODULE, "EOF reached (pos=%" PRIi64 " filesize=%" PRIi64 ")",
 			inst->pos, inst->filesize);
-		inst->blocking--;
 		pthread_mutex_unlock(&inst->lock);
 		return 0;
 	}
 
+	const int piece_index = offset_to_piece_index(inst, inst->pos);
+	ASSERT(!inst->readahead_pieces.empty());
 
-	const int next_piece = offset_to_piece_index(inst, inst->pos);
-
-	/* get the next piece from the cache */
-	if (inst->ra_current_piece != next_piece) {
-		/* DEBUG_VPRINT(LOG_MODULE, "Getting next piece %i", next_piece); */
-		struct cache_entry *entry;
-		ASSERT(!inst->ra_pieces.empty());
-		entry = inst->ra_pieces.front();
-		ASSERT(entry->index == next_piece);
-		inst->ra_current_piece = next_piece;
-		inst->ra_current_piece_size = entry->size;
-		inst->ra_current_piece_buffer = entry->buffer;
-		inst->ra_pieces.pop();
-		delete entry;
+	/* if we're done with the front piece then pop it */
+	if (inst->readahead_pieces.front()->index != piece_index) {
+		inst->readahead_pieces.pop();
+		ASSERT(!inst->readahead_pieces.empty());
+		ASSERT(inst->readahead_pieces.front()->index == piece_index);
 	}
 
 	/* copy the bytes requested */
-	const int offset = (inst->pos + inst->offset) - (next_piece * inst->block_size);
-	const int bytes_to_read = MIN(sz, inst->ra_current_piece_size - offset);
-	memcpy(buf, &inst->ra_current_piece_buffer[offset], bytes_to_read);
+	const int offset = (inst->pos + inst->file_offset) - (((int64_t) piece_index) * inst->piece_size);
+	const int bytes_to_read = (piece_index == offset_to_piece_index(inst, inst->filesize - 1)) ?
+		MIN(sz, inst->filesize - inst->pos) : MIN(sz, inst->readahead_pieces.front()->size - offset);
+	ASSERT(bytes_to_read <= sz);
+	memcpy(buf, &inst->readahead_pieces.front()->buffer[offset], bytes_to_read);
+
+	/* signal the readahead thread if it may be waiting
+	 * for us */
+	if (1 || (inst->ra_pos - inst->pos) >= inst->readahead_min) {
+		pthread_cond_signal(&inst->readahead_cond);
+	}
+
+	/* increment pos and make sure we don't over-read */
+	inst->pos += bytes_to_read;
+	ASSERT(inst->pos <= inst->filesize);
 
 	/* DEBUG_VPRINT(LOG_MODULE, "Read %i bytes from piece %i at offset %i (pos=%" PRIi64 " offset=%" PRIi64 " piece_size=%" PRIi64
 		"ra_pos=%" PRIi64 " count=%" PRIi64 ")",
-		bytes_to_read, next_piece, offset, inst->pos, inst->offset, inst->block_size,
+		bytes_to_read, piece_index, offset, inst->pos - bytes_to_read, inst->file_offset, inst->piece_size,
 		inst->ra_pos, inst->ra_pos - inst->pos); */
 
-	inst->blocking--;
-	inst->pos += bytes_to_read;
-	inst->underrun = 0;
-	pthread_cond_signal(&inst->ra_cond);
 	pthread_mutex_unlock(&inst->lock);
 
 	return bytes_to_read;
@@ -811,30 +1027,24 @@ EXPORT void
 avbox_torrent_bufferstate(struct avbox_torrent * const inst,
 	int64_t * const count, int64_t * const capacity)
 {
-	if (!inst->warm) {
-		*capacity = inst->warmup_pieces * inst->block_size;
-		if (*capacity == 0) {
-			*capacity = 100;
-		}
-		*count = inst->warm_pieces * inst->block_size;
-		if (*count > *capacity) {
-			*count = *capacity;
-		}
-	} else {
-		const int64_t pos = inst->pos;
-		const int64_t torrent_pos = inst->torrent_pos;
+	if (__warmed(inst, count, capacity)) {
 
-		*count = *capacity = inst->download_ahead_min;
+		ASSERT(inst->have_metadata);
+
+		const int64_t pos = inst->pos;
+		const int64_t torrent_pos = get_torrent_pos(inst);
+
+		*count = *capacity = inst->readahead_min;
 
 		if (torrent_pos < inst->filesize &&
-			(pos + inst->download_ahead_min) < inst->filesize) {
-			const int next_piece = offset_to_piece_index(inst, torrent_pos);
+			(pos + inst->readahead_min) < inst->filesize) {
+			const int piece_index = offset_to_piece_index(inst, torrent_pos);
 			const int last_piece = offset_to_piece_index(inst,
-				MIN(inst->filesize, pos + inst->download_ahead_min));
-			*count = MIN(inst->download_ahead_min, torrent_pos - pos);
-			for (int i = next_piece; i < last_piece; i++) {
-				if (inst->handle.have_piece(i)) {
-					*count += inst->block_size;
+				MIN(inst->filesize, pos + inst->readahead_min));
+			*count = MIN(inst->readahead_min, torrent_pos - pos);
+			for (int i = piece_index; i < last_piece; i++) {
+				if (have_piece(inst, i)) {
+					*count += inst->piece_size;
 				}
 			}
 			if (*count > *capacity) {
@@ -848,16 +1058,17 @@ avbox_torrent_bufferstate(struct avbox_torrent * const inst,
 EXPORT int64_t
 avbox_torrent_downloaded(const struct avbox_torrent * const inst)
 {
-	if (inst->handle.is_valid() && inst->have_metadata) {
-		lt::torrent_status st = inst->handle.status();
-		return st.total_done;
+	if (!inst->have_metadata) {
+		return 0;
 	}
-	return 0;
+
+	return (((int64_t) inst->n_avail_pieces) * inst->piece_size) -
+		(have_piece(inst, inst->n_pieces - 1) ? (inst->piece_size - inst->last_piece_size) : 0);
 }
 
 
 EXPORT int64_t
-avbox_torrent_tell(struct avbox_torrent * const inst)
+avbox_torrent_tell(const struct avbox_torrent * const inst)
 {
 	return inst->pos;
 }
@@ -902,6 +1113,7 @@ avbox_torrent_seek(struct avbox_torrent * const inst,
 		pos);
 
 	ASSERT(inst != NULL);
+	ASSERT(inst->flags & AVBOX_TORRENTFLAGS_STREAM);
 
 	if (pos > inst->filesize) {
 		DEBUG_PRINT(LOG_MODULE, "Return -1 to seek beyond EOF");
@@ -916,38 +1128,37 @@ avbox_torrent_seek(struct avbox_torrent * const inst,
 	}
 
 	/* delete all cached pieces */
-	while (!inst->ra_pieces.empty()) {
-		struct cache_entry * const entry =
-			inst->ra_pieces.front();
-		inst->ra_pieces.pop();
-		delete entry;
+	while (!inst->readahead_pieces.empty()) {
+		inst->readahead_pieces.pop();
 	}
 
 	/* update the position and priorities */
-	inst->pos = inst->torrent_pos = inst->ra_pos = pos;
-	update_torrent_pos(inst);
-	adjust_priorities(inst);
+	inst->pos = inst->ra_pos = pos;
+	if (inst->have_metadata) {
+		adjust_priorities(inst);
+	}
 
-	/* Clear the first piece. This is necessary because if we
-	 * are currently at piece X and we seek to piece Y, don't read
-	 * anything and then return to piece X piece 8 will still be the
-	 * current piece but the readahead thread won't know about it so it
-	 * will still place piece 8 in the readahead queue */
-	inst->ra_current_piece = -1;
-	inst->ra_current_piece_buffer = nullptr;
-
-	/* seeking has the same effect as reading as far as the
-	 * readahead thread is concerned so we just signal this
-	 * condition here */
-	pthread_cond_signal(&inst->ra_cond);
+	/* wake the readahead thread */
+	pthread_cond_signal(&inst->readahead_cond);
 
 	DEBUG_VPRINT(LOG_MODULE, "Returning from seek: %" PRIi64,
 		inst->pos);
 
 	pthread_mutex_unlock(&inst->lock);
 
-
 	return 0;
+}
+
+
+EXPORT void
+avbox_torrent_setbitrate(struct avbox_torrent * const inst, const int bitrate)
+{
+	inst->bitrate = bitrate;
+	if (inst->have_metadata) {
+		pthread_mutex_lock(&inst->lock);
+		adjust_priorities(inst);
+		pthread_mutex_unlock(&inst->lock);
+	}
 }
 
 
@@ -1020,6 +1231,7 @@ avbox_torrent_open(const char * const uri, const char * const file,
 {
 	FILE *f = NULL;
 	struct avbox_torrent *inst;
+	pthread_mutexattr_t lockattr;
 	libtorrent::add_torrent_params params;
 	std::string torrent_filename = "";
 	std::string suri(uri);
@@ -1084,26 +1296,34 @@ avbox_torrent_open(const char * const uri, const char * const file,
 		return NULL;
 	}
 
-	/* initialize pthread primitives */
-	if (pthread_mutex_init(&inst->lock, nullptr) != 0) {
+	/* initialize mutexes */
+	pthread_mutexattr_init(&lockattr);
+	pthread_mutexattr_setprotocol(&lockattr, PTHREAD_PRIO_INHERIT);
+	if (pthread_mutex_init(&inst->lock, &lockattr) != 0) {
 		ABORT("Could not initialize pthread primitives!");
 	}
+	pthread_mutexattr_destroy(&lockattr);
 
-	if (pthread_cond_init(&inst->ra_piece_read_cond, nullptr) != 0 ||
-		pthread_cond_init(&inst->ra_cond, nullptr) != 0) {
+	/* initialize condition variables */
+	if (pthread_cond_init(&inst->readahead_cond, nullptr) != 0 ||
+		pthread_cond_init(&inst->user_cond, nullptr) != 0) {
 		ABORT("Could not initialize pthread primitives!");
 	}
 
 	/* initialize stream */
-	inst->pos = inst->torrent_pos = 0;
+	inst->pos = 0;
 	inst->underrun = 0;
-	inst->block_size = -1;
 	inst->n_pieces = 0;
+	inst->n_avail_pieces = 0;
+	inst->torrent_size = 0;
 	inst->flags = flags;
 	inst->notify_object = notify_object;
+	inst->ra_pos = 0;
+	inst->readahead_fn = nullptr;
+	inst->bitrate = 12000000; /* about 12 Mbps for h264 1080p at 60Hz */
 
 	/* add the torrent to the session */
-	if (torrent_filename != "") {
+	if (!torrent_filename.empty()) {
 		params.ti = boost::make_shared<lt::torrent_info>(
 			torrent_filename, boost::ref(ec), 0);
 		if (ec) {
@@ -1132,6 +1352,7 @@ avbox_torrent_open(const char * const uri, const char * const file,
 	params.storage_mode = lt::storage_mode_allocate;
 
 	/* add the torrent */
+	pthread_mutex_lock(&inst->lock);
 	pthread_mutex_lock(&session_lock);
 	LIST_ADD(&torrents, inst);
 	inst->handle = session->add_torrent(params, boost::ref(ec));
@@ -1139,6 +1360,8 @@ avbox_torrent_open(const char * const uri, const char * const file,
 		LOG_VPRINT_ERROR(LOG_MODULE, "Could not add torrent: %s",
 			ec.message().c_str());
 		LIST_REMOVE(inst);
+		pthread_mutex_unlock(&inst->lock);
+		pthread_mutex_destroy(&inst->lock);
 		free(inst);
 		if (!torrent_filename.empty()) {
 			unlink(torrent_filename.c_str());
@@ -1146,12 +1369,18 @@ avbox_torrent_open(const char * const uri, const char * const file,
 		pthread_mutex_unlock(&session_lock);
 		return NULL;
 	}
-	pthread_mutex_unlock(&session_lock);
+
+	ASSERT(inst->handle.is_valid());
 
 	/* save info hash */
 	inst->info_hash = lt::to_hex(inst->handle.info_hash().to_string());
 
-	if (torrent_filename != "") {
+	pthread_mutex_unlock(&session_lock);
+	pthread_mutex_unlock(&inst->lock);
+
+	/* if this is a temporary torrent then unlink it
+	 * and call metadata_received */
+	if (!torrent_filename.empty()) {
 		unlink(torrent_filename.c_str());
 		metadata_received(inst);
 	}
@@ -1159,21 +1388,14 @@ avbox_torrent_open(const char * const uri, const char * const file,
 	DEBUG_VPRINT(LOG_MODULE, "Torrent added: info_hash=%s",
 		inst->info_hash.c_str());
 
-
-	/* initialize readahead struff now */
-	inst->ra_pos = 0;
-	inst->ra_worker = nullptr;
-	inst->ra_current_piece = -1;
-	inst->ra_current_piece_size = 0;
-	inst->ra_current_piece_buffer = nullptr;
-
-	if ((inst->ra_thread = avbox_thread_new(NULL, NULL, AVBOX_THREAD_REALTIME, -5)) == nullptr) {
-		ABORT("Could not initialize readahead thread!");
-	}
-
 	if (flags & AVBOX_TORRENTFLAGS_STREAM) {
 		DEBUG_PRINT(LOG_MODULE, "Starting readahead thread");
-		if ((inst->ra_worker = avbox_thread_delegate(inst->ra_thread, readahead_thread, inst)) == nullptr) {
+
+		/* start the readahead thread */
+		if ((inst->readahead_thread = avbox_thread_new(NULL, NULL, AVBOX_THREAD_REALTIME, -10)) == nullptr) {
+			ABORT("Could not initialize readahead thread!");
+		}
+		if ((inst->readahead_fn = avbox_thread_delegate(inst->readahead_thread, readahead, inst)) == nullptr) {
 			ABORT("Could not start readahead worker");
 		}
 	}
@@ -1187,22 +1409,23 @@ avbox_torrent_init(void)
 {
 	lt::settings_pack settings;
 	struct stat st;
-	struct avbox_delegate *del;
+	pthread_mutexattr_t lockattr;
 
 	DEBUG_PRINT(LOG_MODULE, "Creating session " STRINGIZE(LOCALSTATEDIR));
 
+	pthread_mutexattr_init(&lockattr);
+	pthread_mutexattr_setprotocol(&lockattr, PTHREAD_PRIO_INHERIT);
+	if (pthread_mutex_init(&session_lock, &lockattr) != 0) {
+		ABORT("Could not initialize pthread primitives!");
+	}
+	pthread_mutexattr_destroy(&lockattr);
+
 #ifdef ENABLE_REALTIME
-	/* Use the lowest realtime priority.
-	 * NOTE: At first I assumed that using a SCHED_OTHER or SCHED_IDLE policy
-	 * would suffice for this since everything works well while not streaming.
-	 * However if we don't use a realtime priority it will cause the libtorrent
-	 * usermode theads to be starved by their own IO done on kernel threads (kworker),
-	 * this eventually causes the realtime threads to be starved from data leading
-	 * to interruptions */
 	int have_old_policy = 1;
 	int old_policy = SCHED_RR;
 	struct sched_param parms;
 	struct sched_param old_parms;
+
 	/* save current thread priority */
 	if (pthread_getschedparam(pthread_self(), &old_policy, &old_parms) != 0) {
 		LOG_PRINT_ERROR("Could not get main thread priority");
@@ -1234,7 +1457,29 @@ avbox_torrent_init(void)
 		lt::alert::progress_notification |
 		lt::alert::error_notification |
 		lt::alert::storage_notification |
-		lt::alert::status_notification);
+		lt::alert::status_notification |
+		lt::alert::peer_notification);
+
+	/* we're using an alerts observer. No queue needed */
+	settings.set_int(lt::settings_pack::alert_queue_size, 0);
+
+	/* the page cause causes latency issues for RT and it's also
+	 * pretty pointless on Linux */
+	settings.set_int(lt::settings_pack::read_cache_line_size, 0);
+	settings.set_int(lt::settings_pack::write_cache_line_size, 1);
+
+	/* tune for steady piece rate */
+	settings.set_int(lt::settings_pack::request_queue_time, 1); /* default is 3 */
+	settings.set_int(lt::settings_pack::max_out_request_queue, 100); /* default is 500 */
+	settings.set_int(lt::settings_pack::whole_pieces_threshold, 5); /* default is 20 */
+	settings.set_int(lt::settings_pack::peer_timeout, 60); /* default is 120 */
+
+#if 1 || defined(ENABLE_REALTIME)
+	settings.set_bool(lt::settings_pack::low_prio_disk, true);
+	settings.set_int(lt::settings_pack::aio_threads, 1);
+	settings.set_int(lt::settings_pack::aio_max, 10);
+	settings.set_int(lt::settings_pack::listen_queue_size, 1);
+#endif
 
 #if 0
 	/* enable uTP and TCP and uTP only for outgoing */
@@ -1242,21 +1487,23 @@ avbox_torrent_init(void)
 	settings.set_bool(lt::settings_pack::enable_outgoing_tcp, true);
 	settings.set_bool(lt::settings_pack::enable_incoming_utp, true);
 	settings.set_bool(lt::settings_pack::enable_incoming_tcp, true);
-
-	settings.set_int(lt::settings_pack::download_rate_limit, 0);
-	settings.set_int(lt::settings_pack::upload_rate_limit, 512 * 1024);
-	settings.set_int(lt::settings_pack::aio_threads, 1);
-	settings.set_int(lt::settings_pack::aio_max, 10);
-	settings.set_int(lt::settings_pack::max_queued_disk_bytes, 1024 * 32);
-	settings.set_int(lt::settings_pack::coalesce_reads, true);
-	settings.set_int(lt::settings_pack::coalesce_writes, true);
 #endif
 
+	/* cleanup temp directory */
+	cleanup_temp_directory();
+
+	/* initialize libtorrent */
 	if ((session = new lt::session(settings)) == nullptr) {
 		DEBUG_PRINT(LOG_MODULE, "Could not create libtorrent session!");
 		return -1;
 	}
 
+	/* set the alert handler */
+	boost::shared_ptr<lt::plugin> aop =
+		boost::make_shared<struct alerts_observer_plugin>();
+	session->add_extension(aop);
+
+	/* include everything in global limits */
 	lt::peer_class_type_filter peer_classes;
 	peer_classes.add(lt::peer_class_type_filter::tcp_socket, lt::session::global_peer_class_id);
 	peer_classes.add(lt::peer_class_type_filter::ssl_tcp_socket, lt::session::global_peer_class_id);
@@ -1264,17 +1511,6 @@ avbox_torrent_init(void)
 	peer_classes.add(lt::peer_class_type_filter::utp_socket, lt::session::global_peer_class_id);
 	peer_classes.add(lt::peer_class_type_filter::ssl_utp_socket, lt::session::global_peer_class_id);
 	session->set_peer_class_type_filter(peer_classes);
-
-
-	/* create a thread to monitor the session */
-	if ((thread = avbox_thread_new(NULL, NULL, AVBOX_THREAD_REALTIME, -5)) == nullptr) {
-		DEBUG_VPRINT(LOG_MODULE, "Could not create thread: %s",
-			strerror(errno));
-		return -1;
-	}
-	if ((del = avbox_thread_delegate(thread, session_monitor, NULL)) == nullptr) {
-		ABORT("Could not create torrent thread!");
-	}
 
 #ifdef ENABLE_REALTIME
 	/* restore old scheduling policy */
@@ -1301,7 +1537,6 @@ avbox_torrent_shutdown(void)
 		pthread_mutex_unlock(&session_lock);
 
 		quit = 1;
-		avbox_thread_destroy(thread);
 		delete session;
 		session = nullptr;
 		quit = 0;

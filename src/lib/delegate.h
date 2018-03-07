@@ -22,6 +22,10 @@
 #define __AVBOX_DELEGATE_H__
 
 
+#define AVBOX_DELEGATE_DETTACHED	(1)
+#define AVBOX_DELEGATE_RECYCLE		(2)
+
+
 typedef void* (*avbox_delegate_fn)(void *args);
 
 
@@ -62,7 +66,7 @@ avbox_delegate_wait(struct avbox_delegate *delegate, void **result);
  * Create new delegate.
  */
 struct avbox_delegate *
-avbox_delegate_new(avbox_delegate_fn func, void *arg);
+avbox_delegate_new(avbox_delegate_fn func, void * const arg, const unsigned int flags);
 
 
 /**

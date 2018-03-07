@@ -31,6 +31,7 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <sys/mount.h>
+#include <sys/mman.h>
 #include <sys/reboot.h>
 #include <linux/reboot.h>
 
@@ -49,6 +50,7 @@
 #include "timers.h"
 #include "process.h"
 #include "sysinit.h"
+#include "queue.h"
 #include "su.h"
 #ifdef ENABLE_IONICE
 #include "ionice.h"
@@ -67,9 +69,12 @@ LISTABLE_STRUCT(avbox_application_subscriber,
 static int pid1 = 0;
 static int result = 0;
 static struct avbox_object *dispatch_object;
+static struct avbox_queue *queue = NULL;
 static LIST subscribers;
 static int app_argc = 0;
 static char **app_argv = NULL;
+
+int avbox_idle = 0;
 
 
 /**
@@ -221,7 +226,7 @@ avbox_application_delegate(avbox_delegate_fn func, void *arg)
 	struct avbox_delegate *del;
 
 	/* create delegate */
-	if ((del = avbox_delegate_new(func, arg)) == NULL) {
+	if ((del = avbox_delegate_new(func, arg, 0)) == NULL) {
 		assert(errno == ENOMEM);
 		return NULL;
 	}
@@ -370,6 +375,11 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 
 	pid1 = (getpid() == 1);
 
+#ifdef ENABLE_REALTIME
+	mlockall(MCL_CURRENT);
+	mlockall(MCL_FUTURE | MCL_ONFAULT);
+#endif
+
 	/* initialize logging system for early
 	 * logging */
 	log_init();
@@ -412,7 +422,7 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 	}
 
 	/* initialize message dispatcher */
-	if (avbox_dispatch_init() == -1) {
+	if ((queue = avbox_dispatch_init()) == NULL) {
 		LOG_PRINT_ERROR("Could not initialize dispatcher");
 		return -1;
 	}
@@ -446,7 +456,7 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 	 * video threads (any threads created during initialization of
 	 * the video driver */
 	struct sched_param parms;
-	parms.sched_priority = sched_get_priority_max(SCHED_RR) - 20;
+	parms.sched_priority = sched_get_priority_max(SCHED_RR) - 21;
 	if (pthread_setschedparam(pthread_self(), SCHED_RR, &parms) != 0) {
 		LOG_PRINT_ERROR("Could not send main thread priority");
 	}
@@ -463,8 +473,8 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 	/* NOTE: This will fail when running as a regular user so we
 	 * must call it after the log is initialized or else the
 	 * LOG_PRINT_ERROR() will cause a SEGFAULT. */
-	parms.sched_priority = sched_get_priority_max(SCHED_RR);
-	if (pthread_setschedparam(pthread_self(), SCHED_RR, &parms) != 0) {
+	parms.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
+	if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &parms) != 0) {
 		LOG_PRINT_ERROR("Could not send main thread priority");
 	}
 #endif
@@ -482,13 +492,9 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 		}
 		log_setfile(f);
 
-#ifndef NDEBUG
 		sysinit_coredump();
-#endif
 	} else {
-#ifndef NDEBUG
 		sysinit_coredump();
-#endif
 	}
 
 #ifdef ENABLE_BLUETOOTH
@@ -563,7 +569,9 @@ avbox_application_run(void)
 	while (!quit) {
 		struct avbox_message *msg;
 		/* get the next message */
-		if ((msg = avbox_dispatch_getmsg()) == NULL) {
+		ATOMIC_INC(&avbox_idle);
+		if ((msg = avbox_queue_get(queue)) == NULL) {
+			ATOMIC_DEC(&avbox_idle);
 			switch (errno) {
 			case EAGAIN: continue;
 			case ESHUTDOWN: quit = 1; continue;
@@ -572,6 +580,7 @@ avbox_application_run(void)
 					strerror(errno), errno);
 			}
 		}
+		ATOMIC_DEC(&avbox_idle);
 		avbox_message_dispatch(msg);
 	}
 
@@ -618,23 +627,22 @@ avbox_application_run(void)
 
 
 /**
- * Dispatch the next message in the thread's
- * queue.
+ * Gets the application's main thread queue.
  */
-EXPORT int
-avbox_application_doevents()
+EXPORT struct avbox_queue*
+avbox_application_queue()
 {
-	struct avbox_message *msg;
-	/* get the next message */
-	if (avbox_dispatch_peekmsg() != NULL) {
-		if ((msg = avbox_dispatch_getmsg()) == NULL) {
-			DEBUG_ABORT("application",
-				"BUG: getmsg() returned NULL after peekmsg() succeeded!");
-		}
-		avbox_message_dispatch(msg);
-		return 1;
-	}
-	return 0;
+	return queue;
+}
+
+
+/**
+ * Get the main thread's object.
+ */
+EXPORT struct avbox_object*
+avbox_application_object()
+{
+	return dispatch_object;
 }
 
 

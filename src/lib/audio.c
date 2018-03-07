@@ -40,6 +40,7 @@
 #include "queue.h"
 #include "audio.h"
 
+#define NONBLOCK			(0)
 
 #define AVBOX_AUDIOSTREAM_DATA_PACKET	(1)
 #define AVBOX_AUDIOSTREAM_CLOCK_SET	(2)
@@ -49,6 +50,7 @@ struct avbox_audiostream_data_packet
 {
 	size_t n_frames;
 	uint8_t *data;
+	void* callback_handle;
 };
 
 
@@ -76,8 +78,11 @@ LISTABLE_STRUCT(avbox_audio_packet,
 struct avbox_audiostream
 {
 	snd_pcm_t *pcm_handle;
-	pthread_mutex_t lock;
-	pthread_cond_t wake;
+	pthread_mutex_t io_lock;
+	pthread_cond_t io_wake;
+	pthread_mutex_t queue_lock;
+	pthread_cond_t queue_wake;
+	pthread_mutex_t pool_lock;
 	pthread_t thread;
 	int quit;
 	int paused;
@@ -89,11 +94,14 @@ struct avbox_audiostream
 	int64_t frames;
 	int64_t clock_start;
 	int64_t clock_offset;
+	int64_t last_audio_time;
+	struct timespec last_system_time;
 	snd_pcm_uframes_t buffer_size;
 	unsigned int framerate;
 	struct avbox_queue *packets;
 	avbox_audiostream_callback callback;
 	void *callback_context;
+	LIST packet_pool;
 };
 
 
@@ -102,6 +110,44 @@ struct avbox_audiostream
  * take to play a given amount of frames
  */
 #define FRAMES2TIME(stream, frames)	(((frames) * 1000.0 * 1000.0) / (double) stream->framerate)
+
+
+static struct avbox_audio_packet *
+alloc_packet(struct avbox_audiostream * const inst)
+{
+	struct avbox_audio_packet *packet;
+	pthread_mutex_lock(&inst->pool_lock);
+	packet = LIST_TAIL(struct avbox_audio_packet*, &inst->packet_pool);
+	if (UNLIKELY(packet == NULL)) {
+		if ((packet = malloc(sizeof(struct avbox_audio_packet))) == NULL) {
+			ASSERT(errno == ENOMEM);
+			pthread_mutex_unlock(&inst->pool_lock);
+			return NULL;
+		}
+	} else {
+		LIST_REMOVE(packet);
+	}
+	pthread_mutex_unlock(&inst->pool_lock);
+	return packet;
+
+}
+
+
+static void
+release_packet(struct avbox_audiostream * const inst,
+	struct avbox_audio_packet * const packet)
+{
+	if (packet->type == AVBOX_AUDIOSTREAM_DATA_PACKET) {
+		if (packet->data_packet.callback_handle != NULL && inst->callback != NULL) {
+			inst->callback(inst, AVBOX_AUDIOSTREAM_PACKET_RELEASED,
+				packet->data_packet.callback_handle, inst->callback_context);
+			packet->data_packet.callback_handle = NULL;
+		}
+	}
+	pthread_mutex_lock(&inst->pool_lock);
+	LIST_ADD(&inst->packet_pool, packet);
+	pthread_mutex_unlock(&inst->pool_lock);
+}
 
 
 /**
@@ -163,7 +209,7 @@ __avbox_audiostream_drop(struct avbox_audiostream * const stream)
 			ASSERT(packet != NULL);
 			stream->queued_frames -= packet->data_packet.n_frames;
 		}
-		free(packet);
+		release_packet(stream, packet);
 	}
 	ASSERT(stream->queued_frames == 0);
 
@@ -176,12 +222,11 @@ __avbox_audiostream_drop(struct avbox_audiostream * const stream)
 void
 avbox_audiostream_drop(struct avbox_audiostream * const inst)
 {
-	pthread_mutex_lock(&inst->lock);
+	pthread_mutex_lock(&inst->io_lock);
 	avbox_audiostream_pcm_drain(inst);
-
 	__avbox_audiostream_drop(inst);
-	pthread_cond_broadcast(&inst->wake);
-	pthread_mutex_unlock(&inst->lock);
+	pthread_cond_signal(&inst->io_wake);
+	pthread_mutex_unlock(&inst->io_lock);
 }
 
 
@@ -214,9 +259,10 @@ avbox_pcm_state_getstring(snd_pcm_state_t state)
  * or underruns.
  */
 int64_t
-__avbox_audiostream_gettime(struct avbox_audiostream * const stream)
+avbox_audiostream_gettime(struct avbox_audiostream * const stream)
 {
 	int err = 0;
+	snd_pcm_sframes_t avail;
 	snd_pcm_status_t *status;
 
 	if (stream->pcm_handle == NULL) {
@@ -229,10 +275,39 @@ __avbox_audiostream_gettime(struct avbox_audiostream * const stream)
 		goto end;
 	}
 
+	/* try to aquire the io mutex. If we can't then return
+	 * an approximation.
+	 * NOTE: It may not be necessary to lock here if libasound is
+	 * compiled with thread safety but we still want to do it here
+	 * because our io mutex has PTHREAD_PRIO_INHERIT to solve the
+	 * priority inversion problem when the video output thread has
+	 * to wait for this mutex (it gets preempted by the decoder threads
+	 * resulting in latencies in the 100s of ms). Now we're returning an
+	 * approximation when the mutex is lock so this call should never
+	 * cause a context switch (to another thread).
+	 */
+	if ((err = pthread_mutex_trylock(&stream->io_lock)) != 0) {
+		if (err == EBUSY) {
+			if (1 || stream->last_audio_time < 0) {
+				pthread_mutex_lock(&stream->io_lock);
+			} else {
+				struct timespec now;
+				clock_gettime(CLOCK_MONOTONIC, &now);
+				const int64_t time = stream->last_audio_time +
+					utimediff(&now, &stream->last_system_time);
+				return MAX(time, stream->clock_start +
+					FRAMES2TIME(stream, stream->frames));
+			}
+		} else {
+			ABORT("Mutex trylock returned error!");
+		}
+	}
+
 	/* make sure we're not in xrun */
-	if ((err = snd_pcm_avail(stream->pcm_handle)) < 0) {
+	if ((avail = snd_pcm_avail(stream->pcm_handle)) < 0) {
 		/* LOG_VPRINT_ERROR("avbox_audiostream_gettime(): ALSA error detected: %s",
 			snd_strerror(err)); */
+		pthread_mutex_unlock(&stream->io_lock);
 		goto end;
 	}
 
@@ -240,8 +315,11 @@ __avbox_audiostream_gettime(struct avbox_audiostream * const stream)
 	snd_pcm_status_alloca(&status);
 	if ((err = snd_pcm_status(stream->pcm_handle, status)) < 0) {
 		LOG_VPRINT_ERROR("Stream status error: %s", snd_strerror(err));
+		pthread_mutex_unlock(&stream->io_lock);
 		goto end;
 	}
+
+	pthread_mutex_unlock(&stream->io_lock);
 
 	/* if the stream is running calculate it's runtime
 	 * based on the internal offset + timestamp - trigger timestamp */
@@ -264,6 +342,8 @@ __avbox_audiostream_gettime(struct avbox_audiostream * const stream)
 		time = stream->clock_start + stream->clock_offset;
 		time += SEC2USEC(ts.tv_sec) + ts.tv_usec;
 		time -= SEC2USEC(tts.tv_sec) + tts.tv_usec;
+		/* clock_gettime(CLOCK_MONOTONIC, &stream->last_system_time); 
+		return stream->last_audio_time = MAX(time, stream->last_audio_time); */
 		return time;
 	}
 	default:
@@ -277,17 +357,6 @@ end:
 }
 
 
-int64_t
-avbox_audiostream_gettime(struct avbox_audiostream * const stream)
-{
-	int64_t ret;
-	pthread_mutex_lock(&stream->lock);
-	ret = __avbox_audiostream_gettime(stream);
-	pthread_mutex_unlock(&stream->lock);
-	return ret;
-}
-
-
 /**
  * Pauses the audio stream and synchronizes
  * the audio clock.
@@ -296,6 +365,7 @@ int
 avbox_audiostream_pause(struct avbox_audiostream * const inst)
 {
 	int err, ret = -1;
+	snd_pcm_sframes_t avail;
 	snd_pcm_status_t *status;
 
 	DEBUG_PRINT("audio", "Pausing audio stream");
@@ -308,13 +378,13 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 
 	snd_pcm_status_alloca(&status);
 
-	pthread_mutex_lock(&inst->lock);
+	pthread_mutex_lock(&inst->io_lock);
 
 	/* we need to call this or snd_pcm_status() may succeed when
 	 * we're on XRUN */
-	if ((err = snd_pcm_avail(inst->pcm_handle)) < 0) {
+	if ((avail = snd_pcm_avail(inst->pcm_handle)) < 0) {
 		LOG_VPRINT_ERROR("Could not get pcm avail: %s",
-			snd_strerror(err));
+			snd_strerror(avail));
 		inst->paused = 1;
 		goto end;
 	}
@@ -360,9 +430,9 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 
 		inst->clock_offset = FRAMES2TIME(inst, inst->frames);
 
-		DEBUG_VPRINT(LOG_MODULE, "Predicted: %i, Actual: %li",
+		/* DEBUG_VPRINT(LOG_MODULE, "Predicted: %i, Actual: %li",
 			inst->clock_start + FRAMES2TIME(inst, inst->frames),
-			__avbox_audiostream_gettime(inst));
+			__avbox_audiostream_gettime(inst)); */
 		DEBUG_VPRINT("audio", "PCM state after pause: %s",
 			avbox_pcm_state_getstring(snd_pcm_state(inst->pcm_handle)));
 
@@ -379,7 +449,8 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 	}
 
 end:
-	pthread_mutex_unlock(&inst->lock);
+	inst->last_audio_time = -1;
+	pthread_mutex_unlock(&inst->io_lock);
 	return ret;
 }
 
@@ -395,7 +466,7 @@ avbox_audiostream_resume(struct avbox_audiostream * const inst)
 	DEBUG_VPRINT("audio", "Resuming audio stream (time=%li)",
 		avbox_audiostream_gettime(inst));
 
-	pthread_mutex_lock(&inst->lock);
+	pthread_mutex_lock(&inst->io_lock);
 
 	if (!inst->paused) {
 		LOG_PRINT_ERROR("Cannot resume non-paused stream");
@@ -403,11 +474,12 @@ avbox_audiostream_resume(struct avbox_audiostream * const inst)
 	}
 
 	inst->paused = 0;
+	inst->last_audio_time = -1;
 	ret = 0;
 end:
 	/* signal IO thread */
-	pthread_cond_broadcast(&inst->wake);
-	pthread_mutex_unlock(&inst->lock);
+	pthread_cond_signal(&inst->io_wake);
+	pthread_mutex_unlock(&inst->io_lock);
 
 	DEBUG_VPRINT("audio", "Audio stream resumed (time=%li)",
 		avbox_audiostream_gettime(inst));
@@ -432,10 +504,10 @@ avbox_audiostream_output(void *arg)
 	int dir = 0;
 	snd_pcm_hw_params_t *params;
 	snd_pcm_sw_params_t *swparams;
+	snd_pcm_sframes_t avail;
 	snd_pcm_sframes_t frames;
 	snd_pcm_uframes_t period = 1024, silence_len,
 		start_thres, stop_thres, silen_thres;
-	const snd_pcm_uframes_t fragment = 1024;
 
 	DEBUG_SET_THREAD_NAME("audio_output");
 	DEBUG_PRINT(LOG_MODULE, "Audio playback thread started");
@@ -501,25 +573,7 @@ avbox_audiostream_output(void *arg)
 		goto end;
 	}
 
-	if ((ret = snd_pcm_sw_params_current(inst->pcm_handle, swparams)) < 0) {
-		LOG_VPRINT_ERROR("Could not determine SW params. %s", snd_strerror(ret));
-		goto end;
-	}
-	if ((ret = snd_pcm_sw_params_set_tstamp_type(inst->pcm_handle, swparams, SND_PCM_TSTAMP_TYPE_MONOTONIC)) < 0) {
-		LOG_VPRINT_ERROR("Could not set ALSA clock to CLOCK_MONOTONIC. %s", snd_strerror(ret));
-		goto end;
-	}
-	if ((ret = snd_pcm_sw_params_set_tstamp_mode(inst->pcm_handle, swparams, SND_PCM_TSTAMP_ENABLE)) < 0) {
-		LOG_VPRINT_ERROR("Could not enable timestamps: %s", snd_strerror(ret));
-	}
-	if ((ret = snd_pcm_sw_params_set_avail_min(inst->pcm_handle, swparams, fragment)) < 0) {
-		LOG_VPRINT_ERROR("Could not set ALSA avail_min: %s", snd_strerror(ret));
-		goto end;
-	}
-	if ((ret = snd_pcm_sw_params(inst->pcm_handle, swparams)) < 0) {
-		LOG_VPRINT_ERROR("Could not set ALSA SW paramms. %s", snd_strerror(ret));
-		goto end;
-	}
+	/* read hw params */
 	if ((ret = snd_pcm_hw_params_get_period_time(params, &period_usecs, &dir)) < 0) {
 		LOG_VPRINT_ERROR("Could not get period time: %s",
 			snd_strerror(ret));
@@ -536,6 +590,33 @@ avbox_audiostream_output(void *arg)
 		LOG_VPRINT_ERROR("Could not get buffer size: %s",
 			snd_strerror(ret));
 	}
+
+	/* set sw params */
+	if ((ret = snd_pcm_sw_params_current(inst->pcm_handle, swparams)) < 0) {
+		LOG_VPRINT_ERROR("Could not determine SW params. %s", snd_strerror(ret));
+		goto end;
+	}
+	if ((ret = snd_pcm_sw_params_set_tstamp_type(inst->pcm_handle, swparams, SND_PCM_TSTAMP_TYPE_MONOTONIC)) < 0) {
+		LOG_VPRINT_ERROR("Could not set ALSA clock to CLOCK_MONOTONIC. %s", snd_strerror(ret));
+		goto end;
+	}
+	if ((ret = snd_pcm_sw_params_set_tstamp_mode(inst->pcm_handle, swparams, SND_PCM_TSTAMP_ENABLE)) < 0) {
+		LOG_VPRINT_ERROR("Could not enable timestamps: %s", snd_strerror(ret));
+	}
+	if ((ret = snd_pcm_sw_params_set_avail_min(inst->pcm_handle, swparams, 0)) < 0) {
+		LOG_VPRINT_ERROR("Could not set ALSA avail_min: %s", snd_strerror(ret));
+		goto end;
+	}
+	if ((ret = snd_pcm_sw_params_set_start_threshold(inst->pcm_handle, swparams, inst->buffer_size - period)) < 0) {
+		LOG_VPRINT_ERROR("Could not set ALSA start threshold: %s", snd_strerror(ret));
+		goto end;
+	}
+	if ((ret = snd_pcm_sw_params(inst->pcm_handle, swparams)) < 0) {
+		LOG_VPRINT_ERROR("Could not set ALSA SW paramms. %s", snd_strerror(ret));
+		goto end;
+	}
+
+	/* read sw params */
 	if ((ret = snd_pcm_sw_params_get_start_threshold(swparams, &start_thres)) < 0) {
 		LOG_VPRINT_ERROR("Could not get start threshold: %s", snd_strerror(ret));
 	}
@@ -555,9 +636,9 @@ avbox_audiostream_output(void *arg)
 	DEBUG_VPRINT("audio", "ALSA period size: %ld frames", (unsigned long) period);
 	DEBUG_VPRINT("audio", "ALSA period time: %ld usecs", period_usecs);
 	DEBUG_VPRINT("audio", "ALSA framerate: %u Hz", inst->framerate);
-	DEBUG_VPRINT("audio", "ALSA frame size: %lu bytes",
-		avbox_audiostream_frames2size(inst, 1));
-	DEBUG_VPRINT("audio", "ALSA free buffer space: %ld frames", snd_pcm_avail(inst->pcm_handle));
+	DEBUG_VPRINT("audio", "ALSA frame size: %" PRIi64 " bytes",
+		(int64_t) avbox_audiostream_frames2size(inst, 1));
+	DEBUG_VPRINT("audio", "ALSA free buffer space: %" PRIi64 " frames", (int64_t) snd_pcm_avail(inst->pcm_handle));
 	DEBUG_VPRINT("audio", "ALSA Start threshold: %lu", start_thres);
 	DEBUG_VPRINT("audio", "ALSA Stop threshold: %lu", stop_thres);
 	DEBUG_VPRINT("audio", "ALSA Silence threshold: %lu", silen_thres);
@@ -571,51 +652,70 @@ avbox_audiostream_output(void *arg)
 	DEBUG_VPRINT(LOG_MODULE, "delay: %"PRIi64,
 		(int64_t) delay);
 
+	if ((ret = snd_pcm_nonblock(inst->pcm_handle, NONBLOCK)) < 0) {
+		LOG_VPRINT_ERROR("Could not set nonblock mode: %s",
+			snd_strerror(ret));
+	}
+
 	/* drop superuser privileges */
 	(void) avbox_droproot();
 
 	/* signal that we've started successfully */
 	inst->running = 1;
-	pthread_mutex_lock(&inst->lock);
-	pthread_cond_broadcast(&inst->wake);
-	pthread_mutex_unlock(&inst->lock);
+	pthread_mutex_lock(&inst->io_lock);
+	pthread_cond_signal(&inst->io_wake);
+	pthread_mutex_unlock(&inst->io_lock);
 
 	DEBUG_PRINT("audio", "Audio thread ready");
 
 	/* start audio IO */
 	while (1) {
 		/* get the next packet */
-		if (!underrun) {
+		if (LIKELY(!underrun)) {
 
 			/* calculate how long until the stream dries out
 			 * and wait up to that long for new packets */
-			pthread_mutex_lock(&inst->lock);
-			if ((frames = snd_pcm_avail(inst->pcm_handle)) < 0) {
-				DEBUG_PRINT(LOG_MODULE, "snd_pcm_avail() returned error!!!");
-				timeout = 1;
+			pthread_mutex_lock(&inst->io_lock);
+			if (UNLIKELY((avail = snd_pcm_avail(inst->pcm_handle)) < 0)) {
+				if (inst->frames == 0) {
+					timeout = 10LL * 1000LL;
+				} else {
+					DEBUG_PRINT(LOG_MODULE, "snd_pcm_avail() returned error!!!");
+					timeout = 1;
+				}
 			} else {
-				timeout = FRAMES2TIME(inst, inst->buffer_size - frames);
+				timeout = FRAMES2TIME(inst, inst->buffer_size - avail);
 			}
-			pthread_mutex_unlock(&inst->lock);
+			pthread_mutex_unlock(&inst->io_lock);
 
-			if ((packet = avbox_queue_timedpeek(inst->packets, timeout)) == NULL) {
+			if (UNLIKELY((packet = avbox_queue_timedpeek(inst->packets, timeout)) == NULL)) {
 				if (errno == EAGAIN) {
-					snd_pcm_state_t state = snd_pcm_state(inst->pcm_handle);
+					snd_pcm_state_t state;
 
-					if (state == SND_PCM_STATE_RUNNING ||
+					/* update the state of the pcm and get state */
+					pthread_mutex_lock(&inst->io_lock);
+					if (UNLIKELY((avail = snd_pcm_avail(inst->pcm_handle)) < 0)) {
+						LOG_PRINT_ERROR("snd_pcm_avail() returned error");
+					}
+					state = snd_pcm_state(inst->pcm_handle);
+					pthread_mutex_unlock(&inst->io_lock);
+
+					if (UNLIKELY(inst->frames == 0 || state == SND_PCM_STATE_RUNNING ||
 						state == SND_PCM_STATE_PAUSED ||
-						state == SND_PCM_STATE_SUSPENDED) {
+						state == SND_PCM_STATE_SUSPENDED)) {
 						DEBUG_VPRINT(LOG_MODULE, "PCM state after timedpeek: %s. "
 							"Still waiting (timeout=%"PRIi64" frames=%"PRIi64")",
 							avbox_pcm_state_getstring(state), timeout, frames);
+						usleep(5LL * 1000LL);
 						continue;
 					}
 
 					underrun = 1;
 
 					if (inst->callback != NULL) {
-						inst->callback(inst, AVBOX_AUDIOSTREAM_UNDERRUN, inst->callback_context);
+						inst->callback(inst, AVBOX_AUDIOSTREAM_UNDERRUN, NULL, inst->callback_context);
 					}
+
 					continue;
 				} else if (errno == ESHUTDOWN) {
 					goto end;
@@ -626,7 +726,7 @@ avbox_audiostream_output(void *arg)
 				}
 			}
 		} else {
-			if ((packet = avbox_queue_peek(inst->packets, 1)) == NULL) {
+			if (UNLIKELY((packet = avbox_queue_peek(inst->packets, 1)) == NULL)) {
 				switch (errno) {
 				case EAGAIN: continue;
 				case ESHUTDOWN: goto end;
@@ -640,24 +740,23 @@ avbox_audiostream_output(void *arg)
 		}
 
 		/* if this is a control packet handle it */
-		if (packet->type != AVBOX_AUDIOSTREAM_DATA_PACKET) {
+		if (UNLIKELY(packet->type != AVBOX_AUDIOSTREAM_DATA_PACKET)) {
 			switch (packet->type) {
 			case AVBOX_AUDIOSTREAM_CLOCK_SET:
 			{
 				snd_pcm_status_t *status;
 				snd_pcm_status_alloca(&status);
 
-				pthread_mutex_lock(&inst->lock);
-				avbox_audiostream_pcm_drain(inst);
-
 				DEBUG_VPRINT(LOG_MODULE, "Resetting clock to %d (was %li)",
-					packet->clock_set.value, __avbox_audiostream_gettime(inst));
+					packet->clock_set.value, avbox_audiostream_gettime(inst));
 
 				/* reset the clock */
+				pthread_mutex_lock(&inst->io_lock);
+				avbox_audiostream_pcm_drain(inst);
 				inst->clock_start = packet->clock_set.value;
 				inst->clock_offset = 0;
 				inst->frames = ret = 0;
-				pthread_mutex_unlock(&inst->lock);
+				pthread_mutex_unlock(&inst->io_lock);
 				break;
 			}
 			default:
@@ -669,53 +768,78 @@ avbox_audiostream_output(void *arg)
 				LOG_PRINT_ERROR("Peeked one packet but got a different one. Aborting");
 				abort();
 			}
-			free(packet);
+			release_packet(inst, packet);
 			continue;
 		}
 
-		pthread_mutex_lock(&inst->lock);
+		pthread_mutex_lock(&inst->io_lock);
+
+		/* calculate the number of frames to use from this packet */
+		n_frames = MIN(period, packet->data_packet.n_frames);
 
 		/* wait for the pcm to be ready to receive a fragment.
 		 * NOTE: We don't want to use snd_pcm_wait() for this as it
 		 * deadlocks with some drivers */
-		if ((ret = snd_pcm_avail(inst->pcm_handle)) > 0 && ret < fragment) {
+		if (UNLIKELY((avail = snd_pcm_avail(inst->pcm_handle)) > 0 && avail < n_frames)) {
 			struct timespec tv;
+
+			if (UNLIKELY(avail > inst->buffer_size)) {
+				LOG_VPRINT_WARN("WARNING!: snd_pcm_avail() returned %" PRIi64 " buffer_size=%" PRIi64,
+					(int64_t) avail, (int64_t) inst->buffer_size);
+				avail = inst->buffer_size;
+			}
+
 			tv.tv_sec = 0;
-			tv.tv_nsec = FRAMES2TIME(inst, fragment - ret) * 1000LL;
+			tv.tv_nsec = FRAMES2TIME(inst, n_frames - avail) * 1000LL;
 			delay2abstime(&tv);
-			pthread_cond_timedwait(&inst->wake, &inst->lock, &tv);
-			pthread_mutex_unlock(&inst->lock);
-			continue;
+			pthread_cond_timedwait(&inst->io_wake, &inst->io_lock, &tv);
+
+			#if 0
+			/* if we're too early continue */
+			if ((avail = snd_pcm_avail(inst->pcm_handle)) > 0 && avail < n_frames) {
+				pthread_mutex_unlock(&inst->io_lock);
+				LOG_VPRINT_WARN("Woke up too early (avail_before=%" PRIi64 " wait_time=%" PRIi64 " avail=%" PRIi64
+					" n_frames=%" PRIi64 " slept=%" PRIi64 ")",
+					avail_before, wait_time_us, (int64_t) avail, (int64_t) n_frames,
+					utimediff(&after_sleep, &before_sleep));
+				continue;
+			}
+			#endif
 		}
 
 		/* check if we're paused */
 		if (UNLIKELY(inst->quit)) {
-			pthread_mutex_unlock(&inst->lock);
+			pthread_mutex_unlock(&inst->io_lock);
 			goto end;
 		} else if (UNLIKELY(inst->paused)) {
-			pthread_cond_wait(&inst->wake, &inst->lock);
-			pthread_mutex_unlock(&inst->lock);
+			pthread_cond_wait(&inst->io_wake, &inst->io_lock);
+			pthread_mutex_unlock(&inst->io_lock);
 			continue;
 		} else if (UNLIKELY(avbox_queue_peek(inst->packets, 0) != packet)) {
 			/* the packet changed. Mostlikely because the stream was
 			 * flushed while we waited for the PCM */
-			pthread_mutex_unlock(&inst->lock);
+			pthread_mutex_unlock(&inst->io_lock);
+			usleep(5LL * 1000LL);
 			continue;
 		}
 
-		/* calculate the number of frames to use from this packet */
-		n_frames = MIN(fragment, packet->data_packet.n_frames);
-
 		/* write fragment to ring buffer */
 		if (UNLIKELY((frames = snd_pcm_writei(inst->pcm_handle, packet->data_packet.data, n_frames)) < 0)) {
-			DEBUG_VPRINT("audio", "Recovering from ALSA error: %s",
+			if (NONBLOCK && (frames == -EAGAIN || frames == -EBUSY)) {
+				pthread_mutex_unlock(&inst->io_lock);
+				usleep(10LL * 1000LL);
+				continue;
+			}
+
+			LOG_VPRINT_ERROR("Recovering from ALSA error: %s",
 				snd_strerror(frames));
 
-			/* update the offset */
+			/* update the offset and invalidate last time */
 			inst->clock_offset = FRAMES2TIME(inst, inst->frames);
+			inst->last_audio_time = -1;
 
 			/* attempt to recover */
-			if ((frames = snd_pcm_recover(inst->pcm_handle, frames, 1)) < 0) {
+			if (UNLIKELY((frames = snd_pcm_recover(inst->pcm_handle, frames, 1)) < 0)) {
 				/* recovery has failed... Instead of bailing out we'll pretend
 				 * that the write worked and invoke the critical error callback so
 				 * that the controller thread can kill us. Otherwise things may deadlock
@@ -724,38 +848,47 @@ avbox_audiostream_output(void *arg)
 					snd_strerror(frames));
 				if (inst->callback != NULL) {
 					inst->callback(inst, AVBOX_AUDIOSTREAM_CRITICAL_ERROR,
-						inst->callback_context);
+						NULL, inst->callback_context);
 				}
 				frames = n_frames;
+				pthread_mutex_unlock(&inst->io_lock);
+				goto end;
 			} else {
 				ASSERT(frames == 0);
-				pthread_mutex_unlock(&inst->lock);
+				pthread_mutex_unlock(&inst->io_lock);
 				continue;
 			}
 		}
 
 		/* update frame counts */
-		inst->queued_frames -= frames;
 		inst->frames += frames;
 		packet->data_packet.data += avbox_audiostream_frames2size(inst, frames);
 		packet->data_packet.n_frames -= frames;
 
+		/* we got some samples in so be nice */
+		pthread_mutex_unlock(&inst->io_lock);
+
+		/* update the queue stats and signal any thread
+		 * waiting to write */
+		pthread_mutex_lock(&inst->queue_lock);
+		inst->queued_frames -= frames;
+		pthread_cond_signal(&inst->queue_wake);
+		pthread_mutex_unlock(&inst->queue_lock);
+
 		/* if there's no frames left in the packet then
 		 * remove it from the queue and free it */
-		if (packet->data_packet.n_frames == 0) {
-			if (avbox_queue_get(inst->packets) != packet) {
+		if (LIKELY(packet->data_packet.n_frames == 0)) {
+			if (UNLIKELY(avbox_queue_get(inst->packets) != packet)) {
 				abort();
 			}
-			free(packet);
+			release_packet(inst, packet);
 		}
-		pthread_cond_broadcast(&inst->wake);
-		pthread_mutex_unlock(&inst->lock);
 	}
 
 end:
 	DEBUG_PRINT("audio", "Audio thread exiting");
 
-	pthread_mutex_lock(&inst->lock);
+	pthread_mutex_lock(&inst->io_lock);
 
 	/* cleanup */
 	if (inst->pcm_handle != NULL) {
@@ -766,8 +899,9 @@ end:
 
 	/* signal that we're quitting */
 	inst->running = 0;
-	pthread_cond_broadcast(&inst->wake);
-	pthread_mutex_unlock(&inst->lock);
+	pthread_cond_signal(&inst->io_wake);	/* in case thread bailed during startup */
+	pthread_cond_signal(&inst->queue_wake);
+	pthread_mutex_unlock(&inst->io_lock);
 
 	return NULL;
 }
@@ -782,7 +916,7 @@ avbox_audiostream_setclock(struct avbox_audiostream * const inst,
 {
 	struct avbox_audio_packet *packet;
 
-	if ((packet = malloc(sizeof(struct avbox_audio_packet))) == NULL) {
+	if ((packet = alloc_packet(inst)) == NULL) {
 		ASSERT(errno == ENOMEM);
 		return -1;
 	}
@@ -794,7 +928,7 @@ avbox_audiostream_setclock(struct avbox_audiostream * const inst,
 	if (avbox_queue_put(inst->packets, packet) == -1) {
 		LOG_VPRINT_ERROR("Could not add packet to queue: %s",
 			strerror(errno));
-		free(packet);
+		release_packet(inst, packet);
 		return -1;
 	}
 
@@ -817,10 +951,9 @@ avbox_audiostream_blocking(struct avbox_audiostream * const stream)
  */
 int
 avbox_audiostream_write(struct avbox_audiostream * const stream,
-	const uint8_t * const data, const size_t n_frames)
+	uint8_t * const data, const size_t n_frames, void * const callback_handle)
 {
 	struct avbox_audio_packet *packet;
-	const int sz = avbox_audiostream_frames2size(stream, n_frames);
 
 	ASSERT(stream != NULL);
 
@@ -828,50 +961,46 @@ avbox_audiostream_write(struct avbox_audiostream * const stream,
 		return 0;
 	}
 
-	pthread_mutex_lock(&stream->lock);
+	pthread_mutex_lock(&stream->queue_lock);
 
 	/* if the queue is full wait once and return EAGAIN
 	 * if it's still full */
-	if ((stream->queued_frames + n_frames) > stream->max_frames) {
+	if ((stream->queued_frames) > stream->max_frames) {
 		stream->blocking = 1;
-		pthread_cond_wait(&stream->wake, &stream->lock);
+		pthread_cond_wait(&stream->queue_wake, &stream->queue_lock);
 		stream->blocking = 0;
-		if ((stream->queued_frames + n_frames) > stream->max_frames) {
-			pthread_mutex_unlock(&stream->lock);
+		if ((stream->queued_frames) > stream->max_frames) {
+			pthread_mutex_unlock(&stream->queue_lock);
 			errno = EAGAIN;
 			return -1;
 		}
 	}
 
-	pthread_mutex_unlock(&stream->lock);
-
 	/* allocate memory for packet */
-	if ((packet = malloc(sizeof(struct avbox_audio_packet) + sz)) == NULL) {
+	if ((packet = alloc_packet(stream)) == NULL) {
+		pthread_mutex_unlock(&stream->queue_lock);
 		LOG_PRINT_ERROR("Could not allocate packet");
 		errno = ENOMEM;
 		return -1;
 	}
 
+	/* we can consider the packet as queued already */
+	stream->queued_frames += n_frames;
+	pthread_mutex_unlock(&stream->queue_lock);
+
 	/* copy samples */
 	packet->type = AVBOX_AUDIOSTREAM_DATA_PACKET;
 	packet->data_packet.n_frames = n_frames;
-	packet->data_packet.data = (uint8_t*) (packet + 1);
-	memcpy(packet->data_packet.data, data, sz);
-
-	pthread_mutex_lock(&stream->lock);
+	packet->data_packet.data = data;
+	packet->data_packet.callback_handle = callback_handle;
 
 	/* add packet to queue */
 	if (avbox_queue_put(stream->packets, packet) == -1) {
 		LOG_VPRINT_ERROR("Could not add packet to queue: %s",
 			strerror(errno));
-		free(packet);
+		release_packet(stream, packet);
 		return -1;
 	}
-
-	stream->queued_frames += n_frames;
-
-	pthread_cond_broadcast(&stream->wake);
-	pthread_mutex_unlock(&stream->lock);
 
 	return 0;
 }
@@ -887,7 +1016,7 @@ avbox_audiostream_start(struct avbox_audiostream * const stream)
 
 	DEBUG_PRINT(LOG_MODULE, "Starting audio stream");
 
-	pthread_mutex_lock(&stream->lock);
+	pthread_mutex_lock(&stream->io_lock);
 
 	if (stream->started) {
 		LOG_PRINT_ERROR("Audio stream already started");
@@ -900,7 +1029,7 @@ avbox_audiostream_start(struct avbox_audiostream * const stream)
 		abort();
 	}
 
-	pthread_cond_wait(&stream->wake, &stream->lock);
+	pthread_cond_wait(&stream->io_wake, &stream->io_lock);
 
 	stream->started = 1;
 
@@ -911,7 +1040,7 @@ avbox_audiostream_start(struct avbox_audiostream * const stream)
 
 	ret = 0;
 end:
-	pthread_mutex_unlock(&stream->lock);
+	pthread_mutex_unlock(&stream->io_lock);
 	return ret;
 }
 
@@ -925,6 +1054,18 @@ avbox_audiostream_count(struct avbox_audiostream * const stream)
 	assert(stream != NULL);
 	return avbox_queue_count(stream->packets);
 }
+
+
+/**
+ * Get the number of frames buffered.
+ */
+unsigned int
+avbox_audiostream_size(struct avbox_audiostream * const stream)
+{
+	ASSERT(stream != NULL);
+	return stream->queued_frames;
+}
+
 
 
 /**
@@ -946,7 +1087,7 @@ int
 avbox_audiostream_drain(struct avbox_audiostream * const inst)
 {
 	while (avbox_queue_count(inst->packets)) {
-		usleep(100L * 1000L);
+		usleep(10L * 1000L);
 	}
 	return avbox_audiostream_pause(inst);
 }
@@ -961,6 +1102,7 @@ avbox_audiostream_new(int max_frames,
 	void * const callback_context)
 {
 	struct avbox_audiostream *stream;
+	pthread_mutexattr_t lockattr;
 
 	DEBUG_PRINT(LOG_MODULE, "Initializing audio stream");
 
@@ -980,8 +1122,12 @@ avbox_audiostream_new(int max_frames,
 	}
 
 	/* initialize pthread primitives */
-	if (pthread_mutex_init(&stream->lock, NULL) != 0 ||
-		pthread_cond_init(&stream->wake, NULL) != 0) {
+	pthread_mutexattr_init(&lockattr);
+	pthread_mutexattr_setprotocol(&lockattr, PTHREAD_PRIO_INHERIT);
+	if (pthread_mutex_init(&stream->io_lock, &lockattr) != 0 ||
+		pthread_mutex_init(&stream->queue_lock, NULL) != 0 ||
+		pthread_cond_init(&stream->queue_wake, NULL) != 0 ||
+		pthread_cond_init(&stream->io_wake, NULL) != 0) {
 		free(stream);
 		errno = EFAULT;
 		return NULL;
@@ -991,7 +1137,8 @@ avbox_audiostream_new(int max_frames,
 	stream->queued_frames = 0;
 	stream->callback = callback;
 	stream->callback_context = callback_context;
-
+	stream->last_audio_time = -1;
+	LIST_INIT(&stream->packet_pool);
 	return stream;
 }
 
@@ -1002,25 +1149,32 @@ avbox_audiostream_new(int max_frames,
 void
 avbox_audiostream_destroy(struct avbox_audiostream * const stream)
 {
+	struct avbox_audio_packet *packet;
+
 	DEBUG_PRINT("audio", "Destroying audio stream");
 
 	avbox_audiostream_drop(stream);
 
 	/* wait for IO thread */
-	pthread_mutex_lock(&stream->lock);
+	pthread_mutex_lock(&stream->io_lock);
 	if (stream->running) {
 		stream->quit = 1;
 		avbox_queue_close(stream->packets);
-		pthread_cond_broadcast(&stream->wake);
-		pthread_mutex_unlock(&stream->lock);
+		pthread_cond_signal(&stream->io_wake);
+		pthread_mutex_unlock(&stream->io_lock);
 		pthread_join(stream->thread, 0);
-		pthread_mutex_lock(&stream->lock);
+		pthread_mutex_lock(&stream->io_lock);
 		
 	}
-	pthread_mutex_unlock(&stream->lock);
+	pthread_mutex_unlock(&stream->io_lock);
 
-	/* free any remaining packets */
 	avbox_queue_destroy(stream->packets);
+
+	/* free the packet pool */
+	LIST_FOREACH_SAFE(struct avbox_audio_packet*, packet, &stream->packet_pool, {
+		LIST_REMOVE(packet);
+		free(packet);
+	});
 
 	/* free stream object */
 	free(stream);

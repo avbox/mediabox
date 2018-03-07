@@ -131,9 +131,15 @@ abstime(struct timespec * const tv)
 {
 	struct timeval now; 
 	gettimeofday(&now, NULL);
-	long int abstime_ns_large = now.tv_usec * 1000LL;
-	tv->tv_sec = now.tv_sec + (abstime_ns_large / 1000000000LL);
-	tv->tv_nsec = abstime_ns_large % 1000000000LL;
+
+	tv->tv_sec = now.tv_sec;
+	tv->tv_nsec = now.tv_usec * 1000LL;
+
+	while (UNLIKELY(tv->tv_nsec > (1000LL * 1000LL * 1000LL))) {
+		tv->tv_sec++;
+		tv->tv_nsec -= 1000LL * 1000LL * 1000LL;
+	}
+
 	return tv;
 }
 
@@ -166,8 +172,8 @@ utimediff(const struct timespec * a, const struct timespec * b)
 	if (UNLIKELY(b == NULL)) {
 		b = &zerotime;
 	}
-	const int64_t aa = ((a->tv_sec * 1000.0 * 1000.0 * 1000.0) + a->tv_nsec) / 1000.0;
-	const int64_t bb = ((b->tv_sec * 1000.0 * 1000.0 * 1000.0) + b->tv_nsec) / 1000.0;
+	const int64_t aa = (a->tv_sec * 1000.0 * 1000.0) + (a->tv_nsec / 1000.0);
+	const int64_t bb = (b->tv_sec * 1000.0 * 1000.0) + (b->tv_nsec / 1000.0);
 	return (aa - bb);
 }
 

@@ -41,13 +41,13 @@ null::sysinit:/usr/sbin/dropbear -R -B
 # Rotate logs and start mediabox
 null::sysinit:/bin/mv -f /var/log/mediabox.log /var/log/mediabox.log.1 2>&1 > /dev/null
 null::sysinit:/bin/mv -f /var/log/avmount-mediabox.log /var/log/avmount-mediabox.log.1 2>&1 >/dev/null
-null::sysinit:/sbin/start-stop-daemon -S -q -x /usr/bin/mediabox -p /tmp/mediabox.pid -b -m -- --avbox:logfile /var/log/mediabox.log --no-mediatomb --avbox:decode_cache_size 1000
+null::sysinit:/sbin/start-stop-daemon -S -q -x /usr/bin/mediabox -p /tmp/mediabox.pid -b -m -- --avbox:logfile /var/log/mediabox.log --no-mediatomb --avbox:decode_cache_size 400
 
 # now run any rc scripts
 null::sysinit:/etc/init.d/rcS
 
 # Put a getty on the serial port
-console::respawn:/sbin/getty -L console 0 vt100 # Default console
+#console::respawn:/sbin/getty -L console 0 vt100 # Default console
 
 # Stuff to do before rebooting
 ::shutdown:/etc/init.d/rcK
