@@ -166,6 +166,38 @@ avbox_audiostream_frames2size(struct avbox_audiostream * const stream,
 }
 
 
+/**
+ * Recover from ALSA errors
+ */
+static int
+avbox_audiostream_recover(struct avbox_audiostream * const inst, snd_pcm_sframes_t err)
+{
+	LOG_VPRINT_ERROR("Recovering from ALSA error: %s",
+		snd_strerror(err));
+
+	/* update the offset and invalidate last time */
+	inst->clock_offset = FRAMES2TIME(inst, inst->frames);
+	inst->last_audio_time = -1;
+
+	/* attempt to recover */
+	if (UNLIKELY((err = snd_pcm_recover(inst->pcm_handle, err, 1)) < 0)) {
+		/* recovery has failed... Instead of bailing out we'll pretend
+		 * that the write worked and invoke the critical error callback so
+		 * that the controller thread can kill us. Otherwise things may deadlock
+		 * since the pipeline is stalled */
+		LOG_VPRINT_ERROR("Could not recover from ALSA error: %s",
+			snd_strerror(err));
+		if (inst->callback != NULL) {
+			inst->callback(inst, AVBOX_AUDIOSTREAM_CRITICAL_ERROR,
+				NULL, inst->callback_context);
+		}
+		return 0;
+	}
+
+	return 1;
+}
+
+
 static int
 avbox_audiostream_pcm_drain(struct avbox_audiostream * const inst)
 {
@@ -305,8 +337,9 @@ avbox_audiostream_gettime(struct avbox_audiostream * const stream)
 
 	/* make sure we're not in xrun */
 	if ((avail = snd_pcm_avail(stream->pcm_handle)) < 0) {
-		/* LOG_VPRINT_ERROR("avbox_audiostream_gettime(): ALSA error detected: %s",
-			snd_strerror(err)); */
+		if (!avbox_audiostream_recover(stream, avail)) {
+			ABORT("Could not recover from ALSA error!");
+		}
 		pthread_mutex_unlock(&stream->io_lock);
 		goto end;
 	}
@@ -383,8 +416,9 @@ avbox_audiostream_pause(struct avbox_audiostream * const inst)
 	/* we need to call this or snd_pcm_status() may succeed when
 	 * we're on XRUN */
 	if ((avail = snd_pcm_avail(inst->pcm_handle)) < 0) {
-		LOG_VPRINT_ERROR("Could not get pcm avail: %s",
-			snd_strerror(avail));
+		if (!avbox_audiostream_recover(inst, avail)) {
+			ABORT("Could not recover from ALSA error!");
+		}
 		inst->paused = 1;
 		goto end;
 	}
@@ -607,7 +641,7 @@ avbox_audiostream_output(void *arg)
 		LOG_VPRINT_ERROR("Could not set ALSA avail_min: %s", snd_strerror(ret));
 		goto end;
 	}
-	if ((ret = snd_pcm_sw_params_set_start_threshold(inst->pcm_handle, swparams, inst->buffer_size - period)) < 0) {
+	if ((ret = snd_pcm_sw_params_set_start_threshold(inst->pcm_handle, swparams, 0)) < 0) {
 		LOG_VPRINT_ERROR("Could not set ALSA start threshold: %s", snd_strerror(ret));
 		goto end;
 	}
@@ -677,12 +711,11 @@ avbox_audiostream_output(void *arg)
 			 * and wait up to that long for new packets */
 			pthread_mutex_lock(&inst->io_lock);
 			if (UNLIKELY((avail = snd_pcm_avail(inst->pcm_handle)) < 0)) {
-				if (inst->frames == 0) {
-					timeout = 10LL * 1000LL;
-				} else {
-					DEBUG_PRINT(LOG_MODULE, "snd_pcm_avail() returned error!!!");
-					timeout = 1;
+				pthread_mutex_unlock(&inst->io_lock);
+				if (!avbox_audiostream_recover(inst, avail)) {
+					goto end;
 				}
+				continue;
 			} else {
 				timeout = FRAMES2TIME(inst, inst->buffer_size - avail);
 			}
@@ -695,7 +728,9 @@ avbox_audiostream_output(void *arg)
 					/* update the state of the pcm and get state */
 					pthread_mutex_lock(&inst->io_lock);
 					if (UNLIKELY((avail = snd_pcm_avail(inst->pcm_handle)) < 0)) {
-						LOG_PRINT_ERROR("snd_pcm_avail() returned error");
+						if (!avbox_audiostream_recover(inst, avail)) {
+							goto end;
+						}
 					}
 					state = snd_pcm_state(inst->pcm_handle);
 					pthread_mutex_unlock(&inst->io_lock);
@@ -772,40 +807,31 @@ avbox_audiostream_output(void *arg)
 			continue;
 		}
 
-		pthread_mutex_lock(&inst->io_lock);
-
 		/* calculate the number of frames to use from this packet */
 		n_frames = MIN(period, packet->data_packet.n_frames);
 
-		/* wait for the pcm to be ready to receive a fragment.
-		 * NOTE: We don't want to use snd_pcm_wait() for this as it
-		 * deadlocks with some drivers */
-		if (UNLIKELY((avail = snd_pcm_avail(inst->pcm_handle)) > 0 && avail < n_frames)) {
-			struct timespec tv;
+		/* set the avail_min to the number of frames we're trying to write */
+		if ((ret = snd_pcm_sw_params_set_avail_min(inst->pcm_handle, swparams, n_frames)) < 0) {
+			LOG_VPRINT_ERROR("Could not set ALSA avail_min: %s", snd_strerror(ret));
+			goto end;
+		}
 
-			if (UNLIKELY(avail > inst->buffer_size)) {
-				LOG_VPRINT_WARN("WARNING!: snd_pcm_avail() returned %" PRIi64 " buffer_size=%" PRIi64,
-					(int64_t) avail, (int64_t) inst->buffer_size);
-				avail = inst->buffer_size;
-			}
-
-			tv.tv_sec = 0;
-			tv.tv_nsec = FRAMES2TIME(inst, n_frames - avail) * 1000LL;
-			delay2abstime(&tv);
-			pthread_cond_timedwait(&inst->io_wake, &inst->io_lock, &tv);
-
-			#if 0
-			/* if we're too early continue */
-			if ((avail = snd_pcm_avail(inst->pcm_handle)) > 0 && avail < n_frames) {
-				pthread_mutex_unlock(&inst->io_lock);
-				LOG_VPRINT_WARN("Woke up too early (avail_before=%" PRIi64 " wait_time=%" PRIi64 " avail=%" PRIi64
-					" n_frames=%" PRIi64 " slept=%" PRIi64 ")",
-					avail_before, wait_time_us, (int64_t) avail, (int64_t) n_frames,
-					utimediff(&after_sleep, &before_sleep));
+		/* only wait if this is not the first frame after recovery */
+		if (inst->clock_offset != FRAMES2TIME(inst, inst->frames)) {
+			/* wait until there's room on the ring buffer */
+			if (UNLIKELY((avail = snd_pcm_avail(inst->pcm_handle)) > 0 && avail < n_frames)) {
+				if (!snd_pcm_wait(inst->pcm_handle, -1)) {
+					continue;
+				}
+			} else if (avail < 0) {
+				if (!avbox_audiostream_recover(inst, avail)) {
+					goto end;
+				}
 				continue;
 			}
-			#endif
 		}
+
+		pthread_mutex_lock(&inst->io_lock);
 
 		/* check if we're paused */
 		if (UNLIKELY(inst->quit)) {
@@ -831,32 +857,9 @@ avbox_audiostream_output(void *arg)
 				continue;
 			}
 
-			LOG_VPRINT_ERROR("Recovering from ALSA error: %s",
-				snd_strerror(frames));
-
-			/* update the offset and invalidate last time */
-			inst->clock_offset = FRAMES2TIME(inst, inst->frames);
-			inst->last_audio_time = -1;
-
-			/* attempt to recover */
-			if (UNLIKELY((frames = snd_pcm_recover(inst->pcm_handle, frames, 1)) < 0)) {
-				/* recovery has failed... Instead of bailing out we'll pretend
-				 * that the write worked and invoke the critical error callback so
-				 * that the controller thread can kill us. Otherwise things may deadlock
-				 * since the pipeline is stalled */
-				LOG_VPRINT_ERROR("Could not recover from ALSA error: %s",
-					snd_strerror(frames));
-				if (inst->callback != NULL) {
-					inst->callback(inst, AVBOX_AUDIOSTREAM_CRITICAL_ERROR,
-						NULL, inst->callback_context);
-				}
-				frames = n_frames;
+			if (!avbox_audiostream_recover(inst, frames)) {
 				pthread_mutex_unlock(&inst->io_lock);
 				goto end;
-			} else {
-				ASSERT(frames == 0);
-				pthread_mutex_unlock(&inst->io_lock);
-				continue;
 			}
 		}
 
