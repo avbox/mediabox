@@ -1,0 +1,33 @@
+commit a3bf5276e9a046d00f514d2fc3844c5416567d05
+Author: Fernando Rodriguez <frodzdev@gmail.com>
+Date:   Fri Apr 6 11:25:13 2018 -0400
+
+    Delay hash_failed_alert until on_piece_sync()
+    
+    Delay the hash_failed_alert until after synchronizing with the IO thread
+    so that it can be used to synchronize piece progress.
+
+diff --git a/src/torrent.cpp b/src/torrent.cpp
+index d3fc722e5..765fa779c 100644
+--- a/src/torrent.cpp
++++ b/src/torrent.cpp
+@@ -4525,9 +4525,6 @@ namespace {
+ 
+ 		inc_stats_counter(counters::num_piece_failed);
+ 
+-		if (m_ses.alerts().should_post<hash_failed_alert>())
+-			m_ses.alerts().emplace_alert<hash_failed_alert>(get_handle(), index);
+-
+ 		std::vector<int>::iterator it = std::lower_bound(m_predictive_pieces.begin()
+ 			, m_predictive_pieces.end(), index);
+ 		if (it != m_predictive_pieces.end() && *it == index)
+@@ -4728,6 +4725,9 @@ namespace {
+ 		// ever downloaded for it.
+ 		m_picker->restore_piece(j->piece);
+ 
++		if (m_ses.alerts().should_post<hash_failed_alert>())
++			m_ses.alerts().emplace_alert<hash_failed_alert>(get_handle(), j->piece);
++
+ 		// we have to let the piece_picker know that
+ 		// this piece failed the check as it can restore it
+ 		// and mark it as being interesting for download
