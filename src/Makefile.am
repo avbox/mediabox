@@ -138,6 +138,10 @@ if ENABLE_OPENGL
 mediabox_SOURCES += lib/ui/video-opengl.c
 endif
 
+if ENABLE_WEBREMOTE
+mediabox_SOURCES += lib/ui/input-web.c
+endif
+
 systemddir = /usr/lib/systemd/system
 systemd_DATA = mediabox.service
 
@@ -150,3 +154,6 @@ mediatomb_DATA = res/mediatomb/common.js \
 	res/mediatomb/config.xml \
 	res/mediatomb/import.js \
 	res/mediatomb/playlists.js
+
+webremotedir = $(datadir)/$(PACKAGE)
+webremote_DATA = res/mediabox/webremote.html

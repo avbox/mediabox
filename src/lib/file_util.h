@@ -49,6 +49,8 @@ mkdir_p(const char * const path, mode_t mode);
  */
 char *
 mb_getdatadir(char *buf, size_t bufsize);
+char *
+avbox_getdatadir(char *buf, size_t bufsize);
 
 
 /**
@@ -67,6 +69,10 @@ frep(const char * const ifilename,
 	const char * ofilename,
 	const char * const match[],
 	const char * const replace[]);
+
+
+char*
+avbox_get_resource(const char*const res, int *sz);
 
 
 #endif

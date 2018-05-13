@@ -1,0 +1,314 @@
+<html>
+<head>
+	<title>MediaBox Web Remote</title>
+	<script>
+
+	var ws = null;
+
+	var setConnected = function(state)
+	{
+		state = !state;
+		document.getElementById("btnVolUp").disabled = state;
+		document.getElementById("btnUp").disabled = state;
+		document.getElementById("btnTrack").disabled = state;
+		document.getElementById("btnLeft").disabled = state;
+		document.getElementById("btnMenu").disabled = state;
+		document.getElementById("btnRight").disabled = state;
+		document.getElementById("btnVolDown").disabled = state;
+		document.getElementById("btnDown").disabled = state;
+		document.getElementById("btnMute").disabled = state;
+		document.getElementById("btnBack").disabled = state;
+		document.getElementById("btnKeyboard").disabled = state;
+		document.getElementById("btnEnter").disabled = state;
+
+		document.getElementById("btnPrev").disabled = state;
+		document.getElementById("btnRew").disabled = state;
+		document.getElementById("btnFF").disabled = state;
+		document.getElementById("btnNext").disabled = state;
+		document.getElementById("btnStop").disabled = state;
+		document.getElementById("btnPlay").disabled = state;
+		document.getElementById("btnInfo").disabled = state;
+
+		document.getElementById("txtURL").disabled = state;
+		document.getElementById("btnStream").disabled = state;
+		document.getElementById("btnDownload").disabled = state;
+	};
+
+	var init = function()
+	{
+		setConnected(false);
+
+		ws = new WebSocket('ws://' + window.location.host + '/ws');
+		ws.onopen = function(ev) {
+			setConnected(true);
+		};
+		ws.onclose = function(ev) {
+			setConnected(false);
+		};
+		ws.onmessage = function(ev) {
+			//document.getElementById('debug').textContent += ev.data + '\n';
+		};
+	};
+
+	var sendCommand = function(cmd)
+	{
+		var url = document.getElementById("txtURL").value;
+		var cmdtxt = '' + cmd + ':' + url;
+
+		document.getElementById("txtURL").value = "";
+
+		if (ws == null || url == null || url == "")
+			return;
+
+		ws.send(cmdtxt.trim());
+	};
+
+	window.addEventListener('load', init, false);
+
+	</script>
+</head>
+<body>
+	<table width="100%" cellpadding="0" cellspacing="0">
+		<tr>
+			<td>
+				<table style="width:100%" cellpadding="5" cellspacing="0">
+					<tr>
+						<td style="width:33%" >
+							<input
+								id="btnVolUp"
+								onclick="javascript:ws.send('VOLUP');"
+								style="width:100%"
+								type="button" value="VOL UP" />
+						</td>
+						<td style="width:34%">
+							<input
+								id="btnUp"
+								onclick="javascript:ws.send('UP');"
+								style="width:100%"
+								type="button"
+								value="UP" />
+						</td>
+						<td style="width:33%">
+							<input
+								id="btnTrack"
+								onclick="javascript:ws.send('TRACK');"
+								style="width:100%"
+								type="button"
+								value="TRACK" />
+						</td>
+					</tr>
+					<tr>
+						<td>
+							<input
+								id="btnLeft"
+								onclick="javascript:ws.send('LEFT');"
+								style="width:100%"
+								type="button"
+								value="LEFT" />
+						</td>
+						<td>
+							<input
+								id="btnMenu"
+								onclick="javascript:ws.send('MENU');"
+								style="width:100%"
+								type="button"
+								value="MENU" />
+						</td>
+						<td>
+							<input
+								id="btnRight"
+								onclick="javascript:ws.send('RIGHT');"
+								style="width:100%"
+								type="button"
+								value="RIGHT" />
+						</td>
+					</tr>
+					<tr>
+						<td>
+							<input
+								id="btnVolDown"
+								onclick="javascript:ws.send('VOLDOWN');"
+								style="width:100%"
+								type="button"
+								value="VOL DOWN" />
+						</td>
+						<td>
+							<input
+								id="btnDown"
+								onclick="javascript:ws.send('DOWN');"
+								style="width:100%"
+								type="button"
+								value="DOWN" />
+						</td>
+						<td>
+							<input
+								id="btnMute"
+								onclick="javascript:ws.send('MUTE');"
+								style="width:100%"
+								type="button"
+								value="MUTE" />
+						</td>
+					</tr>
+					<tr>
+						<td>
+							<input
+								id="btnBack"
+								onclick="javascript:ws.send('BACK');"
+								style="width:100%"
+								type="button"
+								value="BACK" />
+						</td>
+						<td>
+							<input
+								id="btnKeyboard"
+								onclick="javascript:alert('Not implemented');"
+								style="width:100%"
+								type="button"
+								value="KEYBOARD" />
+						</td>
+						<td>
+							<input
+								id="btnEnter"
+								onclick="javascript:ws.send('ENTER');"
+								style="width:100%"
+								type="button"
+								value="ENTER" />
+						</td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<table style="width:100%" cellpadding="5" cellspacing="0">
+					<tr>
+						<td colspan="2" align="center">
+							<input
+								style="width:90%; align:left;"
+								type="range"
+								min="0"
+								max="100"
+								value="50" />
+						</td>
+					</tr>
+					<tr>
+						<td align="left"><span>00:00:00</span></td>
+						<td align="right"><span>01:59:00</span></td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<table style="width:100%" cellpadding="5" cellspacing="0">
+					<tr>
+						<td style="width:25%">
+							<input
+								id="btnPrev"
+								onclick="javascript:ws.send('PREV');"
+								style="width:100%"
+								type="button"
+								value="|&lt;" />
+						</td>
+						<td style="width:25%">
+							<input
+								id="btnRew"
+								onclick="javascript:ws.send('REW');"
+								style="width:100%"
+								type="button"
+								value="&lt;&lt;" />
+						</td>
+						<td style="width:25%">
+							<input
+								id="btnFF"
+								onclick="javascript:ws.send('FF');"
+								style="width:100%"
+								type="button"
+								value="&gt;&gt;" />
+						</td>
+						<td style="width:25%">
+							<input
+								id="btnNext"
+								onclick="javascript:ws.send('NEXT');"
+								style="width:100%"
+								type="button"
+								value="&gt;|" />
+						</td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<table style="width:100%" cellpadding="5" cellspacing="0">
+					<tr>
+						<td style="width:33%">
+							<input
+								id="btnStop"
+								onclick="javascript:ws.send('STOP');"
+								style="width:100%"
+								type="button"
+								value="STOP" />
+						</td>
+						<td style="width:34%">
+							<input
+								id="btnPlay"
+								onclick="javascript:ws.send('PLAY');"
+								style="width:100%"
+								type="button"
+								value="PLAY" />
+						</td>
+						<td style="width:33%">
+							<input
+								id="btnInfo"
+								onclick="javascript:ws.send('INFO');"
+								style="width:100%"
+								type="button"
+								value="INFO" />
+						</td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+		<tr style="height:20px"><td /></tr>
+		<tr>
+			<td align="center">
+				<span>Open Media</span>
+			</td>
+		</tr>
+		<tr>
+			<td>
+				<table style="width:100%" cellpadding="5" cellspacing="0">
+					<tr>
+						<td colspan="2">
+							<input
+								id="txtURL"
+								type="text"
+								style="width:100%"
+								value="" />
+						</td>
+					</tr>
+					<tr>
+						<td style="width:50%">
+							<input
+								id="btnStream"
+								onclick="javascript:sendCommand('URL');"
+								type="button"
+								style="width:100%"
+								value="STREAM" />
+						</td>
+						<td style="width:50%">
+							<input
+								id="btnDownload"
+								onclick="javascript:sendCommand('DOWNLOAD');"
+								type="button"
+								style="width:100%"
+								value="DOWNLOAD" />
+						</td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+	</table>
+</body>
+</html>

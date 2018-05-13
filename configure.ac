@@ -153,6 +153,14 @@ if test x"$enable_dvdcss" = xyes; then
 	AC_DEFINE([ENABLE_DVDCSS],1,[Define to 1 to enable DVD support])
 fi
 
+AC_ARG_ENABLE([webremote], [Define to 1 to enable the web remote])
+AM_CONDITIONAL([ENABLE_WEBREMOTE], [test x"$enable_webremote" = xyes])
+if test x"$enable_webremote" = xyes; then
+	AC_DEFINE([ENABLE_WEBREMOTE], 1, [Define to 1 to enable the web remote])
+	AM_CONDITIONAL(ENABLE_WEBREMOTE, [test xyes = xyes])
+fi
+
+
 if test x"$enable_dvdcss" = xyes; then
 	if test x"$enable_dvd" != xyes; then
 		AC_MSG_ERROR([Cannot enable dvdcss without dvd!])
@@ -248,6 +256,13 @@ if test x"$enable_vc4" == xyes; then
 		AC_MSG_ERROR([required library libGLESv2 not found])
 	])
 	LIBS="${LIBS} -lmmal -lbcm_host -lmmal_core -lmmal_components -lmmal_util"
+fi
+
+# web remote dependencies
+if test x"$enable_webremote" = xyes; then
+	AC_SEARCH_LIBS([onion_new], [onion], [], [
+		AC_MSG_ERROR([required library libonion not found])
+	])
 fi
 
 #

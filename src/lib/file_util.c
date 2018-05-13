@@ -159,7 +159,7 @@ mkdir_p(const char * const path, mode_t mode)
  * Otherwise use the configured DATADIR.
  */
 char *
-mb_getdatadir(char *buf, size_t bufsize)
+avbox_getdatadir(char *buf, size_t bufsize)
 {
 	char exe_path_mem[255];
 	char *exe_path = exe_path_mem;
@@ -204,6 +204,72 @@ mb_getdatadir(char *buf, size_t bufsize)
 		}
 	}
 	return NULL;
+}
+
+char*
+mb_getdatadir(char *buf, size_t bufsize)
+{
+	return avbox_getdatadir(buf, bufsize);
+}
+
+char*
+avbox_get_resource(const char*const res, int *sz)
+{
+	char *buf, *buf_p;
+	char fname[1024];
+	struct stat st;
+	int fd, bytes_to_read, bytes_read;
+
+	avbox_getdatadir(fname, sizeof(fname));
+	strcat(fname, "/");
+	strcat(fname, res);
+
+	DEBUG_VPRINT(LOG_MODULE, "Getting resource: %s",
+		fname);
+
+	/* stat file info */
+	if (stat(fname, &st) == -1) {
+		LOG_VPRINT_ERROR("Could not stat resource (%s): %s",
+			fname, strerror(errno));
+		return NULL;
+	}
+
+	/* allocate buffer for resource data */
+	if ((buf = malloc(st.st_size + 1)) == NULL) {
+		LOG_VPRINT_ERROR("Could not allocate memory for resource (%s|size=%li): %s",
+			fname, st.st_size, strerror(errno));
+		return NULL;
+	}
+
+	if ((fd = open(fname, O_RDONLY)) == -1) {
+		LOG_VPRINT_ERROR("Could not open resource file (%s): %s",
+			fname, strerror(errno));
+		free(buf);
+		return NULL;
+	}
+
+	/* read the resource into memory */
+	buf_p = buf;
+	buf[st.st_size] = '\0';
+	bytes_to_read = st.st_size;
+	ASSERT(bytes_to_read > 0);
+	while (bytes_to_read > 0) {
+		if ((bytes_read = read(fd, buf_p, bytes_to_read)) < 0) {
+			if (errno == EAGAIN || errno == EINTR) {
+				continue;
+			}
+		}
+		bytes_to_read -= bytes_read;
+		buf_p += bytes_read;
+		ASSERT(bytes_to_read >= 0);
+	}
+
+	if (sz != NULL) {
+		*sz = st.st_size;
+	}
+
+	close(fd);
+	return buf;
 }
 
 

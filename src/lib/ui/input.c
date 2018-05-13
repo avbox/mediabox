@@ -48,6 +48,9 @@
 #	include "../bluetooth.h"
 #	include "input-bluetooth.h"
 #endif
+#ifdef ENABLE_WEBREMOTE
+#	include "input-web.h"
+#endif
 
 LISTABLE_STRUCT(avbox_input_endpoint,
 	struct avbox_object *object;
@@ -65,6 +68,9 @@ static int using_libinput = 0;
 static int using_tcp = 0;
 #ifdef ENABLE_BLUETOOTH
 static int using_bluetooth = 0;
+#endif
+#ifdef ENABLE_WEBREMOTE
+static int using_webremote = 0;
 #endif
 
 
@@ -333,6 +339,14 @@ avbox_input_init(int argc, char **argv)
 	}
 #endif
 
+#ifdef ENABLE_WEBREMOTE
+	if (avbox_webinput_init() == -1) {
+		LOG_PRINT_ERROR("Could not start web input provider!");
+	} else {
+		using_webremote = 1;
+	}
+#endif
+
 	return 0;
 }
 
@@ -357,6 +371,11 @@ avbox_input_shutdown(void)
 #ifdef ENABLE_LIBINPUT
 	if (using_libinput) {
 		mbi_libinput_destroy();
+	}
+#endif
+#ifdef ENABLE_WEBREMOTE
+	if (using_webremote) {
+		avbox_webinput_shutdown();
 	}
 #endif
 }
