@@ -139,6 +139,8 @@ mediabox_SOURCES += lib/ui/video-opengl.c
 endif
 
 if ENABLE_WEBREMOTE
+AM_CXXFLAGS += @LIBWEBSOCKETS_CFLAGS@
+AM_LDFLAGS += @LIBWEBSOCKETS_LIBS@
 mediabox_SOURCES += lib/ui/input-web.c
 endif
 
@@ -155,5 +157,7 @@ mediatomb_DATA = res/mediatomb/common.js \
 	res/mediatomb/import.js \
 	res/mediatomb/playlists.js
 
+if ENABLE_WEBREMOTE
 webremotedir = $(datadir)/$(PACKAGE)
 webremote_DATA = res/mediabox/webremote.html
+endif

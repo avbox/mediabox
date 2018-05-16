@@ -260,9 +260,8 @@ fi
 
 # web remote dependencies
 if test x"$enable_webremote" = xyes; then
-	AC_SEARCH_LIBS([onion_new], [onion], [], [
-		AC_MSG_ERROR([required library libonion not found])
-	])
+	PKG_CHECK_MODULES(LIBWEBSOCKETS, libwebsockets, ,
+		AC_MSG_ERROR('Unable to find libwebsockets'))
 fi
 
 #

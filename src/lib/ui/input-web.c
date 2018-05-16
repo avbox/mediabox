@@ -31,11 +31,7 @@
 #include <sys/types.h>
 #include <fcntl.h>
 
-#include <onion/onion.h>
-#include <onion/log.h>
-#include <onion/version.h>
-#include <onion/http.h>
-#include <onion/websocket.h>
+#include <libwebsockets.h>
 
 #define LOG_MODULE "input-web"
 
@@ -45,151 +41,190 @@
 #include "../file_util.h"
 #include "../thread.h"
 
+#define MAX_RESPONSE_LENGTH	(1024LL * 1024LL)
 
-static onion* web_server;
-static char* remote_html;
+
+static int running;
+static struct lws_context* web_server_ctx;
 static struct avbox_thread* web_server_thread;
 static struct avbox_delegate* web_server_task;
+static char* remote_html;
+static int remote_html_len;
 
 
-#define DIKS_ESCAPE 		(1)
-#define DIKS_RETURN 		(28)
-#define DIKS_SHIFT 		(42)
-#define DIKS_CURSOR_UP 		(103)
-#define DIKS_CURSOR_DOWN 	(108)
-#define DIKS_CURSOR_LEFT 	(105)
-#define DIKS_CURSOR_RIGHT 	(106)
-#define DIKS_BACKSPACE 		(14)
-#define DIKS_SPACE		(57)
-#define DIKS_LEFT_CTRL		(29)
-#define DIKS_LEFT_ALT		(56)
+static int
+callback_http(struct lws *wsi,
+	 enum lws_callback_reasons reason, void *user, void *in, size_t len);
+static int
+callback_websocket(struct lws*const wsi,
+	enum lws_callback_reasons reason, void*const user, void*const in, size_t len);
 
-#define DIKS_KEY_A		(30)
-#define DIKS_KEY_B		(48)
-#define DIKS_KEY_C		(46)
-#define DIKS_KEY_D		(32)
-#define DIKS_KEY_E		(18)
-#define DIKS_KEY_F		(33)
-#define DIKS_KEY_G		(34)
-#define DIKS_KEY_H		(35)
-#define DIKS_KEY_I		(23)
-#define DIKS_KEY_J		(36)
-#define DIKS_KEY_K		(37)
-#define DIKS_KEY_L		(38)
-#define DIKS_KEY_M		(50)
-#define DIKS_KEY_N		(49)
-#define DIKS_KEY_O		(24)
-#define DIKS_KEY_P		(25)
-#define DIKS_KEY_Q		(16)
-#define DIKS_KEY_R		(19)
-#define DIKS_KEY_S		(31)
-#define DIKS_KEY_T		(20)
-#define DIKS_KEY_U		(22)
-#define DIKS_KEY_V		(47)
-#define DIKS_KEY_W		(17)
-#define DIKS_KEY_X		(45)
-#define DIKS_KEY_Y		(21)
-#define DIKS_KEY_Z		(44)
 
-#define CASE_KEYBOARD(x) \
-	case DIKS_KEY_ ## x: \
-		avbox_input_sendevent(MBI_EVENT_KBD_ ## x, NULL); \
-		break;
-
-static onion_connection_status
-websocket_handler(void *data, onion_websocket *ws, ssize_t data_ready_len)
+static const struct lws_http_mount mount =
 {
-	char *buf;
-	int len;
+	/* .mount_next */		NULL,		/* linked-list "next" */
+	/* .mountpoint */		"/",		/* mountpoint URL */
+	/* .origin */			NULL,		/* protocol */
+	/* .def */			NULL,
+	/* .protocol */			"http",
+	/* .cgienv */			NULL,
+	/* .extra_mimetypes */		NULL,
+	/* .interpret */		NULL,
+	/* .cgi_timeout */		0,
+	/* .cache_max_age */		0,
+	/* .auth_mask */		0,
+	/* .cache_reusable */		0,
+	/* .cache_revalidate */		0,
+	/* .cache_intermediaries */	0,
+	/* .origin_protocol */		LWSMPRO_CALLBACK, /* dynamic */
+	/* .mountpoint_len */		1,		/* char count */
+	/* .basic_auth_login_file */	NULL
+};
 
-	/* allocate a buffer large enough for all data */
-	if ((buf = malloc(data_ready_len + 1)) == NULL) {
-		LOG_VPRINT_ERROR("Could not allocate %zd bytes buffer for message!",
-			data_ready_len);
-		return OCS_INTERNAL_ERROR;
-	}
 
-	DEBUG_VPRINT(LOG_MODULE, "Attempting to read %zd bytes",
-		data_ready_len);
+static struct lws_protocols protocols[] =
+{
+	{ "http", callback_http, 0, 0 },
+	{ "webremote", callback_websocket, 0, 1024*1024, 0, NULL, 0 },
+	{ NULL, NULL, 0, 0 }
+};
 
-	/* read all available data */
-	while ((len = onion_websocket_read(ws, buf, data_ready_len)) < 0) {
-		if (errno == EAGAIN) {
-			free(buf);
-			return OCS_CLOSE_CONNECTION;
-		}
-		LOG_VPRINT_ERROR("Error reading data: %d: %s (%zd)",
-			errno, strerror(errno), data_ready_len);
-		free(buf);
-		return OCS_NEED_MORE_DATA;
-	}
 
-	/* ensure data is null terminated */
-	buf[len] = '\0';
-
-	DEBUG_VPRINT(LOG_MODULE, "Read %i bytes out of %i",
-		len, data_ready_len);
-
-	/* send the command to the input stack */
-	if (!strcmp(buf, "VOLUP")) {
-		avbox_input_sendevent(MBI_EVENT_VOLUME_UP, NULL);
-	} else if (!strcmp(buf, "UP")) {
-		avbox_input_sendevent(MBI_EVENT_ARROW_UP, NULL);
-	} else if (!strcmp(buf, "TRACK")) {
-		avbox_input_sendevent(MBI_EVENT_TRACK, NULL);
-	} else if (!strcmp(buf, "LEFT")) {
-		avbox_input_sendevent(MBI_EVENT_ARROW_LEFT, NULL);
-	} else if (!strcmp(buf, "MENU")) {
-		avbox_input_sendevent(MBI_EVENT_MENU, NULL);
-	} else if (!strcmp(buf, "RIGHT")) {
-		avbox_input_sendevent(MBI_EVENT_ARROW_RIGHT, NULL);
-	} else if (!strcmp(buf, "VOLDOWN")) {
-		avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN, NULL);
-	} else if (!strcmp(buf, "DOWN")) {
-		avbox_input_sendevent(MBI_EVENT_ARROW_DOWN, NULL);
-	} else if (!strcmp(buf, "MUTE")) {
-		avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN, NULL);
-	} else if (!strcmp(buf, "BACK")) {
-		avbox_input_sendevent(MBI_EVENT_BACK, NULL);
-	} else if (!strcmp(buf, "ENTER")) {
-		avbox_input_sendevent(MBI_EVENT_ENTER, NULL);
-	} else if (!strcmp(buf, "PREV")) {
-		avbox_input_sendevent(MBI_EVENT_PREV, NULL);
-	} else if (!strcmp(buf, "NEXT")) {
-		avbox_input_sendevent(MBI_EVENT_NEXT, NULL);
-	} else if (!strcmp(buf, "STOP")) {
-		avbox_input_sendevent(MBI_EVENT_STOP, NULL);
-	} else if (!strcmp(buf, "PLAY")) {
-		avbox_input_sendevent(MBI_EVENT_PLAY, NULL);
-	} else if (!strcmp(buf, "INFO")) {
-		avbox_input_sendevent(MBI_EVENT_INFO, NULL);
-	} else if (!strncmp(buf, "URL:", 4)) {
-		char*const url = strdup(buf + 4);
-		if (url != NULL) {
-			avbox_input_sendevent(MBI_EVENT_URL, url);
-		}
-	}
-
-	free(buf);
-	return OCS_NEED_MORE_DATA;
+static int
+cmdcmp(char*const in, size_t len, const char*const match)
+{
+	if (strlen(match) != len)
+		return 1;
+	return memcmp(match, in, len);
 }
 
 
-static onion_connection_status
-websocket_accept(void*const data, onion_request*const req, onion_response*const res)
+static int
+callback_websocket(struct lws*const wsi,
+	enum lws_callback_reasons reason, void*const user, void*const in, size_t len)
 {
-	onion_websocket*const ws = onion_websocket_new(req, res);
+	switch (reason) {
+	case LWS_CALLBACK_PROTOCOL_INIT:
+	{
+		DEBUG_VPRINT(LOG_MODULE, "Protocol init %p, protocol=%s",
+			wsi, lws_get_protocol(wsi));
+		break;
+	}
+	case LWS_CALLBACK_ESTABLISHED:
+	{
+		DEBUG_PRINT(LOG_MODULE, "Connection established");
+		break;
+	}
+	case LWS_CALLBACK_CLOSED:
+	{
+		DEBUG_PRINT(LOG_MODULE, "Connection closed");
+		break;
+	}
+	case LWS_CALLBACK_SERVER_WRITEABLE:
+	{
+		DEBUG_PRINT(LOG_MODULE, "Server writeable");
+		break;
+	}
+	case LWS_CALLBACK_RECEIVE:
+	{
+		/* send the command to the input stack */
+		if (!cmdcmp(in, len, "VOLUP")) {
+			avbox_input_sendevent(MBI_EVENT_VOLUME_UP, NULL);
+		} else if (!cmdcmp(in, len, "UP")) {
+			avbox_input_sendevent(MBI_EVENT_ARROW_UP, NULL);
+		} else if (!cmdcmp(in, len, "TRACK")) {
+			avbox_input_sendevent(MBI_EVENT_TRACK, NULL);
+		} else if (!cmdcmp(in, len, "LEFT")) {
+			avbox_input_sendevent(MBI_EVENT_ARROW_LEFT, NULL);
+		} else if (!cmdcmp(in, len, "MENU")) {
+			avbox_input_sendevent(MBI_EVENT_MENU, NULL);
+		} else if (!cmdcmp(in, len, "RIGHT")) {
+			avbox_input_sendevent(MBI_EVENT_ARROW_RIGHT, NULL);
+		} else if (!cmdcmp(in, len, "VOLDOWN")) {
+			avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN, NULL);
+		} else if (!cmdcmp(in, len, "DOWN")) {
+			avbox_input_sendevent(MBI_EVENT_ARROW_DOWN, NULL);
+		} else if (!cmdcmp(in, len, "MUTE")) {
+			avbox_input_sendevent(MBI_EVENT_VOLUME_DOWN, NULL);
+		} else if (!cmdcmp(in, len, "BACK")) {
+			avbox_input_sendevent(MBI_EVENT_BACK, NULL);
+		} else if (!cmdcmp(in, len, "ENTER")) {
+			avbox_input_sendevent(MBI_EVENT_ENTER, NULL);
+		} else if (!cmdcmp(in, len, "PREV")) {
+			avbox_input_sendevent(MBI_EVENT_PREV, NULL);
+		} else if (!cmdcmp(in, len, "NEXT")) {
+			avbox_input_sendevent(MBI_EVENT_NEXT, NULL);
+		} else if (!cmdcmp(in, len, "STOP")) {
+			avbox_input_sendevent(MBI_EVENT_STOP, NULL);
+		} else if (!cmdcmp(in, len, "PLAY")) {
+			avbox_input_sendevent(MBI_EVENT_PLAY, NULL);
+		} else if (!cmdcmp(in, len, "INFO")) {
+			avbox_input_sendevent(MBI_EVENT_INFO, NULL);
+		} else if (len > 4 && !memcmp(in, "URL:", 4)) {
+			const int sz = len - 4;
+			char*const url = malloc(sz + 1);
+			if (url != NULL) {
+				url[sz] = '\0';
+				memcpy(url, in + 4, sz);
+				avbox_input_sendevent(MBI_EVENT_URL, url);
+			}
+		}
+		break;
+	}
+	default:
+		break;
+	}
+	return 0;
+}
 
-	/* if this is an http:// request so just send the
-	 * remote page */
-	if (ws == NULL) {
-		onion_response_write0(res, remote_html);
-		return OCS_PROCESSED;
+
+static int
+callback_http(struct lws *wsi,
+	 enum lws_callback_reasons reason, void *user, void *in, size_t len)
+{
+	uint8_t buf[LWS_PRE + 256], *start = &buf[LWS_PRE], *p = start,
+		*end = &buf[sizeof(buf) - 1];
+
+	switch (reason) {
+	case LWS_CALLBACK_HTTP:
+	{
+		/* prepare and write http headers */
+		if (lws_add_http_common_headers(wsi,
+			HTTP_STATUS_OK, "text/html", remote_html_len, &p, end)) {
+			return 1;
+		}
+		if (lws_finalize_write_http_header(wsi, start, &p, end)) {
+			return 1;
+		}
+
+		/* write the body separately */
+		lws_callback_on_writable(wsi);
+
+		return 0;
+	}
+	case LWS_CALLBACK_HTTP_WRITEABLE:
+	{
+		int bytes_written;
+		ASSERT(remote_html_len <= MAX_RESPONSE_LENGTH);
+
+		if ((bytes_written = lws_write(wsi, (unsigned char*)remote_html, remote_html_len,
+			      LWS_WRITE_HTTP)) != remote_html_len) {
+			LOG_VPRINT_ERROR("Could not write entire response (total=%i, written=%i)",
+				(int) remote_html_len, bytes_written);
+			return 1;
+		}
+
+		if (lws_http_transaction_completed(wsi)) {
+			return -1;
+		}
+
+		return 0;
+	}
+	default:
+		break;
 	}
 
-	onion_websocket_set_callback(ws, websocket_handler);
-	DEBUG_PRINT(LOG_MODULE, "Websocket created");
-	return OCS_WEBSOCKET;
+	return lws_callback_http_dummy(wsi, reason, user, in, len);
 }
 
 
@@ -197,8 +232,11 @@ static void*
 web_server_listen(void*const arg)
 {
 	DEBUG_SET_THREAD_NAME("webserver");
-	ASSERT(web_server != NULL);
-	onion_listen(web_server);
+	DEBUG_VPRINT(LOG_MODULE, "Waiting for connections (ctx=%p)",
+		web_server_ctx);
+	ASSERT(web_server_ctx != NULL);
+	while (running && lws_service(web_server_ctx, 1000) >= 0);
+	DEBUG_PRINT(LOG_MODULE, "Webservice shutting down");
 	return NULL;
 }
 
@@ -207,7 +245,7 @@ int
 avbox_webinput_init(void)
 {
 	int len;
-	const char*const port = (getuid() == 0) ? "80" : "8080";
+	struct lws_context_creation_info info;
 
 	DEBUG_PRINT(LOG_MODULE, "Initializing webinput driver");
 
@@ -218,25 +256,24 @@ avbox_webinput_init(void)
 		return -1;
 	}
 
-	ONION_VERSION_IS_COMPATIBLE_OR_ABORT();
+	remote_html_len = len;
+	running = 1;
 
-	/* create onion server */
-	if ((web_server = onion_new(O_POOL)) == NULL) {
-		ABORT("Could not create web server!");
+	/* create web server */
+	memset(&info, 0, sizeof(struct lws_context_creation_info));
+	info.port = (getuid() == 0) ? 80 : 8080;
+	info.mounts = &mount;
+	info.protocols = protocols;
+	info.pt_serv_buf_size = MAX_RESPONSE_LENGTH;
+	if ((web_server_ctx = lws_create_context(&info)) == NULL) {
+		LOG_PRINT_ERROR("Could not initialize web server!");
+		return -1;
 	}
-
-	/* configure it */
-	onion_set_timeout(web_server, 5000);
-	onion_set_hostname(web_server, "0.0.0.0");
-	onion_set_port(web_server, port);
-	onion_url *urls = onion_root_url(web_server);
-	onion_url_add_static(urls, "", remote_html, HTTP_OK);
-	onion_url_add(urls, "ws", websocket_accept);
 
 	/* create listener thread */
 	if ((web_server_thread = avbox_thread_new(NULL, NULL, 0, 0)) == NULL) {
 		LOG_PRINT_ERROR("Could not create web server thread!");
-		onion_free(web_server);
+		lws_context_destroy(web_server_ctx);
 		free(remote_html);
 		return -1;
 	}
@@ -244,7 +281,7 @@ avbox_webinput_init(void)
 	if ((web_server_task = avbox_thread_delegate(web_server_thread,
 		web_server_listen, NULL)) == NULL) {
 		avbox_thread_destroy(web_server_thread);
-		onion_free(web_server);
+		lws_context_destroy(web_server_ctx);
 		free(remote_html);
 		return -1;
 	}
@@ -257,9 +294,9 @@ void
 avbox_webinput_shutdown(void)
 {
 	DEBUG_PRINT(LOG_MODULE, "Shutting down webinput driver");
-	onion_listen_stop(web_server);
+	running = 0;
 	avbox_delegate_wait(web_server_task, NULL);
 	avbox_thread_destroy(web_server_thread);
-	onion_free(web_server);
+	lws_context_destroy(web_server_ctx);
 	free(remote_html);
 }

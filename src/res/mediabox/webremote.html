@@ -38,7 +38,7 @@
 	{
 		setConnected(false);
 
-		ws = new WebSocket('ws://' + window.location.host + '/ws');
+		ws = new WebSocket('ws://' + window.location.host + '/ws', 'webremote');
 		ws.onopen = function(ev) { setConnected(true); };
 		ws.onclose = function(ev) { setConnected(false); };
 		ws.onmessage = function(ev) {
