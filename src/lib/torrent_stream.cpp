@@ -606,6 +606,12 @@ alerts_observer_plugin::on_alert(lt::alert const * a)
 			alert->torrent_name(), alert->what());
 	}
 
+	/* tracker error */
+	else if (auto alert = lt::alert_cast<lt::tracker_error_alert>(a)) {
+		LOG_VPRINT_ERROR("Tracker error (%s): %s",
+			alert->tracker_url(), alert->error.message().c_str());
+	}
+
 	/* torrent finished */
 	else if (auto alert = lt::alert_cast<lt::torrent_finished_alert>(a)) {
 		struct avbox_torrent * const inst = find_stream(alert->handle);
