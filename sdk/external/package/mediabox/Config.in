@@ -90,4 +90,10 @@ config BR2_PACKAGE_MEDIABOX_REALTIME
 	  Enables EXPERIMENTAL realtime scheduling support.
 	  This may lead to deadlocks!
 
+config BR2_PACKAGE_MEDIABOX_WEBREMOTE
+	bool "Enable web-based remote control"
+	select BR2_PACKAGE_LIBWEBSOCKETS3
+	help
+	  Enables the web-based remote control.
+
 endif # BR2_PACKAGE_MEDIABOX

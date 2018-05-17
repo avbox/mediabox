@@ -66,6 +66,11 @@ ifeq ($(BR2_PACKAGE_MEDIABOX_REALTIME),y)
 MEDIABOX_CONF_OPTS += --enable-realtime
 endif
 
+ifeq ($(BR2_PACKAGE_MEDIABOX_WEBREMOTE),y)
+MEDIABOX_CONF_OPTS += --enable-webremote
+MEDIABOX_DEPENDENCIES += libwebsockets3
+endif
+
 # remove from package cache
 define MEDIABOX_UNCACHE
 rm -f $(DL_DIR)/mediabox-staging.tar.gz
