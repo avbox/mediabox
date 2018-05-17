@@ -1,7 +1,14 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
 	<title>MediaBox Web Remote</title>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta charset="UTF-8" />
+	<style>
+	html,body {
+		height:97%;
+	}
+	</style>
 	<script>
 
 	var ws = null;
@@ -65,19 +72,19 @@
 	</script>
 </head>
 <body>
-	<table style="width:100%; height:100%" cellpadding="0" cellspacing="0">
+	<table style="width:100%; height:100%">
 		<tr>
 			<td style="height:33.34%">
-				<table style="width:100%; height:100%" cellpadding="5" cellspacing="0">
+				<table style="width:100%; height:100%">
 					<tr>
-						<td style="width:33%; height:25%" >
+						<td style="width:33%; height:25%; padding:5px">
 							<input
 								id="btnVolUp"
 								onclick="javascript:ws.send('VOLUP');"
 								style="width:100%; height:100%"
 								type="button" value="VOL UP" />
 						</td>
-						<td style="width:34%; height:25%">
+						<td style="width:34%; height:25%; padding:5px">
 							<input
 								id="btnUp"
 								onclick="javascript:ws.send('UP');"
@@ -85,7 +92,7 @@
 								type="button"
 								value="UP" />
 						</td>
-						<td style="width:33%; height:25%">
+						<td style="width:33%; height:25%; padding:5px">
 							<input
 								id="btnTrack"
 								onclick="javascript:ws.send('TRACK');"
@@ -95,7 +102,7 @@
 						</td>
 					</tr>
 					<tr>
-						<td style="height:25%">
+						<td style="height:25%; padding:5px">
 							<input
 								id="btnLeft"
 								onclick="javascript:ws.send('LEFT');"
@@ -103,7 +110,7 @@
 								type="button"
 								value="LEFT" />
 						</td>
-						<td style="height:25%">
+						<td style="height:25%; padding:5px">
 							<input
 								id="btnMenu"
 								onclick="javascript:ws.send('MENU');"
@@ -111,7 +118,7 @@
 								type="button"
 								value="MENU" />
 						</td>
-						<td style="height:25%">
+						<td style="height:25%; padding:5px">
 							<input
 								id="btnRight"
 								onclick="javascript:ws.send('RIGHT');"
@@ -121,7 +128,7 @@
 						</td>
 					</tr>
 					<tr>
-						<td style="height:25%">
+						<td style="height:25%; padding:5px">
 							<input
 								id="btnVolDown"
 								onclick="javascript:ws.send('VOLDOWN');"
@@ -129,7 +136,7 @@
 								type="button"
 								value="VOL DOWN" />
 						</td>
-						<td style="height:25%">
+						<td style="height:25%; padding:5px">
 							<input
 								id="btnDown"
 								onclick="javascript:ws.send('DOWN');"
@@ -137,7 +144,7 @@
 								type="button"
 								value="DOWN" />
 						</td>
-						<td style="height:25%">
+						<td style="height:25%; padding:5px">
 							<input
 								id="btnMute"
 								onclick="javascript:ws.send('MUTE');"
@@ -147,7 +154,7 @@
 						</td>
 					</tr>
 					<tr>
-						<td style="height:25%">
+						<td style="height:25%; padding:5px">
 							<input
 								id="btnBack"
 								onclick="javascript:ws.send('BACK');"
@@ -155,7 +162,7 @@
 								type="button"
 								value="BACK" />
 						</td>
-						<td style="height:25%">
+						<td style="height:25%; padding:5px">
 							<input
 								id="btnKeyboard"
 								onclick="javascript:alert('Not implemented');"
@@ -163,7 +170,7 @@
 								type="button"
 								value="KEYBOARD" />
 						</td>
-						<td style="height:25%">
+						<td style="height:25%; padding:5px">
 							<input
 								id="btnEnter"
 								onclick="javascript:ws.send('ENTER');"
@@ -177,31 +184,35 @@
 		</tr>
 		<tr>
 			<td style="height:16.66%">
-				<table style="width:100%; height:100%" cellpadding="5" cellspacing="0">
+				<table style="width:95%; height:100%; margin: auto">
 					<tr>
-						<td colspan="2" align="center" style="height:50%">
+						<td colspan="2" style="height:50%; padding:5px; margin:0 auto">
 							<input
 								id="seeker"
-								style="width:90%; align:left;"
+								style="width:100%;"
 								type="range"
-								disabled="true"
+								disabled="disabled"
 								min="0"
 								max="100"
 								value="0" />
 						</td>
 					</tr>
 					<tr>
-						<td align="left" style="height:50%"><span>00:00:00</span></td>
-						<td align="right" style="height:50%"><span>01:59:00</span></td>
+						<td style="height:50%; padding:5px; text-align:left">
+							<span>00:00:00</span>
+						</td>
+						<td style="height:50%; padding:5px; text-align:right">
+							<span>01:59:00</span>
+						</td>
 					</tr>
 				</table>
 			</td>
 		</tr>
 		<tr>
 			<td style="height:8.33%">
-				<table style="width:100%; height:100%" cellpadding="5" cellspacing="0">
+				<table style="width:100%; height:100%">
 					<tr>
-						<td style="width:25%; height:100%">
+						<td style="width:25%; height:100%; padding:5px">
 							<input
 								id="btnPrev"
 								onclick="javascript:ws.send('PREV');"
@@ -209,7 +220,7 @@
 								type="button"
 								value="|&lt;" />
 						</td>
-						<td style="width:25%; height:100%">
+						<td style="width:25%; height:100%; padding:5px">
 							<input
 								id="btnRew"
 								onclick="javascript:ws.send('REW');"
@@ -217,7 +228,7 @@
 								type="button"
 								value="&lt;&lt;" />
 						</td>
-						<td style="width:25%; height:100%">
+						<td style="width:25%; height:100%; padding:5px">
 							<input
 								id="btnFF"
 								onclick="javascript:ws.send('FF');"
@@ -225,7 +236,7 @@
 								type="button"
 								value="&gt;&gt;" />
 						</td>
-						<td style="width:25%; height:100%">
+						<td style="width:25%; height:100%; padding:5px">
 							<input
 								id="btnNext"
 								onclick="javascript:ws.send('NEXT');"
@@ -239,9 +250,9 @@
 		</tr>
 		<tr>
 			<td style="height:8.33%">
-				<table style="width:100%; height:100%" cellpadding="5" cellspacing="0">
+				<table style="width:100%; height:100%">
 					<tr>
-						<td style="width:33%; height:100%">
+						<td style="width:33%; height:100%; padding:5px">
 							<input
 								id="btnStop"
 								onclick="javascript:ws.send('STOP');"
@@ -249,7 +260,7 @@
 								type="button"
 								value="STOP" />
 						</td>
-						<td style="width:34%; height:100%">
+						<td style="width:34%; height:100%; padding:5px">
 							<input
 								id="btnPlay"
 								onclick="javascript:ws.send('PLAY');"
@@ -257,7 +268,7 @@
 								type="button"
 								value="PLAY" />
 						</td>
-						<td style="width:33%; height:100%">
+						<td style="width:33%; height:100%; padding:5px">
 							<input
 								id="btnInfo"
 								onclick="javascript:ws.send('INFO');"
@@ -270,15 +281,15 @@
 			</td>
 		</tr>
 		<tr>
-			<td align="center" style="height:8.33%">
+			<td style="height:1%; text-align:center">
 				<span>Open Media</span>
 			</td>
 		</tr>
 		<tr>
 			<td style="height:16.66%">
-				<table style="width:100%; height:100%" cellpadding="5" cellspacing="0">
+				<table style="width:100%; height:100%">
 					<tr>
-						<td colspan="2" style="height:50%">
+						<td colspan="2" style="height:50%; padding:5px">
 							<input
 								id="txtURL"
 								type="text"
@@ -287,7 +298,7 @@
 						</td>
 					</tr>
 					<tr>
-						<td style="width:50%; height:50%">
+						<td style="width:50%; height:50%; padding:5px">
 							<input
 								id="btnStream"
 								onclick="javascript:sendCommand('URL');"
@@ -295,7 +306,7 @@
 								style="width:100%; height:100%"
 								value="STREAM" />
 						</td>
-						<td style="width:50%; height:50%">
+						<td style="width:50%; height:50%; padding:5px">
 							<input
 								id="btnDownload"
 								onclick="javascript:sendCommand('DOWNLOAD');"
