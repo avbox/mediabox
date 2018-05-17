@@ -1,6 +1,6 @@
 /**
  * MediaBox - Linux based set-top firmware
- * Copyright (C) 2016-2017 Fernando Rodriguez
+ * Copyright (C) 2016-2018 Fernando Rodriguez
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License Version 3 as 
@@ -156,7 +156,7 @@ avbox_discovery_broadcast(const char * const iface_name, void *arg)
 	if (!strcmp("lo", iface_name)) {
 		return 0;
 	}
-	if ((ip = ifaceutil_getip(iface_name)) == NULL) {
+	if ((ip = avbox_ifaceutil_getip(iface_name)) == NULL) {
 		return 0;
 	}
 
@@ -185,7 +185,7 @@ static enum avbox_timer_result
 avbox_discovery_sendbroadcast(int timer_id, void *data)
 {
 	iface_index = 0;
-	ifaceutil_enumifaces(avbox_discovery_broadcast, NULL);
+	avbox_ifaceutil_enumifaces(avbox_discovery_broadcast, NULL);
 	return AVBOX_TIMER_CALLBACK_RESULT_CONTINUE;
 }
 

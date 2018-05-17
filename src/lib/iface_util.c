@@ -1,6 +1,6 @@
 /**
  * avbox - Toolkit for Embedded Multimedia Applications
- * Copyright (C) 2016-2017 Fernando Rodriguez
+ * Copyright (C) 2016-2018 Fernando Rodriguez
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License Version 3 as 
@@ -40,12 +40,8 @@
 
 #include "iface_util.h"
 
-/*
- * ifaceutil_getip() -- Gets the IP address of a network
- * interface
- */
 char*
-ifaceutil_getip(const char * const iface_name)
+avbox_ifaceutil_getip(const char*const iface_name)
 {
 
 	int fd;
@@ -67,9 +63,8 @@ ifaceutil_getip(const char * const iface_name)
 }
 
 
-
 int
-ifaceutil_enumifaces(ifaceutil_enum_callback callback, void *data)
+avbox_ifaceutil_enumifaces(avbox_ifaceutil_enum_callback callback, void *data)
 {
 	const char * const sysfs_net = "/sys/class/net";
 	DIR *dir;
@@ -123,7 +118,7 @@ ifaceutil_enumifaces(ifaceutil_enum_callback callback, void *data)
 		}
 
 		/* check that the interface has an ip */
-		if ((ip = ifaceutil_getip(dp->d_name)) == NULL) {
+		if ((ip = avbox_ifaceutil_getip(dp->d_name)) == NULL) {
 			continue;
 		}
 
@@ -133,18 +128,3 @@ ifaceutil_enumifaces(ifaceutil_enum_callback callback, void *data)
 	closedir(dir);
 	return 0;
 }
-
-#if 0
-static int
-callback(const char * const iface_name, void *data)
-{
-	fprintf(stderr, "%s\n", iface_name);
-}
-
-int
-main()
-{
-	return ifaceutil_enumifaces(callback, NULL)
-}
-#endif
-

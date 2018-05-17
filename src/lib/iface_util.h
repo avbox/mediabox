@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2016-2017 Fernando Rodriguez - All rights reserved
+ * Copyright (c) 2016-2018 Fernando Rodriguez - All rights reserved
  * This file is part of mediabox.
  */
 
@@ -9,21 +9,20 @@
 /**
  * Callback for enumerating network interfaces
  */
-typedef int (*ifaceutil_enum_callback)(const char * const iface_name, void *data);
-
-
-/*
- * ifaceutil_getip() -- Gets the IP address of a network
- * interface
- */
-char*
-ifaceutil_getip(const char * const iface_name);
+typedef int (*avbox_ifaceutil_enum_callback)(const char * const iface_name, void *data);
 
 
 /**
- * ifaceutil_enumifaces() -- Enumerate network interfaces
+ * Gets the IP address of a network interface
+ */
+char*
+avbox_ifaceutil_getip(const char*const iface_name);
+
+
+/**
+ * Enumerate network interfaces
  */
 int
-ifaceutil_enumifaces(ifaceutil_enum_callback callback, void *data);
+avbox_ifaceutil_enumifaces(avbox_ifaceutil_enum_callback callback, void *data);
 
 #endif

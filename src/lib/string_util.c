@@ -1,6 +1,6 @@
 /**
  * avbox - Toolkit for Embedded Multimedia Applications
- * Copyright (C) 2016-2017 Fernando Rodriguez
+ * Copyright (C) 2016-2018 Fernando Rodriguez
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License Version 3 as 
@@ -26,6 +26,105 @@
 
 #include "debug.h"
 #include "log.h"
+
+#define AVBOX_STRINGBUILDER_EXTRA_ROOM	(512)
+
+
+struct avbox_stringbuilder
+{
+	char* buf;
+	size_t size;
+	size_t capacity;
+};
+
+
+char*
+avbox_stringbuilder_strdup(const struct avbox_stringbuilder*const inst)
+{
+	return strdup(inst->buf);
+}
+
+size_t
+avbox_stringbuilder_size(const struct avbox_stringbuilder*const inst)
+{
+	return inst->size;
+}
+
+
+const char*
+avbox_stringbuilder_cstr(const struct avbox_stringbuilder*const inst)
+{
+	return inst->buf;
+}
+
+
+ssize_t
+avbox_stringbuilder_append(struct avbox_stringbuilder*const inst,
+	const char*const str)
+{
+	ASSERT(inst != NULL);
+	ASSERT(inst->buf != NULL);
+	ASSERT(str != NULL);
+
+	const size_t len = strlen(str);
+
+	/* grow the buffer if needed */
+	if (inst->capacity <= (inst->size + len)) {
+		const int capacity = inst->size + len +
+			AVBOX_STRINGBUILDER_EXTRA_ROOM;
+		char*const buf = malloc(capacity);
+		if (buf == NULL) {
+			ASSERT(errno == ENOMEM);
+			return -1;
+		}
+		memcpy(buf, inst->buf, inst->size + 1);
+		free(inst->buf);
+		inst->buf = buf;
+		inst->capacity = capacity;
+	}
+
+	/* append the string, including the null terminator */
+	memcpy(inst->buf + inst->size, str, len + 1);
+	inst->size += len;
+	return inst->size;
+}
+
+
+void
+avbox_stringbuilder_destroy(struct avbox_stringbuilder*const inst)
+{
+	ASSERT(inst != NULL);
+	ASSERT(inst->buf != NULL);
+	free(inst->buf);
+	free(inst);
+}
+
+
+struct avbox_stringbuilder*
+avbox_stringbuilder_new(int capacity)
+{
+	struct avbox_stringbuilder*const inst =
+		malloc(sizeof(struct avbox_stringbuilder));
+	if (inst == NULL) {
+		ASSERT(errno == ENOMEM);
+		return NULL;
+	}
+
+	if (capacity == 0) {
+		capacity = AVBOX_STRINGBUILDER_EXTRA_ROOM;
+	}
+
+	if ((inst->buf = malloc(capacity)) == NULL) {
+		ASSERT(errno == ENOMEM);
+		free(inst);
+		return NULL;
+	}
+
+	inst->capacity = capacity;
+	inst->size = 0;
+	inst->buf[0] = '\0';
+	return inst;
+}
 
 
 /**

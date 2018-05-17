@@ -1,6 +1,6 @@
 /**
  * MediaBox - Linux based set-top firmware
- * Copyright (C) 2016-2017 Fernando Rodriguez
+ * Copyright (C) 2016-2018 Fernando Rodriguez
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License Version 3 as 
@@ -42,6 +42,7 @@
 #include "lib/settings.h"
 #include "lib/thread.h"
 #include "lib/string_util.h"
+#include "lib/iface_util.h"
 #include "mainmenu.h"
 #include "discovery.h"
 #include "downloads-backend.h"
@@ -67,6 +68,7 @@ static int volumebar_timer_id = -1;
 static int clock_timer_id = -1;
 static char time_string[256] = "";
 static char date_string[256] = "";
+static char* ip_addresses = NULL;
 
 
 /**
@@ -145,6 +147,21 @@ mbox_shell_draw(struct avbox_window *window, void * const ctx)
 		if (layout_date != NULL) {
 			g_object_unref(layout_date);
 		}
+
+		if (ip_addresses != NULL) {
+			PangoLayout *layout_ip;
+			if ((layout_ip = pango_cairo_create_layout(context)) != NULL) {
+				pango_layout_set_font_description(layout_ip, mbv_getdefaultfont());
+				pango_layout_set_width(layout_ip, w * PANGO_SCALE);
+				pango_layout_set_alignment(layout_ip, PANGO_ALIGN_CENTER);
+				pango_layout_set_text(layout_ip, ip_addresses, -1);
+				pango_cairo_update_layout(context, layout_ip);
+				cairo_move_to(context, 0, 70);
+				pango_cairo_show_layout(context, layout_ip);
+			}
+		}
+
+
 		avbox_window_cairo_end(window);
 	} else {
 		DEBUG_PRINT("about", "Could not get cairo context");
@@ -155,7 +172,8 @@ mbox_shell_draw(struct avbox_window *window, void * const ctx)
 
 
 /**
- * Draws the shutdown dialog */
+ * Draws the shutdown dialog
+ */
 static int
 mbox_shell_shutdowndraw(struct avbox_window *window, void * const ctx)
 {
@@ -895,6 +913,33 @@ mbox_shell_handler(void *context, struct avbox_message *msg)
 }
 
 
+static int
+enum_iface_callback(const char * const iface_name, void *arg)
+{
+	ASSERT(arg != NULL);
+	struct avbox_stringbuilder*const sb = arg;
+	char*const ip = avbox_ifaceutil_getip(iface_name);
+	if (ip == NULL || !strcmp(iface_name, "lo")) {
+		return 0;
+	}
+
+	if (avbox_stringbuilder_size(sb) > 0) {
+		avbox_stringbuilder_append(sb, ", ");
+	} else {
+		avbox_stringbuilder_append(sb, "Web address: ");
+	}
+
+	avbox_stringbuilder_append(sb, "http://");
+	avbox_stringbuilder_append(sb, ip);
+	if (getuid() != 0) {
+		avbox_stringbuilder_append(sb, ":8080");
+	}
+	avbox_stringbuilder_append(sb, "/");
+	free(ip);
+	return 0;
+}
+
+
 /**
  * Initialize the MediaBox shell
  */
@@ -988,6 +1033,15 @@ mbox_shell_init(void)
 		avbox_object_destroy(avbox_player_object(player));
 		avbox_window_destroy(main_window);
 		return -1;
+	}
+
+	struct avbox_stringbuilder*const sb =
+		avbox_stringbuilder_new(0);
+	if (sb != NULL) {
+		avbox_ifaceutil_enumifaces(enum_iface_callback, sb);
+		ip_addresses = (avbox_stringbuilder_size(sb) == 0) ? NULL
+			: avbox_stringbuilder_strdup(sb);
+		avbox_stringbuilder_destroy(sb);
 	}
 
 	return 0;

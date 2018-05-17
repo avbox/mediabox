@@ -1,6 +1,6 @@
 /**
  * avbox - Toolkit for Embedded Multimedia Applications
- * Copyright (C) 2016-2017 Fernando Rodriguez
+ * Copyright (C) 2016-2018 Fernando Rodriguez
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License Version 3 as 
@@ -20,6 +20,54 @@
 
 #ifndef __STRING_UTIL_H__
 #define __STRING_UTIL_H__
+
+
+/**
+ * StringBuilder object.
+ */
+struct avbox_stringbuilder;
+
+
+/**
+ * Gets a copy of the underlying C string.
+ */
+char*
+avbox_stringbuilder_strdup(const struct avbox_stringbuilder*const inst);
+
+
+/**
+ * Get the length of the internally stored string.
+ */
+size_t
+avbox_stringbuilder_size(const struct avbox_stringbuilder*const inst);
+
+
+/**
+ * Get the internally stored string.
+ */
+const char*
+avbox_stringbuilder_cstr(const struct avbox_stringbuilder*const inst);
+
+
+/**
+ * Append a C string to the stringbuilder object.
+ */
+ssize_t
+avbox_stringbuilder_append(struct avbox_stringbuilder*const inst,
+	const char*const str);
+
+/**
+ * Destroy a stringbuilder object.
+ */
+void
+avbox_stringbuilder_destroy(struct avbox_stringbuilder*const inst);
+
+
+/**
+ * Create a new stringbuilder object.
+ */
+struct avbox_stringbuilder*
+avbox_stringbuilder_new(int capacity);
 
 
 /**

@@ -1,6 +1,6 @@
 /**
  * MediaBox - Linux based set-top firmware
- * Copyright (C) 2016-2017 Fernando Rodriguez
+ * Copyright (C) 2016-2018 Fernando Rodriguez
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License Version 3 as 
@@ -2779,7 +2779,7 @@ mbox_library_init(void)
 		state.port = 49163;
 		state.err = 0;
 		state.gotone = 0;
-		ifaceutil_enumifaces(mb_library_backend_startmediatomb, &state);
+		avbox_ifaceutil_enumifaces(mb_library_backend_startmediatomb, &state);
 		if (state.err != 0) {
 			LOG_PRINT_ERROR("An error occurred while launching mediatomb!");
 			goto end;
