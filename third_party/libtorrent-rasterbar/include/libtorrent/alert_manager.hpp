@@ -46,11 +46,13 @@ POSSIBILITY OF SUCH DAMAGE.
 #endif
 #include <boost/function/function0.hpp>
 #include <boost/shared_ptr.hpp>
+#include <boost/atomic.hpp>
 #include <boost/config.hpp>
 #include <list>
 #include <utility> // for std::forward
 
 #include "libtorrent/aux_/disable_warnings_pop.hpp"
+
 
 #ifdef __GNUC__
 // this is to suppress the warnings for using std::auto_ptr
@@ -94,7 +96,20 @@ namespace libtorrent {
 			// for high priority alerts, double the upper limit
 			if (m_alerts[m_generation].size() >= m_queue_size_limit
 				* (1 + T::priority))
+			{
+#ifndef TORRENT_DISABLE_EXTENSIONS
+				lock.unlock();
+
+				if (m_ses_extensions_reliable.empty())
+					return;
+
+				mutex::scoped_lock reliable_lock(m_mutex_reliable);
+				T alert(m_allocator_reliable, std::forward<Args>(args)...);
+				notify_extensions(&alert, m_ses_extensions_reliable);
+				m_allocator_reliable.reset();
+#endif
 				return;
+			}
 
 			T alert(m_allocations[m_generation], std::forward<Args>(args)...);
 			m_alerts[m_generation].push_back(alert);
@@ -116,27 +131,19 @@ namespace libtorrent {
 		template <class T>
 		bool should_post() const
 		{
-			mutex::scoped_lock lock(m_mutex);
-			if (m_alerts[m_generation].size() >= m_queue_size_limit
-				* (1 + T::priority))
-			{
-				return false;
-			}
-			return (m_alert_mask & T::static_category) != 0;
+			return (m_alert_mask.load(boost::memory_order_relaxed) & T::static_category) != 0;
 		}
 
 		alert* wait_for_alert(time_duration max_wait);
 
 		void set_alert_mask(boost::uint32_t m)
 		{
-			mutex::scoped_lock lock(m_mutex);
-			m_alert_mask = m;
+			m_alert_mask.store(m, boost::memory_order_relaxed);
 		}
 
 		boost::uint32_t alert_mask() const
 		{
-			mutex::scoped_lock lock(m_mutex);
-			return m_alert_mask;
+			return m_alert_mask.load(boost::memory_order_relaxed);
 		}
 
 		int alert_queue_size_limit() const { return m_queue_size_limit; }
@@ -164,7 +171,7 @@ namespace libtorrent {
 
 		mutable mutex m_mutex;
 		condition_variable m_condition;
-		boost::uint32_t m_alert_mask;
+		boost::atomic<boost::uint32_t> m_alert_mask;
 		int m_queue_size_limit;
 
 #ifndef TORRENT_NO_DEPRECATE
@@ -181,7 +188,7 @@ namespace libtorrent {
 		boost::function<void()> m_notify;
 
 		// the number of resume data alerts  in the alert queue
-		int m_num_queued_resume;
+		boost::atomic<int> m_num_queued_resume;
 
 		// this is either 0 or 1, it indicates which m_alerts and m_allocations
 		// the alert_manager is allowed to use right now. This is swapped when
@@ -202,7 +209,11 @@ namespace libtorrent {
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
 		typedef std::list<boost::shared_ptr<plugin> > ses_extension_list_t;
+		void notify_extensions(alert * const a, ses_extension_list_t const& extensions);
 		ses_extension_list_t m_ses_extensions;
+		ses_extension_list_t m_ses_extensions_reliable;
+		aux::stack_allocator m_allocator_reliable;
+		mutex m_mutex_reliable;
 #endif
 	};
 }

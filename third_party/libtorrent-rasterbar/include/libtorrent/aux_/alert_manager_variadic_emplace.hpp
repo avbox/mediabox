@@ -39,7 +39,22 @@
 			// for high priority alerts, double the upper limit
 			if (m_alerts[m_generation].size() >= m_queue_size_limit
 				* (1 + T::priority))
+			{
+#ifndef TORRENT_DISABLE_EXTENSIONS
+				lock.unlock();
+
+				if (m_ses_extensions_reliable.empty())
+					return;
+
+				mutex::scoped_lock reliable_lock(m_mutex_reliable);
+				T alert(m_allocator_reliable
+					BOOST_PP_COMMA_IF(I)
+					BOOST_PP_ENUM_PARAMS(I, a));
+				notify_extensions(&alert, m_ses_extensions_reliable);
+				m_allocator_reliable.reset();
+#endif
 				return;
+			}
 
 			T alert(m_allocations[m_generation]
 				BOOST_PP_COMMA_IF(I)

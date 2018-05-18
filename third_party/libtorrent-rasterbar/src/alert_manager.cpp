@@ -52,8 +52,7 @@ namespace libtorrent
 
 	int alert_manager::num_queued_resume() const
 	{
-		mutex::scoped_lock lock(m_mutex);
-		return m_num_queued_resume;
+		return m_num_queued_resume.load(boost::memory_order_consume);
 	}
 
 	alert* alert_manager::wait_for_alert(time_duration max_wait)
@@ -75,7 +74,7 @@ namespace libtorrent
 	{
 		if (a->type() == save_resume_data_failed_alert::alert_type
 			|| a->type() == save_resume_data_alert::alert_type)
-			++m_num_queued_resume;
+			m_num_queued_resume.fetch_add(1, boost::memory_order_relaxed);
 
 		if (m_alerts[m_generation].size() == 1)
 		{
@@ -97,11 +96,7 @@ namespace libtorrent
 		}
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
-		for (ses_extension_list_t::iterator i = m_ses_extensions.begin()
-			, end(m_ses_extensions.end()); i != end; ++i)
-		{
-			(*i)->on_alert(a);
-		}
+		notify_extensions(a, m_ses_extensions);
 #endif
 	}
 
@@ -162,8 +157,19 @@ namespace libtorrent
 	}
 
 #ifndef TORRENT_DISABLE_EXTENSIONS
+	void alert_manager::notify_extensions(alert * const alert, ses_extension_list_t const& list)
+	{
+		for (ses_extension_list_t::const_iterator i = list.begin(),
+			end(list.end()); i != end; ++i)
+		{
+			(*i)->on_alert(alert);
+		}
+	}
+
 	void alert_manager::add_extension(boost::shared_ptr<plugin> ext)
 	{
+		if ((ext->implemented_features() & plugin::reliable_alerts_feature) != 0)
+			m_ses_extensions_reliable.push_back(ext);
 		m_ses_extensions.push_back(ext);
 	}
 #endif
@@ -171,13 +177,13 @@ namespace libtorrent
 	void alert_manager::get_all(std::vector<alert*>& alerts, int& num_resume)
 	{
 		mutex::scoped_lock lock(m_mutex);
-		TORRENT_ASSERT(m_num_queued_resume <= m_alerts[m_generation].size());
+		TORRENT_ASSERT(m_num_queued_resume.load(boost::memory_order_relaxed) <= m_alerts[m_generation].size());
 
 		alerts.clear();
 		if (m_alerts[m_generation].empty()) return;
 
 		m_alerts[m_generation].get_pointers(alerts);
-		num_resume = m_num_queued_resume;
+		num_resume = m_num_queued_resume.load(boost::memory_order_relaxed);
 		m_num_queued_resume = 0;
 
 		// swap buffers
