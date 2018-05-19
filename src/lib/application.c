@@ -55,9 +55,7 @@
 #ifdef ENABLE_IONICE
 #include "ionice.h"
 #endif
-#ifdef ENABLE_LIBTORRENT
 #include "torrent_stream.h"
-#endif
 
 
 LISTABLE_STRUCT(avbox_application_subscriber,
@@ -377,7 +375,11 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 
 #ifdef ENABLE_REALTIME
 	mlockall(MCL_CURRENT);
+#ifdef HAVE_MCL_ON_FAULT
 	mlockall(MCL_FUTURE | MCL_ONFAULT);
+#else
+	mlockall(MCL_FUTURE);
+#endif
 #endif
 
 	/* initialize logging system for early
@@ -522,12 +524,10 @@ avbox_application_init(int argc, char **cargv, const char *logf)
 	}
 #endif
 
-#ifdef ENABLE_LIBTORRENT
 	if (avbox_torrent_init() == -1) {
 		LOG_PRINT_ERROR("Could not start torrent engine");
 		return -1;
 	}
-#endif
 
 	LIST_INIT(&subscribers);
 

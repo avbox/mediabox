@@ -1,7 +1,13 @@
 #!/bin/sh
 
-#echo '* Runing libtoolize...'
-#libtoolize --install --copy --force --automake -Wall
+echo '* Running libtorrent-rasterbar autotool.sh...'
+cd third_party/libtorrent-rasterbar
+./autotool.sh
+cd ../..
+echo
+
+echo '* Runing libtoolize...'
+libtoolize --install --copy --force --automake
 
 echo '* Running aclocal...'
 aclocal

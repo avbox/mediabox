@@ -1,4 +1,4 @@
-MediaBox
+MediaBox [![Build Status](https://travis-ci.org/avbox/mediabox.svg?branch=master)](https://travis-ci.org/avbox/mediabox)
 ========
 
 

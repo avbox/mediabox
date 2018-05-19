@@ -210,6 +210,7 @@ end:
 struct avbox_thread *
 avbox_thread_new(avbox_message_handler handler, void * const context, int flags, int prio)
 {
+	int ret;
 	struct avbox_thread *thread;
 
 	/* allocate memory */
@@ -234,7 +235,9 @@ avbox_thread_new(avbox_message_handler handler, void * const context, int flags,
 	thread->flags = flags;
 	thread->running = 0;
 	thread->prio = prio;
-	if (pthread_create(&thread->thread, NULL, avbox_thread_run, thread) != 0) {
+	if ((ret = pthread_create(&thread->thread, NULL, avbox_thread_run, thread)) != 0) {
+		errno = ret;
+		LOG_VPRINT_ERROR("pthread_create() error %s", strerror(ret));
 		free(thread);
 		return NULL;
 	}
@@ -403,7 +406,12 @@ avbox_workqueue_init(void)
 		if ((thread = avbox_thread_new(NULL, NULL, 0, 0)) == NULL ||
 			(initfunc = avbox_thread_delegate(thread, avbox_workqueue_thread_init, thread)) == NULL) {
 			if (thread != NULL) {
+				LOG_VPRINT_ERROR("Could not start thread #%i: %s",
+					i, strerror(errno));
 				avbox_thread_destroy(thread);
+			} else {
+				LOG_VPRINT_ERROR("Could not create thread #%i: %s",
+					i, strerror(errno));
 			}
 			LIST_FOREACH_SAFE(struct avbox_thread*, thread, &workqueue_threads, {
 				avbox_thread_destroy(thread);

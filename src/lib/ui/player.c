@@ -2335,7 +2335,6 @@ avbox_player_openstream(void *arg)
 	}
 #endif
 
-#ifdef ENABLE_LIBTORRENT
 	else if (!strncmp("magnet:", osa->path, 7) ||
 		(!strncmp("http", osa->path, 4))) {
 		if (avbox_torrentin_open(osa->path, osa->inst, &osa->inst->stream) == NULL) {
@@ -2345,7 +2344,7 @@ avbox_player_openstream(void *arg)
 			return (void*) -1;
 		}
 	}
-#endif
+
 	return (void*) 0;
 }
 

@@ -58,9 +58,7 @@
 #	include "dvdio.h"
 #endif
 
-#ifdef ENABLE_LIBTORRENT
-#	include "torrent_stream.h"
-#	include "torrent_in.h"
-#endif
+#include "torrent_stream.h"
+#include "torrent_in.h"
 
 #endif

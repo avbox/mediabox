@@ -630,10 +630,12 @@ avbox_audiostream_output(void *arg)
 		LOG_VPRINT_ERROR("Could not determine SW params. %s", snd_strerror(ret));
 		goto end;
 	}
+#ifdef HAVE_SND_PCM_TSTAMP_TYPE_MONOTONIC
 	if ((ret = snd_pcm_sw_params_set_tstamp_type(inst->pcm_handle, swparams, SND_PCM_TSTAMP_TYPE_MONOTONIC)) < 0) {
 		LOG_VPRINT_ERROR("Could not set ALSA clock to CLOCK_MONOTONIC. %s", snd_strerror(ret));
 		goto end;
 	}
+#endif
 	if ((ret = snd_pcm_sw_params_set_tstamp_mode(inst->pcm_handle, swparams, SND_PCM_TSTAMP_ENABLE)) < 0) {
 		LOG_VPRINT_ERROR("Could not enable timestamps: %s", snd_strerror(ret));
 	}

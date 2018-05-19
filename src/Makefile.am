@@ -9,10 +9,6 @@ AM_SHARED_FLAGS = \
 	@ALSA_CFLAGS@ \
 	@PANGOCAIRO_CFLAGS@ \
 	@CURL_CFLAGS@ \
-	@LIBAVUTIL_CFLAGS@ \
-	@LIBAVFORMAT_CFLAGS@ \
-	@LIBAVCODEC_CFLAGS@ \
-	@LIBAVFILTER_CFLAGS@ \
 	@GLIB_CFLAGS@ \
 	@GIO_CFLAGS@ \
 	@SQLITE3_CFLAGS@ \
@@ -24,16 +20,12 @@ AM_SHARED_FLAGS = \
 AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE $(AM_SHARED_FLAGS)
 AM_CXXFLAGS = -std=c++11 -Wall $(AM_SHARED_FLAGS)
 
-AM_LDFLAGS = -lz -lm -lswscale \
+AM_LDFLAGS = -lz -lm \
 	@LIBS@ \
 	@PTHREAD_LIBS@ \
 	@ALSA_LIBS@ \
 	@PANGOCAIRO_LIBS@ \
 	@CURL_LIBS@ \
-	@LIBAVUTIL_LIBS@ \
-	@LIBAVFORMAT_LIBS@ \
-	@LIBAVCODEC_LIBS@ \
-	@LIBAVFILTER_LIBS@ \
 	@GLIB_LIBS@ \
 	@GIO_LIBS@ \
 	@SQLITE3_LIBS@ \
@@ -44,6 +36,9 @@ AM_LDFLAGS = -lz -lm -lswscale \
 
 bin_PROGRAMS = mediabox
 
+mediabox_LDADD =
+mediabox_CFLAGS = $(AM_CFLAGS)
+mediabox_CXXFLAGS = $(AM_CXXFLAGS)
 mediabox_SOURCES = \
 	lib/queue.c \
 	lib/dispatch.c \
@@ -125,14 +120,19 @@ if ENABLE_VC4
 noinst_LIBRARIES = libvc4.a
 libvc4_a_SOURCES = lib/ui/video-vc4.c lib/ui/mmaldecode.c
 libvc4_a_CFLAGS = $(AM_CFLAGS) -std=gnu89
-mediabox_LDADD = $(AM_LDFLAGS) libvc4.a
+mediabox_LDADD += $(AM_LDFLAGS) libvc4.a
 endif
 
-if ENABLE_LIBTORRENT
-mediabox_SOURCES += lib/torrent_stream.cpp lib/torrent_in.c
-AM_CXXFLAGS += @LIBTORRENT_CFLAGS@
+if WITH_SYSTEM_LIBTORRENT
 AM_LDFLAGS += @LIBTORRENT_LIBS@
+AM_CXXFLAGS += @LIBTORRENT_CFLAGS@
+else
+mediabox_CFLAGS += -I../third_party/libtorrent-rasterbar/include
+mediabox_CXXFLAGS += -I../third_party/libtorrent-rasterbar/include
+mediabox_LDADD += ../third_party/libtorrent-rasterbar/src/.libs/libtorrent-rasterbar.la
 endif
+
+mediabox_SOURCES += lib/torrent_stream.cpp lib/torrent_in.c
 
 if ENABLE_OPENGL
 mediabox_SOURCES += lib/ui/video-opengl.c
@@ -142,6 +142,20 @@ if ENABLE_WEBREMOTE
 AM_CXXFLAGS += @LIBWEBSOCKETS_CFLAGS@
 AM_LDFLAGS += @LIBWEBSOCKETS_LIBS@
 mediabox_SOURCES += lib/ui/input-web.c
+endif
+
+if WITH_SYSTEM_FFMPEG
+AM_LDFLAGS += @LIBSWSCALE_LIBS@ @LIBAVUTIL_LIBS@ @LIBAVFORMAT_LIBS@ @LIBAVCODEC_LIBS@ @LIBAVFILTER_LIBS@
+AM_CXXFLAGS += @LIBSWSCALE_CFLAGS@ @LIBAVUTIL_CFLAGS@ @LIBAVFORMAT_CFLAGS@ @LIBAVCODEC_CFLAGS@ @LIBAVFILTER_CFLAGS@
+else
+mediabox_LDADD += \
+	../third_party/ffmpeg/libswscale/libswscale.a \
+	../third_party/ffmpeg/libavformat/libavformat.a \
+	../third_party/ffmpeg/libavfilter/libavfilter.a \
+	../third_party/ffmpeg/libavcodec/libavcodec.a \
+	../third_party/ffmpeg/libavutil/libavutil.a \
+	../third_party/ffmpeg/libswresample/libswresample.a \
+	-ldl -lbz2 -llzma -lz
 endif
 
 systemddir = /usr/lib/systemd/system

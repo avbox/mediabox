@@ -1,15 +1,14 @@
 AC_PREREQ([2.69])
-AC_INIT([mediabox], [0.01], [https://github.com/avbox/mediabox/])
+AC_INIT([mediabox], [0.6], [https://github.com/avbox/mediabox/])
 
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_HEADERS(src/config.h)
 AC_CONFIG_SRCDIR(src/main.c)
 AC_CONFIG_MACRO_DIR(m4)
-AC_COPYRIGHT([Copyright (C) 2016-2017 Fernando Rodriguez])
+AC_COPYRIGHT([Copyright (C) 2016-2018 Fernando Rodriguez])
 AC_REVISION([$Revision: 266 $])
 
 AM_INIT_AUTOMAKE([1.9 -Wall std-options gnu])
-
 
 AC_PROG_CC
 AC_PROG_INSTALL
@@ -18,6 +17,8 @@ AC_PROG_RANLIB
 AM_PROG_AR
 AC_PATH_PROG([RM], [rm])
 AC_PROG_CXX
+
+LT_INIT
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_UID_T
@@ -74,9 +75,11 @@ else
 	CFLAGS="-O2 -DNDEBUG -DHAVE_CONFIG_H"
 fi
 
-AM_CONDITIONAL(ENABLE_LIBTORRENT, test xyes = xyes)
-AC_DEFINE([ENABLE_LIBTORRENT], 1, [Define to 1 to enable libtorrent support])
+AC_ARG_WITH([system-libtorrent], [Use the system libtorrent-rasterbar library])
+AM_CONDITIONAL(WITH_SYSTEM_LIBTORRENT, test x"$with_system_libtorrent" != xno)
 
+AC_ARG_WITH([system-ffmpeg], [Use the system ffmpeg libraries])
+AM_CONDITIONAL(WITH_SYSTEM_FFMPEG, test x"$with_system_ffmpeg" != xno)
 
 AC_ARG_ENABLE([ionice], [realtime IO priority for main process])
 if test x"$enable_ionice" = xyes; then
@@ -138,6 +141,20 @@ fi
 AC_ARG_ENABLE([realtime], [Define to 1 to enable realtime scheduling support])
 if test x"$enable_realtime" = xyes; then
 	AC_DEFINE([ENABLE_REALTIME], 1, [Define to 1 to enable realtime scheduling support])
+
+	# check that we have MCL_ONFAULT on sys/mman.h
+	AC_MSG_CHECKING([if we have MCL_ONFAULT on sys/mman.h])
+	AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
+		#include "sys/mman.h"
+		#ifndef MCL_ONFAULT
+		# error macro not defined
+		#endif
+	]])], [
+		AC_DEFINE([HAVE_MCL_ONFAULT], 1, [Define to 1 if we have MCL_ONFAULT on mman.h])
+		AC_MSG_RESULT([yes])
+	], [
+		AC_MSG_RESULT([no])
+	])
 fi
 
 
@@ -160,16 +177,12 @@ if test x"$enable_webremote" = xyes; then
 	AM_CONDITIONAL(ENABLE_WEBREMOTE, [test xyes = xyes])
 fi
 
-
 if test x"$enable_dvdcss" = xyes; then
 	if test x"$enable_dvd" != xyes; then
 		AC_MSG_ERROR([Cannot enable dvdcss without dvd!])
 	fi
 fi
 
-
-
-#AC_SUBST(DAEMON_ARGS)
 
 #
 # POSIX Threads
@@ -199,15 +212,33 @@ fi
 
 PKG_CHECK_MODULES(ALSA, [alsa], ,
 	AC_MSG_ERROR('Unable to find libasound. Please make sure library and header files are installed.'))
+AC_MSG_CHECKING([if we have SND_PCM_TSTAMP_TYPE_MONOTONIC on asoundlib.h])
+AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
+	#include "alsa/asoundlib.h"
+	const int x = SND_PCM_TSTAMP_TYPE_MONOTONIC;
+]])], [
+	AC_DEFINE([HAVE_SND_PCM_TSTAMP_TYPE_MONOTONIC], 1,
+		[Define to 1 if we have SND_PCM_TSTAMP_TYPE_MONOTONIC on asoundlib.h])
+	AC_MSG_RESULT([yes])
+], [
+	AC_MSG_RESULT([no])
+])
 
-PKG_CHECK_MODULES(LIBAVUTIL, [libavutil], ,
-	AC_MSG_ERROR('Unable to find libavutil. Please make sure library and header files are installed.'))
-PKG_CHECK_MODULES(LIBAVFORMAT, [libavformat], ,
-	AC_MSG_ERROR('Unable to find libavformat. Please make sure library and header files are installed.'))
-PKG_CHECK_MODULES(LIBAVCODEC, [libavcodec], ,
-	AC_MSG_ERROR('Unable to find libavcodec. Please make sure library and header files are installed.'))
-PKG_CHECK_MODULES(LIBAVFILTER, [libavfilter], ,
-	AC_MSG_ERROR('Unable to find libavfilter. Please make sure library and header files are installed.'))
+
+if test x"$with_system_ffmpeg" = xno; then
+	CFLAGS="${CFLAGS} -I../third_party/ffmpeg"
+else
+	PKG_CHECK_MODULES(LIBAVUTIL, [libavutil], ,
+		AC_MSG_ERROR('Unable to find libavutil. Please make sure library and header files are installed.'))
+	PKG_CHECK_MODULES(LIBAVFORMAT, [libavformat], ,
+		AC_MSG_ERROR('Unable to find libavformat. Please make sure library and header files are installed.'))
+	PKG_CHECK_MODULES(LIBAVCODEC, [libavcodec], ,
+		AC_MSG_ERROR('Unable to find libavcodec. Please make sure library and header files are installed.'))
+	PKG_CHECK_MODULES(LIBAVFILTER, [libavfilter], ,
+		AC_MSG_ERROR('Unable to find libavfilter. Please make sure library and header files are installed.'))
+	PKG_CHECK_MODULES(LIBSWSCALE, [libswscale], ,
+		AC_MSG_ERROR('Unable to find libswscale. Please make sure library and header files are installed.'))
+fi
 
 PKG_CHECK_MODULES(SQLITE3, [sqlite3], ,
 	AC_MSG_ERROR('Unable to find SQLite3. Please make sure library and header files are installed.'))
@@ -260,8 +291,8 @@ fi
 
 # web remote dependencies
 if test x"$enable_webremote" = xyes; then
-	PKG_CHECK_MODULES(LIBWEBSOCKETS, libwebsockets, ,
-		AC_MSG_ERROR('Unable to find libwebsockets'))
+	PKG_CHECK_MODULES(LIBWEBSOCKETS, [libwebsockets >= 3.0.0], ,
+		AC_MSG_ERROR('Unable to find libwebsockets-3.0.0'))
 fi
 
 #
@@ -307,8 +338,12 @@ fi
 #
 # libtorrent
 #
-PKG_CHECK_MODULES(LIBTORRENT, [libtorrent-rasterbar >= 1.1.5], ,
-	AC_MSG_ERROR('Unable to find libtorrent. Please make sure library and header files are installed.'))
+if test x"$with_system_libtorrent" = xno; then
+	AC_CONFIG_SUBDIRS([third_party/libtorrent-rasterbar])
+else
+	PKG_CHECK_MODULES(LIBTORRENT, [libtorrent-rasterbar >= 1.1.5], ,
+		AC_MSG_ERROR('Unable to find libtorrent. Please make sure library and header files are installed.'))
+fi
 
 
 #
@@ -316,43 +351,90 @@ PKG_CHECK_MODULES(LIBTORRENT, [libtorrent-rasterbar >= 1.1.5], ,
 #
 PKG_CHECK_MODULES(CURL, [libcurl], ,
 	AC_MSG_ERROR('Unable to find libcurl. Please make sure library and header files are installed.'))
-
 AC_DEFINE([USE_CURL], 1, [Define to 1 to use libcurl])
 
 flags2ycm()
 {
 	FLAGS_ARRAY=""
-
 	while [[ "$#" != 0 ]]; do
 		FLAGS_ARRAY="${FLAGS_ARRAY}'${1}',"$'\n'
 		shift
 	done
-
 	echo "${FLAGS_ARRAY}"
 }
 
-YCM_FLAGS="$(flags2ycm ${CFLAGS} \
-	${PTHREAD_CFLAGS} \
-	${DIRECTFB_CFLAGS} \
-	${ALSA_CFLAGS} \
-	${PANGOCAIRO_CFLAGS} \
-	${CURL_CFLAGS} \
-	${LIBAVUTIL_CFLAGS} \
-	${LIBAVFORMAT_CFLAGS} \
-	${LIBAVCODEC_CFLAGS} \
-	${LIBAVFILTER_CFLAGS} \
-	${GLIB_CFLAGS} \
-	${GIO_CFLAGS} \
-	${LIBINPUT_CFLAGS} \
-	${SQLITE3_CFLAGS})"
-
-
+# CFLAGS for YouCompleteMe.
+# TODO: How to support C and C++ in one config?
+YCM_FLAGS="${PTHREAD_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${DIRECTFB_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${ALSA_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${PANGOCAIRO_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${CURL_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${LIBAVUTIL_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${LIBAVFORMAT_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${LIBAVCODEC_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${LIBAVFILTER_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${GLIB_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${GIO_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${LIBINPUT_CFLAGS}"
+YCM_FLAGS="${YCM_FLAGS} ${SQLITE3_CFLAGS})"
+YCM_FLAGS="$(flags2ycm ${YCM_FLAGS})"
 AC_SUBST(PREFIX)
 AC_SUBST(YCM_FLAGS)
 AM_SUBST_NOTMAKE(YCM_FLAGS)
 
+# generate files
 AC_CONFIG_FILES([Makefile
                  src/Makefile
 		 src/.ycm_extra_conf.py
 		 src/mediabox.service])
+
 AC_OUTPUT
+
+# configure bundled ffmpeg
+if test x"$with_system_ffmpeg" = xno; then
+	AS_ECHO
+	AS_ECHO "Configuring ffmpeg..."
+	AS_ECHO
+
+	FF_CONFIG_SCRIPT="cd third_party/ffmpeg && ./configure"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-programs"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-doc"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-manpages"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-htmlpages"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-podpages"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-txtpages"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-libxcb"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-libxcb-shm"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-libxcb-xfixes"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-libxcb-shape"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-sdl2"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-xlib"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-encoders"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-muxers"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-devices"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-hwaccels"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-protocols"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-network"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-postproc"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-avdevice"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-bsfs"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-filters"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --enable-filter=aresample "
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --enable-filter=aformat"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --enable-filter=null"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-vdpau"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-vaapi"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-vda"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-cuda"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-cuvid"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --disable-shared"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --enable-protocol=file"
+	FF_CONFIG_SCRIPT="${FF_CONFIG_SCRIPT} --prefix=${prefix}"
+
+	AS_ECHO "${FF_CONFIG_SCRIPT}"
+	AS_ECHO
+	(
+		eval "${FF_CONFIG_SCRIPT}"
+	)
+fi

@@ -65,7 +65,7 @@ struct piece_status
 };
 
 
-typedef std::queue<boost::shared_ptr<struct piece_header>> piece_queue_t;
+typedef std::queue<boost::shared_ptr<struct piece_header> > piece_queue_t;
 
 
 LISTABLE_STRUCT(avbox_torrent,

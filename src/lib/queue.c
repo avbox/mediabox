@@ -402,7 +402,8 @@ avbox_queue_new(const size_t sz)
 
 	/* initialize pre-allocated node pool */
 	if (sz) {
-		for (size_t i = 0; i < sz; i++) {
+		size_t i;
+		for (i = 0; i < sz; i++) {
 			struct avbox_queue_node * const node =
 				malloc(sizeof(struct avbox_queue_node));
 			if (node != NULL) {
