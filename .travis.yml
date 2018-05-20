@@ -1,5 +1,5 @@
 language: C
-script: ./autogen.sh && ./configure --enable-debug --enable-x11 --enable-realtime --enable-webremote --without-system-libtorrent --without-system-ffmpeg --without-system-libwebsockets --disable-shared && make
+script: ./autogen.sh && ./configure --enable-debug --enable-x11 --enable-realtime --enable-webremote --without-system-libtorrent --without-system-ffmpeg --without-system-libwebsockets && make
 
 before_install:
 - sudo apt-get update -qq

@@ -13,7 +13,6 @@ AM_SHARED_FLAGS = \
 	@GIO_CFLAGS@ \
 	@SQLITE3_CFLAGS@ \
 	@LIBUDEV_CFLAGS@ \
-	@LIBDVDCSS_CFLAGS@ \
 	@LIBDVDNAV_CFLAGS@ \
 	@EGL_CFLAGS@
 
@@ -30,7 +29,6 @@ AM_LDFLAGS = -lz -lm \
 	@GIO_LIBS@ \
 	@SQLITE3_LIBS@ \
 	@LIBUDEV_LIBS@ \
-	@LIBDVDCSS_LIBS@ \
 	@LIBDVDNAV_LIBS@ \
 	@EGL_LIBS@
 
@@ -73,6 +71,8 @@ mediabox_SOURCES = \
 	lib/ui/input.c \
 	lib/ui/input-socket.c \
 	lib/ui/input-tcp.c \
+	lib/torrent_stream.cpp \
+	lib/torrent_in.c \
 	shell.c \
 	mainmenu.c \
 	downloads.c \
@@ -132,7 +132,6 @@ mediabox_CXXFLAGS += -I../third_party/libtorrent-rasterbar/include
 mediabox_LDADD += ../third_party/libtorrent-rasterbar/src/.libs/libtorrent-rasterbar.la
 endif
 
-mediabox_SOURCES += lib/torrent_stream.cpp lib/torrent_in.c
 
 if ENABLE_OPENGL
 mediabox_SOURCES += lib/ui/video-opengl.c
@@ -153,6 +152,8 @@ if WITH_SYSTEM_FFMPEG
 AM_LDFLAGS += @LIBSWSCALE_LIBS@ @LIBAVUTIL_LIBS@ @LIBAVFORMAT_LIBS@ @LIBAVCODEC_LIBS@ @LIBAVFILTER_LIBS@
 AM_CXXFLAGS += @LIBSWSCALE_CFLAGS@ @LIBAVUTIL_CFLAGS@ @LIBAVFORMAT_CFLAGS@ @LIBAVCODEC_CFLAGS@ @LIBAVFILTER_CFLAGS@
 else
+mediabox_CFLAGS += -I../third_party/ffmpeg
+mediabox_CXXFLAGS += -I../third_party/ffmpeg
 mediabox_LDADD += \
 	../third_party/ffmpeg/libswscale/libswscale.a \
 	../third_party/ffmpeg/libavformat/libavformat.a \
@@ -165,10 +166,6 @@ endif
 
 systemddir = /usr/lib/systemd/system
 systemd_DATA = mediabox.service
-
-delugedir = $(datadir)/$(PACKAGE)/deluge
-deluge_DATA = res/deluge/core.conf \
-	res/deluge/auth
 
 mediatombdir = $(datadir)/$(PACKAGE)/mediatomb
 mediatomb_DATA = res/mediatomb/common.js \
