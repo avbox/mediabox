@@ -635,26 +635,24 @@ avbox_drm_egl_init(struct mbv_drv_funcs * const driver,
 	/* create a framebuffer bo */
 	gbm_dev = gbm_create_device(fd);
 
-	#if 1
-	PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display = NULL;
-		get_platform_display = (void *) eglGetProcAddress("eglGetPlatformDisplayEXT");
-	assert(get_platform_display != NULL);
-
-
-	#define EGL_PLATFORM_GBM_KHR              0x31D7
-
+#ifdef HAVE_PFNEGLGETPLATFORMDISPLAYEXTPROC
+	/* get display */
+	#define EGL_PLATFORM_GBM_KHR 0x31D7
+	PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display =
+		(void*)eglGetProcAddress("eglGetPlatformDisplayEXT");
+	ASSERT(get_platform_display != NULL);
 	if ((egl_display = get_platform_display(EGL_PLATFORM_GBM_KHR, (void*) gbm_dev, NULL)) == EGL_NO_DISPLAY) {
 		LOG_PRINT_ERROR("Could not create EGL display!");
 		gbm_device_destroy(gbm_dev);
 		goto end;
 	}
-	#else
+#else
 	/* get display */
 	if ((egl_display = eglGetDisplay((void*) gbm_dev)) == EGL_NO_DISPLAY) {
 		LOG_PRINT_ERROR("Could not create EGL display!");
 		goto end;
 	}
-	#endif
+#endif
 
 	if (eglInitialize(egl_display, &major, &minor) == EGL_FALSE) {
 		LOG_PRINT_ERROR("Could not initialize EGL display!");

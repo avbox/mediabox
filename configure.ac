@@ -380,6 +380,25 @@ if test x"$enable_libdrm" = xyes; then
 	fi
 
 	if test x"${USE_OPENGL}" = xyes; then
+
+		# check that we have PFNEGLGETPLATFORMDISPLAYEXTPROC
+		AC_MSG_CHECKING([if we have PFNEGLGETPLATFORMDISPLAYEXTPROC])
+		AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
+			#include "EGL/egl.h"
+			#include "EGL/eglext.h"
+			int main()
+			{
+				PFNEGLGETPLATFORMDISPLAYEXTPROC dsp =
+					(void*)eglGetProcAddress("eglGetPlatformDisplayEXT");
+				return 0;
+			}
+		]])], [
+			AC_DEFINE([HAVE_PFNEGLGETPLATFORMDISPLAYEXTPROC], 1, [Define to 1 if we have PFNEGLGETPLATFORMDISPLAYEXTPROC])
+			AC_MSG_RESULT([yes])
+		], [
+			AC_MSG_RESULT([no])
+		])
+
 		AC_DEFINE([ENABLE_OPENGL], 1, [Define to 1 to enable OpenGL support])
 		AM_CONDITIONAL(ENABLE_OPENGL, [test xyes = xyes])
 	else
