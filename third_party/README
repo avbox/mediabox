@@ -1,0 +1,3 @@
+libtorrent-rasterbar: git subtree add --squash --prefix third_party/libtorrent-rasterbar https://github.com/arvidn/libtorrent.git libtorrent-1_1_7
+ffmpeg: git subtree add --squash --prefix third_party/ffmpeg https://github.com/ffmpeg/ffmpeg.git n3.3.7
+libwebsockets: git subtree add --squash --prefix third_party/libwebsockets https://github.com/warmcat/libwebsockets.git v3.0-stable

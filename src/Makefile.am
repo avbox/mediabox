@@ -139,9 +139,14 @@ mediabox_SOURCES += lib/ui/video-opengl.c
 endif
 
 if ENABLE_WEBREMOTE
+mediabox_SOURCES += lib/ui/input-web.c
+if WITH_SYSTEM_LIBWEBSOCKETS
 AM_CXXFLAGS += @LIBWEBSOCKETS_CFLAGS@
 AM_LDFLAGS += @LIBWEBSOCKETS_LIBS@
-mediabox_SOURCES += lib/ui/input-web.c
+else
+mediabox_CFLAGS += -I../third_party/libwebsockets/include
+mediabox_LDADD += ../third_party/libwebsockets/lib/libwebsockets.a
+endif
 endif
 
 if WITH_SYSTEM_FFMPEG
