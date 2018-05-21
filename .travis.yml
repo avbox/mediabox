@@ -1,5 +1,23 @@
 language: C
-script: ./autogen.sh && ./configure --enable-debug --enable-x11 --enable-libdrm --enable-directfb --enable-realtime --enable-webremote --without-system-libtorrent --without-system-ffmpeg --without-system-libwebsockets && make
+matrix:
+  include:
+    - env: variant=debug
+    - env: variant=release
+
+script:
+- ./autogen.sh
+- ./configure
+        $(if [[ "${variant}" -eq "debug" ]]; then echo "--enable-debug"; fi)
+        --enable-x11
+        --enable-libdrm
+        --enable-directfb
+        --enable-realtime
+        --enable-ionice
+        --enable-webremote
+        --without-system-libtorrent
+        --without-system-ffmpeg
+        --without-system-libwebsockets
+- make
 
 before_install:
 - sudo apt-get update -qq
