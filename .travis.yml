@@ -1,11 +1,12 @@
 language: C
-script: ./autogen.sh && ./configure --enable-debug --enable-x11 --enable-libdrm --enable-realtime --enable-webremote --without-system-libtorrent --without-system-ffmpeg --without-system-libwebsockets && make
+script: ./autogen.sh && ./configure --enable-debug --enable-x11 --enable-libdrm --enable-directfb --enable-realtime --enable-webremote --without-system-libtorrent --without-system-ffmpeg --without-system-libwebsockets && make
 
 before_install:
 - sudo apt-get update -qq
 - sudo apt-get install libcairo2-dev libpango1.0-dev libasound2-dev libsqlite3-dev libmagic-dev # core deps
 - sudo apt-get install libx11-dev # for X11 video driver
 - sudo apt-get install libegl1-mesa-dev libgbm-dev # for libdrm driver
+- sudo apt-get install libdirectfb-dev # for DirectFB video/input driver
 - sudo apt-get install libboost1.55-all-dev libboost1.55-tools-dev # for bundled libtorrent-rasterbar
 - sudo apt-get install yasm # for bundled ffmpeg
 

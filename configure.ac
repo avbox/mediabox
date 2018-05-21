@@ -268,7 +268,7 @@ PKG_CHECK_MODULES([PANGOCAIRO], [pangocairo], , AC_MSG_ERROR([Unable to find pan
 # directfb
 #
 if test x"$enable_directfb" = xyes; then
-	PKG_CHECK_MODULES(DIRECTFB, [directfb >= 1.4.9], , AC_MSG_ERROR([Unable to find DirectFB.  ${LIBRARY_HINT}]))
+	PKG_CHECK_MODULES(DIRECTFB, [directfb], , AC_MSG_ERROR([Unable to find DirectFB.  ${LIBRARY_HINT}]))
 fi
 
 
