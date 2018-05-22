@@ -2698,8 +2698,10 @@ avbox_player_doseek(struct avbox_player * const inst,
 
 	if (flags & AVBOX_PLAYER_SEEK_CHAPTER) {
 
-		int chapter = 0, nb_chapters = inst->fmt_ctx->nb_chapters;
+		int chapter = 0, chapter_pos = 0, nb_chapters = inst->fmt_ctx->nb_chapters;
 		const int64_t chapter_duration = 60 * 5 * 1000L * 1000L;
+
+		ASSERT(incr == -1 || incr == 1);
 
 		/* find the current chapter */
 		if (nb_chapters == 0) {
@@ -2707,21 +2709,36 @@ avbox_player_doseek(struct avbox_player * const inst,
 			while (p < inst->fmt_ctx->duration) {
 				if (p <= pos) {
 					chapter = nb_chapters;
+					chapter_pos = p;
 				}
 				p += chapter_duration;
 				nb_chapters++;
 			}
+
 			DEBUG_VPRINT(LOG_MODULE, "Current chapter: %i",
 				chapter);
 		} else {
 			for (chapter = 0; chapter < inst->fmt_ctx->nb_chapters; chapter++) {
-				AVChapter *ch = inst->fmt_ctx->chapters[chapter];
+				AVChapter*const ch = inst->fmt_ctx->chapters[chapter];
 				if (av_compare_ts(pos, AV_TIME_BASE_Q,
 					ch->start, ch->time_base) < 0) {
+
 					chapter--;
+					chapter_pos = av_rescale_q(
+						inst->fmt_ctx->chapters[chapter]->start,
+						inst->fmt_ctx->chapters[chapter]->time_base,
+						AV_TIME_BASE_Q);
 					break;
 				}
 			}
+		}
+
+		/* if we're more than 5 seconds into this chapter and we're seeking
+		 * to the previous chapter then increment the chapter number so that
+		 * seeking takes us back to the start of the chapter instead of the
+		 * previous item on the playlist */
+		if (incr == -1 && (pos - chapter_pos) > (5LL * 1000LL * 1000LL)) {
+			chapter++;
 		}
 
 		DEBUG_VPRINT(LOG_MODULE, "Chapter %i of %i",
@@ -3797,6 +3814,12 @@ avbox_player_play(struct avbox_player *inst, const char * const path)
 		LOG_PRINT_ERROR("Could not allocate copy of play path!");
 		return;
 	}
+
+	/* if our local list is not empty then free it first */
+	if (!LIST_EMPTY(&inst->playlist)) {
+		avbox_player_freeplaylist(inst);
+	}
+
 	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_PLAY, path_copy);
 }
 
@@ -3835,7 +3858,15 @@ avbox_player_playlist(struct avbox_player* inst, LIST *playlist, struct avbox_pl
 	}
 
 	/* play the selected item */
-	avbox_player_play(inst, inst->playlist_item->filepath);
+	char * path_copy = NULL;
+	if (inst->playlist_item->filepath != NULL &&
+		(path_copy = strdup(inst->playlist_item->filepath)) == NULL) {
+		LOG_PRINT_ERROR("Could not allocate copy of play path!");
+		return 0;
+	}
+
+	/* send the command to the player thread */
+	avbox_player_sendctl(inst, AVBOX_PLAYERCTL_PLAY, path_copy);
 
 	return 0;
 }
