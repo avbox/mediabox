@@ -612,6 +612,19 @@ alerts_observer_plugin::on_alert(lt::alert const * a)
 			alert->tracker_url(), alert->error.message().c_str());
 	}
 
+	/* peer error */
+	else if (auto alert = lt::alert_cast<lt::peer_error_alert>(a)) {
+		LOG_VPRINT_ERROR("Peer error: %s",
+			alert->error.message().c_str());
+	}
+
+	/* portmap error */
+	else if (auto alert = lt::alert_cast<lt::portmap_error_alert>(a)) {
+		LOG_VPRINT_ERROR("Portmap error (%s): %s",
+			(alert->map_type == 0) ? "NAT-PMP" : "UPnP",
+			alert->error.message().c_str());
+	}
+
 	/* torrent finished */
 	else if (auto alert = lt::alert_cast<lt::torrent_finished_alert>(a)) {
 		struct avbox_torrent * const inst = find_stream(alert->handle);
@@ -669,6 +682,60 @@ alerts_observer_plugin::on_alert(lt::alert const * a)
 				lt::to_hex(alert->info_hash.to_string()).c_str());
 		}
 	}
+
+#ifndef NDEBUG
+	else if (auto alert = lt::alert_cast<lt::external_ip_alert>(a)) {
+		DEBUG_VPRINT(LOG_MODULE, "External IP: %s",
+			alert->external_address.to_string().c_str());
+	}
+
+	else if (auto alert = lt::alert_cast<lt::lsd_peer_alert>(a)) {
+		DEBUG_VPRINT(LOG_MODULE, "LSD Peer alert: %s",
+			alert->message().c_str());
+	}
+
+	else if (auto alert = lt::alert_cast<lt::state_changed_alert>(a)) {
+		DEBUG_VPRINT(LOG_MODULE, "State changed alert: %s",
+			alert->message().c_str());
+	}
+
+	else if (auto alert = lt::alert_cast<lt::torrent_resumed_alert>(a)) {
+		DEBUG_VPRINT(LOG_MODULE, "Torrent resumed alert: %s",
+			alert->message().c_str());
+	}
+
+	else if (auto alert = lt::alert_cast<lt::torrent_checked_alert>(a)) {
+		DEBUG_VPRINT(LOG_MODULE, "Torrent checked: %s",
+			alert->message().c_str());
+	}
+
+	else if (auto alert = lt::alert_cast<lt::file_completed_alert>(a)) {
+		DEBUG_VPRINT(LOG_MODULE, "File completed: %s",
+			alert->message().c_str());
+	}
+
+	else if (lt::alert_cast<lt::cache_flushed_alert>(a)) {
+		DEBUG_PRINT(LOG_MODULE, "Cache flushed");
+	}
+
+	else if (auto alert = lt::alert_cast<lt::peer_ban_alert>(a)) {
+		DEBUG_VPRINT(LOG_MODULE, "Peer ban alert: %s",
+			alert->message().c_str());
+	}
+
+	else if (lt::alert_cast<lt::block_downloading_alert>(a) != NULL ||
+		lt::alert_cast<lt::peer_snubbed_alert>(a) != NULL ||
+		lt::alert_cast<lt::peer_unsnubbed_alert>(a) != NULL ||
+		lt::alert_cast<lt::block_timeout_alert>(a) != NULL ||
+		lt::alert_cast<lt::incoming_connection_alert>(a) != NULL) {
+		/* ignore these alerts */
+	}
+
+	else {
+		DEBUG_VPRINT(LOG_MODULE, "Alert received: %i",
+			a->type());
+	}
+#endif
 }
 
 
