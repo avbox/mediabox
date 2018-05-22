@@ -274,7 +274,7 @@ avbox_webinput_init(void)
 	}
 
 	/* create listener thread */
-	if ((web_server_thread = avbox_thread_new(NULL, NULL, 0, 0)) == NULL) {
+	if ((web_server_thread = avbox_thread_new(NULL, NULL, AVBOX_THREAD_REALTIME, -20)) == NULL) {
 		LOG_PRINT_ERROR("Could not create web server thread!");
 		lws_context_destroy(web_server_ctx);
 		free(remote_html);
