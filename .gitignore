@@ -39,3 +39,5 @@ depcomp
 ar-lib
 libtool
 ltmain.sh
+test-driver
+test/.deps/

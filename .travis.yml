@@ -18,6 +18,7 @@ script:
         --without-system-ffmpeg
         --without-system-libwebsockets
 - make
+- make check
 
 before_install:
 - sudo apt-get update -qq

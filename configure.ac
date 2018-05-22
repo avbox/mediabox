@@ -475,7 +475,8 @@ AM_SUBST_NOTMAKE(YCM_FLAGS)
 AC_CONFIG_FILES([Makefile
                  src/Makefile
 		 src/.ycm_extra_conf.py
-		 src/mediabox.service])
+		 src/mediabox.service
+		 test/Makefile])
 AC_OUTPUT
 
 

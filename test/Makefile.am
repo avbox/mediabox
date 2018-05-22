@@ -1,0 +1,40 @@
+AUTOMAKE_OPTIONS = subdir-objects
+
+AM_SHARED_FLAGS = \
+	-DDEBUG_MEMORY_POOLS \
+	-DDATADIR="$(datadir)" \
+	-DLOCALSTATEDIR="$(localstatedir)" \
+	@CFLAGS@ \
+	@PTHREAD_CFLAGS@ \
+	@ALSA_CFLAGS@ \
+	@PANGOCAIRO_CFLAGS@ \
+	@CURL_CFLAGS@ \
+	@GLIB_CFLAGS@ \
+	@GIO_CFLAGS@ \
+	@SQLITE3_CFLAGS@ \
+	@LIBUDEV_CFLAGS@ \
+	@LIBDVDNAV_CFLAGS@ \
+	@EGL_CFLAGS@
+
+AM_CFLAGS = -std=c99 -Wall -D_GNU_SOURCE $(AM_SHARED_FLAGS)
+AM_CXXFLAGS = -std=c++11 -Wall $(AM_SHARED_FLAGS)
+
+AM_LDFLAGS = -lz -lm \
+	@LIBS@ \
+	@PTHREAD_LIBS@ \
+	@ALSA_LIBS@ \
+	@PANGOCAIRO_LIBS@ \
+	@CURL_LIBS@ \
+	@GLIB_LIBS@ \
+	@GIO_LIBS@ \
+	@SQLITE3_LIBS@ \
+	@LIBUDEV_LIBS@ \
+	@LIBDVDNAV_LIBS@ \
+	@EGL_LIBS@
+
+noinst_PROGRAMS = run-tests
+TESTS = run-tests
+
+run_tests_CFLAGS = $(AM_CFLAGS)
+run_tests_CXXFLAGS = $(AM_CXXFLAGS)
+run_tests_SOURCES = main.c
