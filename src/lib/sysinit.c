@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -37,12 +37,7 @@
 /* TODO: Do this at configure time */
 #define LINUX 1
 
-#include "debug.h"
-#include "log.h"
-#include "process.h"
-#include "file_util.h"
-#include "settings.h"
-#include "proc_util.h"
+#include <libavbox/avbox.h>
 
 
 #define UDEVD_BIN	"/sbin/udevd"

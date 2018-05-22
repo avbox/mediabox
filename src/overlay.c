@@ -25,7 +25,7 @@
 
 #define LOG_MODULE "overlay"
 
-#include "lib/avbox.h"
+#include <libavbox/avbox.h>
 #include "library.h"
 #include "overlay.h"
 

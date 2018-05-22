@@ -1,5 +1,5 @@
 #ifdef HAVE_CONFIG_H
-#include "../../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <errno.h>
@@ -22,12 +22,7 @@
 
 #define LOG_MODULE "video-opengl"
 
-#include "../debug.h"
-#include "../log.h"
-#include "../thread.h"
-#include "../string_util.h"
-#include "video.h"
-#include "video-drv.h"
+#include <libavbox/avbox.h>
 
 
 /* why does adding the version directive causes the shader to

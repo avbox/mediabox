@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 
 #ifdef ENABLE_DVD
@@ -28,9 +28,8 @@
 
 #define LOG_MODULE "ffmpegutil"
 
-#include "log.h"
-#include "debug.h"
-#include "ffmpeg_util.h"
+#include <libavbox/avbox.h>
+
 
 /**
  * Initialize ffmpeg's filter graph

@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../../config.h"
+#       include <libavbox/config.h>
 #endif
 
 #include <errno.h>
@@ -37,12 +37,7 @@
 
 #define LOG_MODULE "video-software"
 
-#include "../log.h"
-#include "../debug.h"
-#include "../linkedlist.h"
-#include "../ffmpeg_util.h"
-#include "video-drv.h"
-#include "video.h"
+#include <libavbox/avbox.h>
 
 
 /* define to 1 if swap_buffers will never

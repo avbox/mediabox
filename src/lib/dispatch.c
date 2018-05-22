@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <assert.h>
@@ -33,13 +33,7 @@
 
 #define LOG_MODULE "dispatch"
 
-#include "log.h"
-#include "debug.h"
-#include "linkedlist.h"
-#include "queue.h"
-#include "dispatch.h"
-#include "compiler.h"
-#include "timers.h"
+#include <libavbox/avbox.h>
 
 
 #define AVBOX_MESSAGE_POOL_SIZE		(10)

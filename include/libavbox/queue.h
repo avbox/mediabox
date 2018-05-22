@@ -21,6 +21,7 @@
 #ifndef __AVBOX_QUEUE_H__
 #define __AVBOX_QUEUE_H__
 
+#include <inttypes.h>
 
 /**
  * Represents a queue object.

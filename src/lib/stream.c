@@ -20,7 +20,7 @@
  */
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 
 #include <stdio.h>
@@ -36,11 +36,7 @@
 
 #define LOG_MODULE "stream"
 
-#include "debug.h"
-#include "log.h"
-#include "compiler.h"
-#include "linkedlist.h"
-#include "math_util.h"
+#include <libavbox/avbox.h>
 
 
 #define MB 			(1024 * 1024)

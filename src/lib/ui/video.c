@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../../config.h"
+#	include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -28,34 +28,12 @@
 #include <math.h>
 #include <pango/pangocairo.h>
 
-#include "../ffmpeg_util.h"
-
 #define LOG_MODULE "video"
 
-#include "video.h"
-#include "video-drv.h"
-#include "input.h"
-#include "../debug.h"
-#include "../linkedlist.h"
-#include "../log.h"
-#include "../dispatch.h"
-#include "../delegate.h"
+#include <libavbox/avbox.h>
 
 
 #define FORCE_FULL_SCREEN_REPAINTS 1
-
-#ifdef ENABLE_DIRECTFB
-#	include "video-directfb.h"
-#endif
-#ifdef ENABLE_VC4
-#	include "video-vc4.h"
-#endif
-#ifdef ENABLE_LIBDRM
-#	include "video-drm.h"
-#endif
-#ifdef ENABLE_X11
-#	include "video-x11.h"
-#endif
 
 #define ALIGNED(addr, bytes) \
     (((uintptr_t)(const void *)(addr)) % (bytes) == 0)

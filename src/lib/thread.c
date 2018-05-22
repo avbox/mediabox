@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <errno.h>
@@ -31,15 +31,7 @@
 
 #define LOG_MODULE "thread"
 
-#include "log.h"
-#include "debug.h"
-#include "dispatch.h"
-#include "linkedlist.h"
-#include "delegate.h"
-#include "time_util.h"
-#include "thread.h"
-#include "compiler.h"
-#include "queue.h"
+#include <libavbox/avbox.h>
 
 
 #define N_THREADS (3)

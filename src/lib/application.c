@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <errno.h>
@@ -37,25 +37,7 @@
 
 #define LOG_MODULE "application"
 
-#include "ui/video.h"
-#include "ui/input.h"
-#include "audio.h"
-#include "log.h"
-#include "debug.h"
-#include "dispatch.h"
-#include "thread.h"
-#include "bluetooth.h"
-#include "application.h"
-#include "settings.h"
-#include "timers.h"
-#include "process.h"
-#include "sysinit.h"
-#include "queue.h"
-#include "su.h"
-#ifdef ENABLE_IONICE
-#include "ionice.h"
-#endif
-#include "torrent_stream.h"
+#include <libavbox/avbox.h>
 
 
 LISTABLE_STRUCT(avbox_application_subscriber,

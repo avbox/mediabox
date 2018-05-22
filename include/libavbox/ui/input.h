@@ -25,6 +25,23 @@
 #include <pthread.h>
 #include "../linkedlist.h"
 #include "../dispatch.h"
+#include "input-tcp.h"
+#include "input-socket.h"
+
+#ifdef ENABLE_DIRECTFB
+#	include "input-directfb.h"
+#endif
+#ifdef ENABLE_LIBINPUT
+#	include "input-libinput.h"
+#endif
+#ifdef ENABLE_BLUETOOTH
+#	include "../bluetooth.h"
+#	include "input-bluetooth.h"
+#endif
+#ifdef ENABLE_WEBREMOTE
+#	include "input-web.h"
+#endif
+
 
 #define MBI_RECIPIENT_ANY	(-1)
 

@@ -25,9 +25,9 @@ endif
 # rules for bundled libraries
 #
 ffmpeg-all:
-	cd third_party/ffmpeg && $(MAKE)
+	cd third_party/ffmpeg && $(MAKE) V=1
 ffmpeg-clean:
-	cd third_party/ffmpeg && $(MAKE) clean
+	cd third_party/ffmpeg && $(MAKE) V=1 clean
 libtorrent-all:
 	cd third_party/libtorrent-rasterbar && $(MAKE)
 libtorrent-clean:

@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#	include <libavbox/config.h>
 #endif
 #ifdef ENABLE_BLUETOOTH
 #include <stdlib.h>
@@ -42,12 +42,7 @@
 
 #define LOG_MODULE "bluetooth"
 
-#include "linkedlist.h"
-#include "queue.h"
-#include "debug.h"
-#include "log.h"
-#include "process.h"
-#include "bluetooth.h"
+#include <libavbox/avbox.h>
 
 
 #define BLUETOOTHD_BIN "/usr/libexec/bluetooth/bluetoothd"

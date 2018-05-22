@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -28,7 +28,7 @@
 
 #define LOG_MODULE "url-util"
 
-#include "avbox.h"
+#include <libavbox/avbox.h>
 
 
 struct MemoryStruct

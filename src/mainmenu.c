@@ -30,15 +30,9 @@
 
 #define LOG_MODULE "mainmenu"
 
-#include "lib/log.h"
-#include "lib/debug.h"
-#include "lib/dispatch.h"
-#include "lib/bluetooth.h"
-#include "lib/ui/video.h"
-#include "lib/ui/listview.h"
-#include "lib/ui/input.h"
+#include <libavbox/avbox.h>
+
 #include "browser.h"
-#include "lib/su.h"
 #include "shell.h"
 #include "about.h"
 #include "downloads.h"
@@ -56,7 +50,7 @@ struct mbox_mainmenu
 	struct mbox_browser *library;
 	struct mbox_about *about;
 	struct mbox_downloads *downloads;
-#ifdef ENABLE_BLUETOOTH
+#ifdef ENABLE_A2DP
 	struct mbox_a2dp *a2dp;
 #endif
 };
@@ -139,7 +133,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 						}
 					}
 				}
-#ifdef ENABLE_BLUETOOTH
+#ifdef ENABLE_A2DP
 			} else if (!strcmp("A2DP", selected)) {
 				DEBUG_PRINT("mainmenu", "Selected bluetooth audio");
 
@@ -203,7 +197,7 @@ mbox_mainmenu_messagehandler(void *context, struct avbox_message *msg)
 
 				inst->downloads = NULL;
 			}
-#ifdef ENABLE_BLUETOOTH
+#ifdef ENABLE_A2DP
 			else if (payload == inst->a2dp) {
 				DEBUG_PRINT("mainmenu", "Destroying a2dp window");
 				ASSERT(inst->a2dp != NULL);
@@ -284,7 +278,7 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	int window_height, window_width;
 	int n_entries = 5;
 
-#ifdef ENABLE_BLUETOOTH
+#ifdef ENABLE_A2DP
 	if (avbox_bluetooth_ready()) {
 		n_entries++;
 	}
@@ -351,13 +345,13 @@ mbox_mainmenu_new(struct avbox_object *notify_object)
 	inst->library = NULL;
 	inst->about = NULL;
 	inst->downloads = NULL;
-#ifdef ENABLE_BLUETOOTH
+#ifdef ENABLE_A2DP
 	inst->a2dp = NULL;
 #endif
 
 	/* populate the list */
 	if (avbox_listview_additem(inst->menu, "BROWSE MEDIA", "LIB") == -1 ||
-#ifdef ENABLE_BLUETOOTH
+#ifdef ENABLE_A2DP
 		(avbox_bluetooth_ready() && avbox_listview_additem(inst->menu, "BLUETOOTH AUDIO", "A2DP") == -1) ||
 #endif
 		avbox_listview_additem(inst->menu, "FILE TRANSFERS", "DOWN") == -1 ||

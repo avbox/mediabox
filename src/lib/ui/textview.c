@@ -25,9 +25,7 @@
 
 #define LOG_MODULE "textview"
 
-#include "video.h"
-#include "../log.h"
-#include "../debug.h"
+#include <libavbox/avbox.h>
 
 
 struct mb_ui_textview

@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 
 #include <stdlib.h>
@@ -35,10 +35,8 @@
 
 #define LOG_MODULE "settings"
 
-#include "log.h"
-#include "debug.h"
-#include "file_util.h"
-#include "db_util.h"
+#include <libavbox/avbox.h>
+
 
 #define DEFAULT_HOSTNAME	("mediabox-v0")
 

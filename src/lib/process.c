@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <stdio.h>
@@ -37,21 +37,7 @@
 
 #define LOG_MODULE "process"
 
-#include "debug.h"
-#include "log.h"
-#include "linkedlist.h"
-#include "timers.h"
-#include "su.h"
-#include "process.h"
-#include "math_util.h"
-#include "file_util.h"
-#include "delegate.h"
-#include "thread.h"
-
-
-#ifdef ENABLE_IONICE
-#include "ionice.h"
-#endif
+#include <libavbox/avbox.h>
 
 
 struct avbox_process;

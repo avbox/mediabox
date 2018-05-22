@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../../config.h"
+#       include <libavbox/config.h>
 #endif
 
 #define HAVE_MALLOC_TRIM	(1)	/* TODO: Check for this on configure */
@@ -44,8 +44,8 @@
 
 #define LOG_MODULE "player"
 
-#include "../avbox.h"
-#include "player_p.h"
+#include <libavbox/avbox.h>
+#include <libavbox/ui/player_p.h>
 
 #ifdef ENABLE_MMAL
 #	include "mmaldecode.h"

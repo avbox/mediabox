@@ -21,8 +21,7 @@
 #ifndef __MB_LIBRARY_H__
 #define __MB_LIBRARY_H__
 
-#include "lib/ui/video.h"
-
+#include <libavbox/dispatch.h>
 
 struct mbox_browser;
 

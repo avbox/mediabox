@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../../config.h"
+#       include <libavbox/config.h>
 #endif
 
 #include <errno.h>
@@ -40,18 +40,7 @@
 
 #define LOG_MODULE "video-drm"
 
-#include "../log.h"
-#include "../debug.h"
-#include "../linkedlist.h"
-#include "video-drv.h"
-#include "video-software.h"
-
-#ifdef ENABLE_OPENGL
-#	include <EGL/egl.h>
-#	include <EGL/eglext.h>
-#	include <gbm.h>
-#	include "video-opengl.h"
-#endif
+#include <libavbox/avbox.h>
 
 
 struct mbv_drm_dev;

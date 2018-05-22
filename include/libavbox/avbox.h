@@ -22,7 +22,7 @@
 #define __AVBOX_H__
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#	include "config.h"
 #endif
 
 
@@ -31,9 +31,12 @@
 #include "queue.h"
 #include "timers.h"
 #include "dispatch.h"
+#include "process.h"
 #include "ui/video.h"
 #include "ui/input.h"
 #include "ui/player.h"
+#include "ui/listview.h"
+#include "ui/progressview.h"
 
 #include "su.h"
 #include "time_util.h"
@@ -50,12 +53,21 @@
 #include "thread.h"
 #include "stopwatch.h"
 #include "syncarg.h"
+#include "volume.h"
+#include "settings.h"
+#include "sysinit.h"
 #include "file_util.h"
 #include "string_util.h"
 #include "url_util.h"
+#include "db_util.h"
+#include "proc_util.h"
+#include "iface_util.h"
 
 #ifdef ENABLE_DVD
 #	include "dvdio.h"
+#endif
+#ifdef ENABLE_IONICE
+#	include "ionice.h"
 #endif
 
 #include "torrent_stream.h"

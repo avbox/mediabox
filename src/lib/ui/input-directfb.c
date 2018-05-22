@@ -24,9 +24,7 @@
 
 #define LOG_MODULE "input"
 
-#include "input.h"
-#include "../debug.h"
-#include "../log.h"
+#include <libavbox/avbox.h>
 
 
 extern IDirectFB *dfb;

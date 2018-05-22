@@ -32,10 +32,7 @@
 
 #define LOG_MODULE "about"
 
-#include "lib/debug.h"
-#include "lib/dispatch.h"
-#include "lib/ui/video.h"
-#include "lib/ui/input.h"
+#include <libavbox/avbox.h>
 
 
 struct mbox_about

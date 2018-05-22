@@ -27,14 +27,7 @@
 
 #define LOG_MODULE "ui-menu"
 
-#include "../debug.h"
-#include "../log.h"
-#include "../linkedlist.h"
-#include "../dispatch.h"
-#include "video.h"
-#include "input.h"
-#include "listview.h"
-
+#include <libavbox/avbox.h>
 
 #define FONT_PADDING (3)
 

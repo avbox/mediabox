@@ -28,7 +28,7 @@
 #	include <libudev.h>
 #endif
 
-#include "lib/linkedlist.h"
+#include <libavbox/linkedlist.h>
 
 
 LISTABLE_STRUCT(mbox_library_dirent,

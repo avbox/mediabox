@@ -34,10 +34,7 @@
 
 #define LOG_MODULE		"discovery"
 
-#include "lib/log.h"
-#include "lib/debug.h"
-#include "lib/timers.h"
-#include "lib/iface_util.h"
+#include <libavbox/avbox.h>
 
 #define MB_ANNOUNCE_INTERVAL  	(10)
 #define MB_ANNOUNCE_PORT	(49550)

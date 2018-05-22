@@ -8,12 +8,7 @@
 
 #define LOG_MODULE "video-x11"
 
-#include "../debug.h"
-#include "../log.h"
-#include "../thread.h"
-#include "video.h"
-#include "video-drv.h"
-#include "video-opengl.h"
+#include <libavbox/avbox.h>
 
 
 /* X11 driver */

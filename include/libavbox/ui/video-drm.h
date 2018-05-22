@@ -21,6 +21,13 @@
 #ifndef __MB_VIDEO_DRM_H__
 #define __MB_VIDEO_DRM_H__
 
+#ifdef ENABLE_OPENGL
+#	include <EGL/egl.h>
+#	include <EGL/eglext.h>
+#	include <gbm.h>
+#	include "video-opengl.h"
+#endif
+
 
 void
 mbv_drm_initft(struct mbv_drv_funcs * const funcs);

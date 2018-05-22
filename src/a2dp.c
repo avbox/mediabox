@@ -31,12 +31,7 @@
 
 #define LOG_MODULE "a2dp"
 
-#include "lib/debug.h"
-#include "lib/dispatch.h"
-#include "lib/bluetooth.h"
-#include "lib/process.h"
-#include "lib/ui/video.h"
-#include "lib/ui/input.h"
+#include <libavbox/avbox.h>
 
 #define BLUEALSA_APLAY  "/usr/bin/bluealsa-aplay"
 

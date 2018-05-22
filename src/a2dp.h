@@ -20,7 +20,7 @@
 #ifndef __AVBOX_A2DP_H__
 #define __AVBOX_A2DP_H__
 
-#include "lib/dispatch.h"
+#include <libavbox/dispatch.h>
 
 
 struct mbox_a2dp;

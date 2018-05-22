@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <stdint.h>
@@ -33,10 +33,7 @@
 
 #define LOG_MODULE "input-socket"
 
-#include "input.h"
-#include "input-socket.h"
-#include "../debug.h"
-#include "../log.h"
+#include <libavbox/avbox.h>
 
 
 #define STRINGIZE2(x) #x

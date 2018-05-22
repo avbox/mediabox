@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 
 #include <stdlib.h>
@@ -35,9 +35,8 @@
 
 #define LOG_MODULE "db_util"
 
-#include "log.h"
-#include "debug.h"
-#include "file_util.h"
+#include <libavbox/avbox.h>
+
 
 char *
 avbox_dbutil_getdbfile(const char * const filename)

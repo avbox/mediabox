@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 
 #include <stdlib.h>
@@ -38,7 +38,7 @@
 #include <arpa/inet.h>
 #include <dirent.h>
 
-#include "iface_util.h"
+#include <libavbox/iface_util.h>
 
 char*
 avbox_ifaceutil_getip(const char*const iface_name)

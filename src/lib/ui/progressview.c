@@ -23,9 +23,7 @@
 #include <assert.h>
 #include <errno.h>
 
-#include "video.h"
-#include "../log.h"
-#include "../debug.h"
+#include <libavbox/avbox.h>
 
 
 struct avbox_progressview

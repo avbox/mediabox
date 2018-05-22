@@ -20,7 +20,8 @@
 
 #ifndef __MB_MAINMENU_H__
 #define __MB_MAINMENU_H__
-#include "lib/dispatch.h"
+
+#include <libavbox/dispatch.h>
 
 struct mbox_mainmenu;
 

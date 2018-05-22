@@ -28,21 +28,7 @@
 
 #define LOG_MODULE "shell"
 
-#include "lib/ui/video.h"
-#include "lib/ui/progressview.h"
-#include "lib/ui/player.h"
-#include "lib/ui/input.h"
-#include "lib/su.h"
-#include "lib/timers.h"
-#include "lib/debug.h"
-#include "lib/log.h"
-#include "lib/volume.h"
-#include "lib/dispatch.h"
-#include "lib/application.h"
-#include "lib/settings.h"
-#include "lib/thread.h"
-#include "lib/string_util.h"
-#include "lib/iface_util.h"
+#include <libavbox/avbox.h>
 #include "mainmenu.h"
 #include "discovery.h"
 #include "downloads-backend.h"

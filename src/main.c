@@ -28,7 +28,7 @@
 #include <assert.h>
 #include <unistd.h>
 
-#include "lib/application.h"
+#include <libavbox/avbox.h>
 #include "shell.h"
 
 #define WORKDIR  "/var/lib/mediabox"

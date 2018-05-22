@@ -28,12 +28,8 @@
 
 #define LOG_MODULE "video-dfb"
 
-#include "../debug.h"
-#include "../log.h"
-#include "../compiler.h"
-#include "../su.h"
-#include "video.h"
-#include "video-drv.h"
+#include <libavbox/avbox.h>
+
 
 /* #define DEBUG_MEMORY */
 #define DEFAULT_OPACITY     (MBV_DEFAULT_OPACITY)

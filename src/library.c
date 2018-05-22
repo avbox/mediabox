@@ -43,20 +43,8 @@
 
 #define LOG_MODULE "library"
 
-#include "lib/log.h"
-#include "lib/debug.h"
-#include "lib/process.h"
-#include "lib/iface_util.h"
-#include "lib/linkedlist.h"
-#include "lib/proc_util.h"
-#include "lib/file_util.h"
-#include "lib/db_util.h"
+#include <libavbox/avbox.h>
 #include "library.h"
-#include "lib/delegate.h"
-#include "lib/thread.h"
-#include "lib/string_util.h"
-#include "lib/bluetooth.h"
-#include "lib/application.h"
 
 
 

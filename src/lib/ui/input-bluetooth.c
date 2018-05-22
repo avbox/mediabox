@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../../config.h"
+#	include <libavbox/avbox.h>
 #endif
 #ifdef ENABLE_BLUETOOTH
 #include <stdlib.h>
@@ -42,13 +42,7 @@
 
 #define LOG_MODULE "input-bluetooth"
 
-#include "input.h"
-#include "input-socket.h"
-#include "../linkedlist.h"
-#include "../debug.h"
-#include "../log.h"
-#include "../process.h"
-#include "../bluetooth.h"
+#include <libavbox/avbox.h>
 
 
 static int sockfd = -1;

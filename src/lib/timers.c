@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <stdio.h>
@@ -32,12 +32,7 @@
 
 #define LOG_MODULE "timers"
 
-#include "timers.h"
-#include "time_util.h"
-#include "linkedlist.h"
-#include "debug.h"
-#include "input.h"
-#include "dispatch.h"
+#include <libavbox/avbox.h>
 
 
 /**

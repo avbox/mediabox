@@ -2,7 +2,7 @@ AC_PREREQ([2.69])
 AC_INIT([mediabox], [0.6], [https://github.com/avbox/mediabox/])
 
 AC_CONFIG_MACRO_DIR([m4])
-AC_CONFIG_HEADERS(src/config.h)
+AC_CONFIG_HEADERS(include/libavbox/config.h)
 AC_CONFIG_SRCDIR(src/main.c)
 AC_CONFIG_MACRO_DIR(m4)
 AC_COPYRIGHT([Copyright (C) 2016-2018 Fernando Rodriguez])
@@ -117,6 +117,19 @@ AC_ARG_ENABLE([bluetooth], [Define to 1 to enable Bluetooth support])
 AM_CONDITIONAL([ENABLE_BLUETOOTH], [test x$enable_bluetooth = xyes])
 if test x"$enable_bluetooth" = xyes; then
 	AC_DEFINE([ENABLE_BLUETOOTH], 1, [Define to 1 to enable Bluetooth support])
+fi
+
+
+#
+# --enable-a2dp
+#
+AC_ARG_ENABLE([a2dp], [Define to 1 to enable A2DP (Bluetooth Speaker) support])
+AM_CONDITIONAL([ENABLE_A2DP], [test x$enable_a2dp = xyes])
+if test x"$enable_a2dp" = xyes; then
+	AC_DEFINE([ENABLE_A2DP], 1, [Define to 1 to enable A2DP (Bluetooth Speaker) support])
+	if test x"$enable_bluetooth" != xyes; then
+		AC_MSG_ERROR([A2DP requires Bluetooth support. Please add --enable-bluetooth.])
+	fi
 fi
 
 

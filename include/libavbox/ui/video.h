@@ -20,12 +20,30 @@
 
 #ifndef __MB_VIDEO_H__
 #define __MB_VIDEO_H__
-
+#ifdef HAVE_CONFIG_H
+#	include "../config.h"
+#endif
 #include <stdint.h>
 #include <pango/pangocairo.h>
 #include "../dispatch.h"
 #include "../delegate.h"
 #include "video-drv.h"
+#include "video-software.h"
+
+#ifdef ENABLE_DIRECTFB
+#	include "video-directfb.h"
+#endif
+#ifdef ENABLE_VC4
+#	include "video-vc4.h"
+#endif
+#ifdef ENABLE_LIBDRM
+#	include "video-drm.h"
+#endif
+#ifdef ENABLE_X11
+#	include "video-x11.h"
+#endif
+
+
 
 /**
  * Window flags */

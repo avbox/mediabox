@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <errno.h>
@@ -35,11 +35,7 @@
 
 #define LOG_MODULE "input-web"
 
-#include "input.h"
-#include "../debug.h"
-#include "../log.h"
-#include "../file_util.h"
-#include "../thread.h"
+#include <libavbox/avbox.h>
 
 #define MAX_RESPONSE_LENGTH	(1024LL * 1024LL)
 

@@ -31,16 +31,7 @@
 
 #define LOG_MODULE "browser"
 
-#include "lib/log.h"
-#include "lib/debug.h"
-#include "lib/dispatch.h"
-#include "lib/thread.h"
-#include "lib/application.h"
-#include "lib/timers.h"
-#include "lib/ui/video.h"
-#include "lib/ui/listview.h"
-#include "lib/ui/input.h"
-#include "lib/ui/player.h"
+#include <libavbox/avbox.h>
 #include "browser.h"
 #include "library.h"
 #include "shell.h"

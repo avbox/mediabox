@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../config.h"
+#	include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <string.h>
@@ -29,10 +29,7 @@
 
 #define LOG_MODULE "queue"
 
-#include "log.h"
-#include "debug.h"
-#include "linkedlist.h"
-#include "time_util.h"
+#include <libavbox/avbox.h>
 
 
 /**

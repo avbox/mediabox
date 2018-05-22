@@ -34,7 +34,7 @@
 
 #define LOG_MODULE "download-manager"
 
-#include "lib/avbox.h"
+#include <libavbox/avbox.h>
 #include "downloads-backend.h"
 
 #define PREFIX "/usr/local"

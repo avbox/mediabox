@@ -21,7 +21,7 @@
 #ifndef __MBOX_ABOUT_H__
 #define __MBOX_ABOUT_H__
 
-#include "lib/dispatch.h"
+#include <libavbox/dispatch.h>
 
 
 struct mbox_about;

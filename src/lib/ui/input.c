@@ -19,7 +19,7 @@
 
 
 #ifdef HAVE_CONFIG_H
-#	include "../../config.h"
+#       include <libavbox/config.h>
 #endif
 #include <stdlib.h>
 #include <stdint.h>
@@ -31,26 +31,8 @@
 
 #define LOG_MODULE "input"
 
-#include "input.h"
-#include "input-tcp.h"
-#include "../linkedlist.h"
-#include "../debug.h"
-#include "../log.h"
-#include "../dispatch.h"
+#include <libavbox/avbox.h>
 
-#ifdef ENABLE_DIRECTFB
-#	include "input-directfb.h"
-#endif
-#ifdef ENABLE_LIBINPUT
-#	include "input-libinput.h"
-#endif
-#ifdef ENABLE_BLUETOOTH
-#	include "../bluetooth.h"
-#	include "input-bluetooth.h"
-#endif
-#ifdef ENABLE_WEBREMOTE
-#	include "input-web.h"
-#endif
 
 LISTABLE_STRUCT(avbox_input_endpoint,
 	struct avbox_object *object;

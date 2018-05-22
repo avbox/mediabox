@@ -30,21 +30,11 @@
 
 #define LOG_MODULE "downloads"
 
-#include "lib/log.h"
-#include "lib/debug.h"
-#include "lib/dispatch.h"
-#include "lib/process.h"
-#include "lib/timers.h"
-#include "lib/thread.h"
-#include "lib/application.h"
-#include "lib/ui/video.h"
-#include "lib/ui/listview.h"
-#include "lib/ui/input.h"
-#include "lib/linkedlist.h"
+#include <libavbox/avbox.h>
 
 #ifdef ENABLE_IONICE
-#include "lib/ionice.h"
-#include "lib/su.h"
+#include <libavbox/ionice.h>
+#include <libavbox/su.h>
 #endif
 
 #include "downloads-backend.h"
