@@ -259,6 +259,9 @@ avbox_webinput_init(void)
 	remote_html_len = len;
 	running = 1;
 
+	/* disable LWS logging */
+	lws_set_log_level(0, NULL);
+
 	/* create web server */
 	memset(&info, 0, sizeof(struct lws_context_creation_info));
 	info.port = (getuid() == 0) ? 80 : 8080;
